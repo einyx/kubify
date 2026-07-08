@@ -8,6 +8,7 @@ import (
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,6 +72,9 @@ func (s *FluxStrategy) Reconcile(
 				repo.Spec.Interval = metav1.Duration{Duration: 10 * time.Minute}
 				if strings.HasPrefix(comp.ChartRef.RepoURL, "oci://") {
 					repo.Spec.Type = sourcev1.HelmRepositoryTypeOCI
+				}
+				if comp.ChartPullSecretRef != nil {
+					repo.Spec.SecretRef = &meta.LocalObjectReference{Name: comp.ChartPullSecretRef.Name}
 				}
 				return ctrl.SetControllerReference(stack, repo, s.Client.Scheme())
 			})
