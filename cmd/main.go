@@ -227,6 +227,10 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Stack")
 		os.Exit(1)
 	}
+	if err = platformv1alpha1.SetupStackWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Stack")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
