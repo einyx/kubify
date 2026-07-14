@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"github.com/fluxcd/pkg/apis/meta"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -14,7 +15,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"encoding/json"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
