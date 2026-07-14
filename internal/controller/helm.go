@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -112,8 +113,13 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, e
 	pull.DestDir = dir
 	pull.Version = ref.ChartVersion
 	pull.Settings = cli.New()
-	pull.RepoURL = ref.RepoURL
-	if _, err := pull.Run(ref.ChartName); err != nil {
+	chartArg := ref.ChartName
+	if strings.HasPrefix(ref.RepoURL, "oci://") {
+		chartArg = strings.TrimSuffix(ref.RepoURL, "/") + "/" + ref.ChartName
+	} else {
+		pull.RepoURL = ref.RepoURL
+	}
+	if _, err := pull.Run(chartArg); err != nil {
 		return nil, fmt.Errorf("pull chart %s/%s:%s: %w", ref.RepoURL, ref.ChartName, ref.ChartVersion, err)
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*.tgz"))
@@ -146,8 +152,8 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		inst.ReleaseName = compName
 		inst.Namespace = namespace
 		inst.CreateNamespace = true
-		inst.Wait = true
-		inst.Timeout = 10 * time.Minute
+		inst.Wait = false
+		inst.Timeout = 2 * time.Minute
 		inst.Version = chartVersion(ch)
 		rel, err := inst.Run(ch, values)
 		if err != nil {
@@ -158,8 +164,8 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 
 	up := action.NewUpgrade(cfg)
 	up.Namespace = namespace
-	up.Wait = true
-	up.Timeout = 10 * time.Minute
+	up.Wait = false
+	up.Timeout = 2 * time.Minute
 	up.ReuseValues = false
 	up.Version = chartVersion(ch)
 	rel, err := up.Run(compName, ch, values)

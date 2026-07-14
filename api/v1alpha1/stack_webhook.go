@@ -51,12 +51,13 @@ func validate(obj runtime.Object) (admission.Warnings, error) {
 
 	hasRef := stack.Spec.StackRef != ""
 	hasInline := stack.Spec.Inline != nil
+	hasBundle := stack.Spec.Bundle != nil && stack.Spec.Bundle.URL != ""
 
 	if hasRef && hasInline {
 		return nil, fmt.Errorf("spec.stackRef and spec.inline are mutually exclusive")
 	}
-	if !hasRef && !hasInline {
-		return nil, fmt.Errorf("one of spec.stackRef or spec.inline must be set")
+	if !hasRef && !hasInline && !hasBundle {
+		return nil, fmt.Errorf("one of spec.stackRef, spec.inline, or spec.bundle must be set")
 	}
 	return nil, nil
 }
