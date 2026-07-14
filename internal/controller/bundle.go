@@ -20,6 +20,7 @@ import (
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
@@ -91,6 +92,7 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 		return nil, nil, err
 	}
 	charts, err := loadCharts(dir)
+	log.FromContext(ctx).Info("bundle parsed", "url", stack.Spec.Bundle.URL, "charts", len(charts), "images", len(images))
 	return charts, images, err
 }
 
@@ -118,6 +120,15 @@ func readBundleImages(ctx context.Context, repo *remote.Repository, layer ocispe
 		out[name] = bundleImage{Name: name, Repo: repoName, Tag: tag}
 	}
 	return out, nil
+}
+
+// splitRegistry splits "ghcr.io/einyx/opa" into ("ghcr.io", "einyx/opa").
+// A repo with no "/" returns ("", repo).
+func splitRegistry(repo string) (registry, path string) {
+	if i := strings.Index(repo, "/"); i >= 0 {
+		return repo[:i], repo[i+1:]
+	}
+	return "", repo
 }
 
 func splitImage(ref string) (name, repo, tag string) {
@@ -194,7 +205,13 @@ func rewriteImageRefs(v interface{}, images map[string]bundleImage) {
 	case map[string]interface{}:
 		if repo, ok := t["repository"].(string); ok {
 			if img, ok := lookupBundleImage(repo, images); ok {
-				t["repository"] = img.Repo
+				reg, path := splitRegistry(img.Repo)
+				if _, hasReg := t["registry"]; hasReg {
+					t["registry"] = reg
+					t["repository"] = path
+				} else {
+					t["repository"] = img.Repo
+				}
 				if tag, _ := t["tag"].(string); tag == "" || tag == "latest" {
 					t["tag"] = img.Tag
 				}
@@ -250,7 +267,13 @@ func applyBundleImage(values map[string]interface{}, img bundleImage, pullSecret
 	if image == nil {
 		image = map[string]interface{}{}
 	}
-	image["repository"] = img.Repo
+	reg, path := splitRegistry(img.Repo)
+	if _, hasReg := image["registry"]; hasReg {
+		image["registry"] = reg
+		image["repository"] = path
+	} else {
+		image["repository"] = img.Repo
+	}
 	image["tag"] = img.Tag
 	image["pullPolicy"] = "IfNotPresent"
 	values["image"] = image
