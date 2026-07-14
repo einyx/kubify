@@ -101,8 +101,15 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
 		}
 	} else {
+		excluded := map[string]bool{}
+		for _, n := range stack.Spec.Exclude {
+			excluded[n] = true
+		}
 		seen := map[*chart.Chart]string{}
 		for name, ch := range bundleCharts {
+			if excluded[name] {
+				continue
+			}
 			if _, ok := seen[ch]; ok {
 				continue
 			}

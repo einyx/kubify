@@ -41,6 +41,11 @@ type StackSpec struct {
 	// +optional
 	Bundle *BundleSource `json:"bundle,omitempty"`
 
+	// Exclude names bundle charts to skip. Only applied when installing directly
+	// from a Bundle (no StackRef/Inline).
+	// +optional
+	Exclude []string `json:"exclude,omitempty"`
+
 	// Mode selects the deployment strategy. Defaults to Direct.
 	// +kubebuilder:default=Direct
 	// +optional
