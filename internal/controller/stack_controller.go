@@ -216,6 +216,23 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Prune releases dropped from the stack (exclude/removed component). Compares
+	// against the last observed component set, so nothing outside this Stack is touched.
+	desired := map[string]bool{}
+	for _, s := range statuses {
+		desired[s.Name] = true
+	}
+	for _, prev := range stack.Status.Components {
+		if desired[prev.Name] {
+			continue
+		}
+		if err := r.Helm.Uninstall(prev.Name, stack.Namespace); err != nil {
+			log.Info("prune uninstall failed", "component", prev.Name, "err", err.Error())
+		} else {
+			log.Info("pruned component", "component", prev.Name)
+		}
+	}
+
 	stack.Status.Components = statuses
 
 	if allReady {
