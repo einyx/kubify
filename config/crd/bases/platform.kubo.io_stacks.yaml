@@ -158,6 +158,16 @@ spec:
                           items:
                             type: string
                           type: array
+                        scope:
+                          default: Namespaced
+                          description: |-
+                            Scope is Namespaced (default) or Cluster. Cluster components are
+                            installed once for the whole cluster (vault-operator, spark-operator)
+                            and are not repeated per Stack.
+                          enum:
+                          - Namespaced
+                          - Cluster
+                          type: string
                         name:
                           description: Name of the component (also used as the Helm
                             release name).
@@ -208,6 +218,23 @@ spec:
                 description: Paused stops reconciliation without deleting deployed
                   components.
                 type: boolean
+              operators:
+                description: |-
+                  Operators installs cluster-wide operators once, outside any tenant namespace.
+                  Tenant charts named vault-operator or spark-operator are never installed into the Stack namespace.
+                properties:
+                  istio:
+                    description: |-
+                      Istio installs the istiod control plane (CRDs are installed by the
+                      operator at startup). Stacks deploy their own VirtualServices.
+                    type: boolean
+                  spark:
+                    description: Spark installs kubeflow spark-operator.
+                    type: boolean
+                  vault:
+                    description: Vault installs bank-vaults vault-operator.
+                    type: boolean
+                type: object
               stackRef:
                 description: |-
                   StackRef names the cluster-scoped StackDefinition to deploy.
