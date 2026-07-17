@@ -48,10 +48,18 @@ var _ = Describe("StackDefinition Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &platformv1alpha1.StackDefinition{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: platformv1alpha1.StackDefinitionSpec{
+						Title: "Test",
+						Components: []platformv1alpha1.StackComponentSpec{{
+							Name: "postgres",
+							ChartRef: platformv1alpha1.ChartRef{
+								RepoURL:   "oci://registry-1.docker.io/bitnamicharts",
+								ChartName: "postgresql",
+							},
+						}},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
