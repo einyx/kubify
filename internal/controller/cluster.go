@@ -17,7 +17,7 @@ const clusterOperatorsNamespace = "operators"
 
 func isClusterOperator(name string) bool {
 	switch name {
-	case "vault-operator", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres":
+	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres":
 		return true
 	default:
 		return false
@@ -95,16 +95,39 @@ func (r *StackReconciler) reconcileOperators(ctx context.Context, stack *platfor
 		on   bool
 	}{
 		{"vault-operator", stack.Spec.Operators != nil && stack.Spec.Operators.Vault},
+		{"vault-tenant", stack.Spec.Operators != nil && stack.Spec.Operators.Vault},
 		{"spark-operator", stack.Spec.Operators != nil && stack.Spec.Operators.Spark},
 		{"istiod", stack.Spec.Operators != nil && stack.Spec.Operators.Istio},
 		{"istio-ingress", stack.Spec.Operators != nil && stack.Spec.Operators.Istio},
 		{"kafka-operator", stack.Spec.Operators != nil && stack.Spec.Operators.Kafka},
 		{"kubegres", stack.Spec.Operators != nil && stack.Spec.Operators.Postgres},
+		{"agentfw", stack.Spec.Operators != nil && stack.Spec.Operators.AgentFW},
 	} {
 		if !op.on {
 			if err := r.releaseOperator(ctx, stack, op.name); err != nil && firstErr == nil {
 				firstErr = err
 			}
+			continue
+		}
+		if op.name == "vault-tenant" || op.name == "agentfw" {
+			st := platformv1alpha1.ComponentStatus{Name: op.name, Phase: platformv1alpha1.ComponentPhaseReady}
+			var perr error
+			switch op.name {
+			case "vault-tenant":
+				perr = r.ensureTenantVault(ctx, stack)
+				st.Message = "tenant vault reconciled + seeded"
+			case "agentfw":
+				perr = r.ensureTenantAgentFW(ctx, stack)
+				st.Message = "agent firewall reconciled"
+			}
+			if perr != nil {
+				st.Phase = platformv1alpha1.ComponentPhaseFailed
+				st.Message = perr.Error()
+				if firstErr == nil {
+					firstErr = perr
+				}
+			}
+			statuses = append(statuses, st)
 			continue
 		}
 		st, err := r.ensureOperator(ctx, op.name, bundleCharts)
@@ -205,7 +228,7 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 }
 
 func (r *StackReconciler) releaseOperators(ctx context.Context, stack *platformv1alpha1.Stack) error {
-	for _, name := range []string{"vault-operator", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres"} {
+	for _, name := range []string{"agentfw", "vault-tenant", "vault-operator", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres"} {
 		if err := r.releaseOperator(ctx, stack, name); err != nil {
 			return err
 		}
@@ -214,10 +237,20 @@ func (r *StackReconciler) releaseOperators(ctx context.Context, stack *platformv
 }
 
 func (r *StackReconciler) releaseOperator(ctx context.Context, stack *platformv1alpha1.Stack, name string) error {
+	switch name {
+	case "vault-tenant":
+		return r.deleteTenantVault(ctx, stack)
+	case "agentfw":
+		return r.deleteAgentFW(ctx, stack)
+	}
 	if r.operatorWantedByOther(ctx, stack, name) {
 		return nil
 	}
-	return r.Helm.Uninstall(name, clusterOperatorsNamespace)
+	ns := clusterOperatorsNamespace
+	if name == "istio-ingress" {
+		ns = "istio-ingress"
+	}
+	return r.Helm.Uninstall(name, ns)
 }
 
 // clusterReleaseInUse reports whether another live Stack has a cluster-scoped
