@@ -24,10 +24,15 @@ type Event struct {
 	Error    string    `json:"error,omitempty"`
 }
 
-// Auditor writes structured JSON events.
-type Auditor struct{ w io.Writer }
+// Auditor writes structured JSON events, optionally signing each line.
+type Auditor struct {
+	w      io.Writer
+	signer *Signer // optional; nil = no signing
+}
 
 func NewAuditor(w io.Writer) *Auditor { return &Auditor{w: w} }
+
+func (a *Auditor) WithSigner(s *Signer) *Auditor { a.signer = s; return a }
 
 func (a *Auditor) Log(ev Event) {
 	ev.Time = time.Now().UTC().Format(time.RFC3339)
@@ -35,6 +40,15 @@ func (a *Auditor) Log(ev Event) {
 	if err != nil {
 		log.Printf("agentfw audit marshal: %v", err)
 		return
+	}
+	if a.signer != nil {
+		// Append sig field by re-marshaling with signature.
+		type signed struct {
+			Event
+			Sig string `json:"sig"`
+		}
+		sb, _ := json.Marshal(signed{Event: ev, Sig: a.signer.Sign(b)})
+		b = sb
 	}
 	_, _ = a.w.Write(append(b, '\n'))
 }

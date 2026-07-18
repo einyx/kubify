@@ -2,6 +2,7 @@ package agentfw
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -17,9 +18,36 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
+
+	// Load community rule bundle (no-op if file absent).
+	rulesPath := policy.RulesPath
+	if rulesPath == "" {
+		rulesPath = "/etc/agentfw/rules.yaml"
+	}
+	if err := LoadRules(rulesPath); err != nil {
+		log.Printf("agentfw: rules load warning: %v", err)
+	}
+
 	auditor := NewAuditor(os.Stdout)
+
+	// Ed25519 signed receipts (optional).
+	keyPath := policy.SigningKeyPath
+	if keyPath == "" {
+		keyPath = "/etc/agentfw/signing.key"
+	}
+	if signer, err := NewSigner(keyPath); err == nil {
+		auditor.WithSigner(signer)
+	} else {
+		log.Printf("agentfw: signing disabled: %v", err)
+	}
+
 	ks := NewKillSwitch(killSwitchFile)
 	rl := NewRateLimiter(policy.RequestsPerMinute, policy.DataBudgetMB)
+	sessions := NewSessionStore()
+
+	newScanner := func(p Policy) *Scanner {
+		return &Scanner{Policy: p, Auditor: auditor, KillSwitch: ks, Sessions: sessions}
+	}
 
 	var core http.Handler
 	if policy.Upstream != "" {
@@ -27,11 +55,11 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 		if err != nil {
 			return err
 		}
-		rp.scanner.KillSwitch = ks
+		rp.scanner = newScanner(policy)
 		core = rp
 	} else {
 		px := NewProxy(policy, auditor)
-		px.scanner.KillSwitch = ks
+		px.scanner = newScanner(policy)
 		core = px
 	}
 
@@ -45,7 +73,6 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// Admin server (kill switch endpoint).
 	adminSrv := &http.Server{
 		Addr:        adminAddr,
 		Handler:     ks.AdminHandler(),
@@ -56,7 +83,7 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		srv.Shutdown(shutCtx)    //nolint:errcheck
+		srv.Shutdown(shutCtx)      //nolint:errcheck
 		adminSrv.Shutdown(shutCtx) //nolint:errcheck
 	}()
 
