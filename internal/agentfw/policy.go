@@ -29,6 +29,16 @@ type Policy struct {
 	SigningKeyPath string `json:"signingKeyPath,omitempty"`
 	// RulesPath is a YAML file of additional DLP/injection patterns to load.
 	RulesPath string `json:"rulesPath,omitempty"`
+	// MITMEnabled turns on TLS termination of CONNECT tunnels so response
+	// scanners can see decrypted bodies. Off by default.
+	MITMEnabled bool `json:"mitmEnabled,omitempty"`
+	// MITMCACert / MITMCAKey are PEM paths for the CA that mints leaf certs.
+	// Required when MITMEnabled. Generate with `agentfw mitm-ca`.
+	MITMCACert string `json:"mitmCaCert,omitempty"`
+	MITMCAKey  string `json:"mitmCaKey,omitempty"`
+	// MITMBypass lists SNI hostname suffixes to tunnel opaquely
+	// (cert-pinned APIs, sensitive endpoints). Matched as suffix.
+	MITMBypass []string `json:"mitmBypass,omitempty"`
 }
 
 func DefaultPolicy() Policy {

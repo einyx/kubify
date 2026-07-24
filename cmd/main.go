@@ -17,33 +17,32 @@ limitations under the License.
 package main
 
 import (
-	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
-	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
-	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
-	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/controller"
 	"github.com/einyx/kubo/internal/prereqs"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
+	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -112,6 +111,34 @@ func main() {
 	// Create watchers for metrics and webhooks certificates
 	var metricsCertWatcher, webhookCertWatcher *certwatcher.CertWatcher
 
+	// Pre-flight, before the manager starts: with a direct (non-cached)
+	// client, install cluster prereqs (Istio + Flux CRDs) and make sure the
+	// webhook serving certificate exists (self-signed fallback). This must
+	// happen before the HelmRelease watch and certwatcher initialize.
+	preflightCfg := ctrl.GetConfigOrDie()
+	preflightClient, err := client.New(preflightCfg, client.Options{Scheme: scheme})
+	if err != nil {
+		setupLog.Error(err, "unable to create pre-flight client")
+		os.Exit(1)
+	}
+	ctx := ctrl.SetupSignalHandler()
+	if err := prereqs.Ensure(ctx, preflightClient); err != nil {
+		setupLog.Error(err, "failed to install cluster prereqs")
+		os.Exit(1)
+	}
+	setupLog.Info("cluster prereqs installed")
+	if len(webhookCertPath) > 0 {
+		webhookNS := os.Getenv("POD_NAMESPACE")
+		if webhookNS == "" {
+			webhookNS = "kubo-system"
+		}
+		if err := prereqs.EnsureWebhookCert(ctx, preflightClient,
+			webhookNS, "webhook-server-cert", "kubo-webhook-service"); err != nil {
+			setupLog.Error(err, "failed to ensure webhook serving certificate")
+			os.Exit(1)
+		}
+	}
+
 	// Initial webhook TLS options
 	webhookTLSOpts := tlsOpts
 
@@ -120,13 +147,20 @@ func main() {
 			"webhook-cert-path", webhookCertPath, "webhook-cert-name", webhookCertName, "webhook-cert-key", webhookCertKey)
 
 		var err error
-		webhookCertWatcher, err = certwatcher.New(
-			filepath.Join(webhookCertPath, webhookCertName),
-			filepath.Join(webhookCertPath, webhookCertKey),
-		)
-		if err != nil {
-			setupLog.Error(err, "Failed to initialize webhook certificate watcher")
-			os.Exit(1)
+		certFile := filepath.Join(webhookCertPath, webhookCertName)
+		keyFile := filepath.Join(webhookCertPath, webhookCertKey)
+		// The Secret volume may take a moment to materialize after the
+		// pre-flight created it — retry instead of exiting.
+		for i := 0; ; i++ {
+			webhookCertWatcher, err = certwatcher.New(certFile, keyFile)
+			if err == nil {
+				break
+			}
+			if i >= 24 { // ~2 minutes
+				setupLog.Error(err, "webhook certificate never appeared", "path", certFile)
+				os.Exit(1)
+			}
+			time.Sleep(5 * time.Second)
 		}
 
 		webhookTLSOpts = append(webhookTLSOpts, func(config *tls.Config) {
@@ -261,20 +295,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
-		if err := prereqs.Ensure(ctx, mgr.GetClient()); err != nil {
-			setupLog.Error(err, "failed to install cluster prereqs")
-			return err
-		}
-		setupLog.Info("cluster prereqs installed")
-		return nil
-	})); err != nil {
-		setupLog.Error(err, "unable to register prereqs runnable")
-		os.Exit(1)
-	}
-
 	setupLog.Info("starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}

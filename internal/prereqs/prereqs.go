@@ -19,10 +19,16 @@ import (
 //go:embed istio-crds.yaml
 var istioCRDs []byte
 
+//go:embed flux-crds.yaml
+var fluxCRDs []byte
+
 // Ensure server-side-applies the embedded prereqs. Owner name is stable so
 // re-applies converge.
 func Ensure(ctx context.Context, c client.Client) error {
-	return applyAll(ctx, c, istioCRDs)
+	if err := applyAll(ctx, c, istioCRDs); err != nil {
+		return fmt.Errorf("istio crds: %w", err)
+	}
+	return applyAll(ctx, c, fluxCRDs)
 }
 
 func applyAll(ctx context.Context, c client.Client, doc []byte) error {
