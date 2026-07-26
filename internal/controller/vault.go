@@ -219,6 +219,24 @@ func vaultCRSpec(ns string) map[string]interface{} {
 		"serviceAccount":  vaultSAName,
 		"statsdDisabled":  true,
 		"serviceType":     "ClusterIP",
+		"volumeClaimTemplates": []interface{}{
+			map[string]interface{}{
+				"metadata": map[string]interface{}{"name": "vault-file"},
+				"spec": map[string]interface{}{
+					"accessModes":      []interface{}{"ReadWriteOnce"},
+					"storageClassName": "standard",
+					"resources": map[string]interface{}{
+						"requests": map[string]interface{}{"storage": "1Gi"},
+					},
+				},
+			},
+		},
+		"volumeMounts": []interface{}{
+			map[string]interface{}{
+				"name":      "vault-file",
+				"mountPath": "/vault/file",
+			},
+		},
 		"unsealConfig": map[string]interface{}{
 			"kubernetes": map[string]interface{}{"secretNamespace": ns},
 		},

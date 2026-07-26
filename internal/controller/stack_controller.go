@@ -7,6 +7,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -31,11 +32,17 @@ const stackFinalizer = "platform.kubo.io/stack-cleanup"
 // StackReconciler reconciles a Stack object. It is fully generic: it
 // resolves spec.stackRef to a StackDefinition and deploys its components
 // as Helm releases. Adding a product = authoring a StackDefinition.
+type bundleCacheEntry struct {
+	charts map[string]*chart.Chart
+	images map[string]bundleImage
+}
+
 type StackReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Helm   *HelmEngine
-	Flux   *FluxStrategy
+	Scheme      *runtime.Scheme
+	Helm        *HelmEngine
+	Flux        *FluxStrategy
+	bundleCache sync.Map // digest string → bundleCacheEntry
 }
 
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks,verbs=get;list;watch;create;update;patch;delete
