@@ -24,8 +24,8 @@ import (
 // Mirrored images — upstream images are Docker Hub hosted and rate-limited
 // or unavailable from inside clusters.
 const (
-	vaultImage      = "ghcr.io/einyx/vault:1.14.8"
-	bankVaultsImage = "ghcr.io/einyx/bank-vaults:1.16.3"
+	vaultImage      = "hashicorp/vault:1.14.8"
+	bankVaultsImage = "ghcr.io/bank-vaults/bank-vaults:v1.33.1"
 	vaultSAName     = "vault"
 	vaultUnsealKey  = "vault-unseal-keys"
 	vaultRBACName   = "vault-secrets"
@@ -224,7 +224,7 @@ func vaultCRSpec(ns string) map[string]interface{} {
 				"metadata": map[string]interface{}{"name": "vault-file"},
 				"spec": map[string]interface{}{
 					"accessModes":      []interface{}{"ReadWriteOnce"},
-					"storageClassName": "standard",
+					"storageClassName": "managed-csi",
 					"resources": map[string]interface{}{
 						"requests": map[string]interface{}{"storage": "1Gi"},
 					},

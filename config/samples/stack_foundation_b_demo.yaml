@@ -1,0 +1,591 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: product-b
+---
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: product
+  namespace: product-b
+spec:
+  # Secrets are pre-created in kubo-system with the "product-b-" prefix
+  # and propagated here by the kubo operator on every reconcile.
+  secretsRef:
+    - from: product-b-backend-auth0
+      to: backend-auth0
+    - from: product-b-frontend-auth0
+      to: product-frontend-auth0
+    - from: product-b-trino-jwt-signing-key
+      to: trino-jwt-signing-key
+    - from: product-b-trino-credentials
+      to: trino-credentials
+    - from: product-b-trino-auth0
+      to: trino-auth0
+    - from: product-b-trino-s3-credentials
+      to: trino-s3-credentials
+    - from: product-b-ai-secrets
+      to: product-ai-secrets
+  componentValues:
+    backend:
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/backend
+        tag: v0.5.62
+      config:
+        auth0:
+          audience: "https://demo.kubify.product/"
+          client_id: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+          domain: auth0-stg.kubify.app
+          enabled: true
+        kafka:
+          cluster_host: kafka:9092
+        scheduler:
+          host: scheduler
+          port: 65434
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+        mcp:
+          enabled: true
+          publicUrl: https://product-b.demo.kubify.product
+          auth0Audience: "https://demo.kubify.product/"
+      env:
+      - name: MX_AUTH0_CLIENT_ID
+        value: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+      - name: MX_POSTGRES_PASSWORD
+        value: product
+      - name: MX_SECRET_KEY
+        value: dev-local-secret
+      - name: MX_S3_ENDPOINT_LOCATION
+        value: http://storage-engine:8080
+      - name: MX_S3_ACCESS_KEY_ID
+        value: product-b
+      - name: MX_S3_SECRET_ACCESS_KEY
+        value: e95df32785232200f1934146dba4039ea6572113eebbe485
+      - name: MX_S3_REGION_NAME
+        value: us-east-1
+      - name: MX_S3_PATH_STYLE_ACCESS
+        value: "true"
+      - name: MX_S3_SIGNATURE_VERSION
+        value: s3v4
+      - name: MX_PRODUCT_API_URL
+        value: http://localhost:65432
+      - name: MX_AUTH0_DOMAIN
+        value: auth0-stg.kubify.app
+      - name: MX_AUTH0_MANAGEMENT_DOMAIN
+        value: kubify-stg.eu.auth0.com
+      sidecar:
+        mcp:
+          enabled: true
+      extraEnvFrom:
+      - secretRef:
+          name: backend-auth0
+
+    frontend:
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/frontend
+        tag: v0.7.37
+      externalSecret:
+        enabled: true
+        target:
+          name: product-frontend-auth0
+      env:
+        internal_api_url: http://backend/
+      virtualService:
+        enabled: true
+        gateway: product-gateway
+        gatewayNamespace: product
+        host: product-b.demo.kubify.product
+        extraHttp:
+        - name: mcp
+          match:
+          - uri:
+              prefix: /mcp
+          route:
+          - destination:
+              host: backend
+              port:
+                number: 8765
+          timeout: 300s
+        - name: ai
+          match:
+          - uri:
+              prefix: /ai
+          route:
+          - destination:
+              host: ai-product-b
+              port:
+                number: 8000
+          timeout: 300s
+        http:
+          cors:
+            allowHeaders:
+            - X-Account
+            - Content-Type
+            - Authorization
+            allowMethods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            allowOrigins:
+            - exact: https://product-b.demo.kubify.product
+          destination:
+            host: frontend
+            port: 80
+          matchPrefix: /
+          name: frontend
+          responseHeaders:
+            StrictTransportSecurity: max-age=31536000
+          timeout: 50s
+        name: frontend
+
+    kafka:
+      extraConfig: ''
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/kafka
+      listeners:
+        client:
+          protocol: PLAINTEXT
+      controller:
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 2Gi
+        heapOpts: "-Xmx3g -Xms1g"
+
+    opa:
+      image:
+        registry: kubifyregistry.azurecr.io
+        repository: cached/ecr-kubify/product/opa
+        tag: v0.5.62
+      env:
+        API_BASE_URL: http://backend:65432
+
+    postgres:
+      auth:
+        database: product
+        password: product
+        username: product
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/postgresql
+      primary:
+        initdb:
+          scripts:
+            grant_public.sql: |
+              GRANT CREATE ON SCHEMA public TO product;
+
+    processor:
+      replicaCount: 1
+      autoscaling:
+        enabled: false
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/processor
+        tag: v0.2.33
+      config:
+        kafka:
+          cluster_host: kafka:9092
+        postgres:
+          password: product
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+        iceberg:
+          s3_endpoint: http://storage-engine:8080
+          s3_access_key_id: product-b
+          s3_secret_access_key: e95df32785232200f1934146dba4039ea6572113eebbe485
+      externalSecret:
+        enabled: false
+      imagePullSecrets:
+      - name: acr-pull-secret
+      migrations:
+        enabled: false
+      serviceAccount:
+        name: product-processor
+      resources:
+        limits:
+          cpu: "1"
+          memory: 1Gi
+        requests:
+          cpu: 500m
+          memory: 512Mi
+
+    scheduler:
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/scheduler
+        tag: v1.1.10
+      config:
+        MX_KAFKA_CLUSTER_HOST: kafka:9092
+        MX_POSTGRES_DATABASE: product
+        MX_POSTGRES_HOST: postgres-postgresql
+        MX_POSTGRES_PORT: 5432
+        MX_POSTGRES_USER: product
+        MX_SCHEDULER_HOST: 0.0.0.0
+      imagePullSecrets:
+      - name: acr-pull-secret
+      initContainer:
+        enabled: true
+      secret:
+        MX_POSTGRES_PASSWORD: product
+
+    storage-engine:
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/storage-engine
+        tag: v0.0.43
+      externalSecrets:
+        enabled: false
+        aws:
+          enabled: false
+        azure:
+          enabled: false
+        auth:
+          enabled: false
+        sentry:
+          enabled: false
+      config:
+        auth:
+          type: awsv4
+          identity: product-b
+          credential: e95df32785232200f1934146dba4039ea6572113eebbe485
+        storage:
+          provider: filesystem
+          filesystem:
+            baseDir: /data
+        virusTotal:
+          enabled: false
+      configFile:
+        enabled: true
+        filename: storage-engine.yaml
+        content: |
+          server:
+            listen: ":8080"
+            read_timeout: 600s
+            write_timeout: 600s
+            idle_timeout: 120s
+            max_body_size: 5368709120
+          storage:
+            provider: filesystem
+            filesystem:
+              root_path: /data
+          auth:
+            type: awsv4
+          ui:
+            enabled: false
+          logging:
+            level: info
+            format: json
+
+    trino:
+      image:
+        repository: kubifyregistry.azurecr.io/trinodb/trino
+        tag: "482-kubify"
+      imagePullSecrets:
+      - name: acr-pull-secret
+      serviceAccount:
+        create: false
+      server:
+        workers: 2
+        exchangeManager:
+          name: filesystem
+      accessControl:
+        type: properties
+        properties: |
+          access-control.name=opa
+          opa.policy.uri=http://opa:8181/v1/data/trino/authz/allow
+          opa.policy.batched-uri=http://opa:8181/v1/data/trino/authz/batch
+          opa.policy.batch-column-masking-uri=http://opa:8181/v1/data/trino/authz/batchColumnMasks
+          opa.log-requests=true
+          opa.log-responses=true
+          opa.allow-permission-management-operations=false
+          opa.http-client.request-timeout=60s
+          opa.http-client.max-requests-queued-per-destination=10000
+      additionalConfigProperties:
+      - catalog.management=dynamic
+      - retry-policy=TASK
+      - task.concurrency=16
+      - task.max-worker-threads=64
+      - query.max-memory=8GB
+      - query.max-memory-per-node=4GB
+      - query.max-total-memory=12GB
+      - memory.heap-headroom-per-node=2GB
+      - query.remote-task.max-error-duration=5m
+      - query.low-memory-killer.policy=total-reservation-on-blocked-nodes
+      - exchange.client-threads=25
+      - exchange.concurrent-request-multiplier=3
+      - exchange.max-buffer-size=32MB
+      - exchange.max-response-size=32MB
+      - sink.max-buffer-size=32MB
+      - http-server.authentication.type=JWT,PASSWORD
+      - http-server.process-forwarded=true
+      - internal-communication.shared-secret=change-this-to-a-random-secret-value
+      - http-server.authentication.jwt.key-file=/etc/trino/jwt/${KID}.pem
+      - http-server.authentication.jwt.principal-field=sub
+      - http-server.authentication.allow-insecure-over-http=true
+      additionalExchangeManagerProperties:
+      - exchange.base-directories=s3://trino/trino-exchange
+      - exchange.s3.endpoint=http://storage-engine:8080
+      - exchange.s3.region=me-central-1
+      - exchange.s3.aws-access-key=${ENV:MINIO_USERNAME}
+      - exchange.s3.aws-secret-key=${ENV:MINIO_PASSWORD}
+      - exchange.s3.path-style-access=true
+      - exchange.sink-buffer-pool-min-size=10
+      - exchange.sink-buffers-per-partition=2
+      - exchange.source-concurrent-readers=4
+      env:
+      - name: MINIO_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: trino-s3-credentials
+            key: MINIO_ACCESS_KEY
+      - name: MINIO_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: trino-s3-credentials
+            key: MINIO_SECRET_ACCESS_KEY
+      - name: TRINO_OAUTH2_CLIENT_ID
+        valueFrom:
+          secretKeyRef:
+            name: trino-auth0
+            key: client_id
+      - name: TRINO_OAUTH2_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: trino-auth0
+            key: client_secret
+      secretMounts:
+      - name: trino-credentials
+        path: /etc/trino/auth/password
+        secretName: trino-credentials
+      coordinator:
+        additionalConfigProperties:
+        - web-ui.authentication.type=OAUTH2
+        additionalConfigFiles:
+          password-authenticator.properties: |
+            password-authenticator.name=file
+            file.password-file=/etc/trino/auth/password/password.db
+        jvm:
+          maxHeapSize: "8G"
+          gcMethod:
+            type: UseG1GC
+            g1:
+              heapRegionSize: "32M"
+        resources:
+          limits:
+            cpu: 4
+            memory: "12Gi"
+          requests:
+            cpu: 2
+            memory: "8Gi"
+        additionalVolumes:
+        - emptyDir: {}
+          name: trino-cache
+        - name: signing-cert
+          secret:
+            secretName: trino-jwt-signing-key
+        - emptyDir: {}
+          name: jwt-config
+        additionalVolumeMounts:
+        - mountPath: /mnt/trino-cache
+          name: trino-cache
+        - mountPath: /etc/trino/jwt
+          name: jwt-config
+          readOnly: true
+      worker:
+        additionalConfigFiles:
+          password-authenticator.properties: |
+            password-authenticator.name=file
+            file.password-file=/etc/trino/auth/password/password.db
+        jvm:
+          maxHeapSize: "6G"
+          gcMethod:
+            type: UseG1GC
+            g1:
+              heapRegionSize: "32M"
+        replicas: 2
+        resources:
+          limits:
+            cpu: 2
+            memory: "8Gi"
+          requests:
+            cpu: 1
+            memory: "4Gi"
+        additionalVolumeMounts:
+        - mountPath: /mnt/trino-cache
+          name: trino-cache
+        additionalVolumes:
+        - emptyDir: {}
+          name: trino-cache
+
+    ai:
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/ai
+        tag: v0.0.2
+      imagePullSecrets:
+      - name: acr-pull-secret
+      externalSecret:
+        enabled: false
+      extraEnvFrom:
+      - secretRef:
+          name: product-ai-secrets
+      config:
+        env:
+          MX_DB_HOST: postgres-postgresql
+          MX_DB_PORT: "5432"
+          MX_DB_NAME: product
+          MX_DB_USER: product
+          MX_AUTH0_DOMAIN: auth0-stg.kubify.app
+          MX_AUTH0_CLIENT_ID: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+          MX_AUTH0_AUDIENCE: "https://demo.kubify.product/"
+          MX_PRODUCT_DATA_MCP_URL: http://backend:8765/mcp
+          MX_MCP_OAUTH_REDIRECT_URI: https://product-b.demo.kubify.product/ai/oauth/mcp-callback
+          MX_DEFAULT_MODEL: claude-sonnet-4-6
+
+    watcher:
+      replicaCount: 1
+      autoscaling:
+        enabled: false
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/product/watcher
+        tag: v2.0.25
+      config:
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+          existingSecret: postgres-postgresql
+          existingSecretSuperUserKey: postgres-password
+      fullnameOverride: watcher
+
+  exclude:
+  - vault-operator
+
+  inline:
+    components:
+    - chartPullSecretRef:
+        name: ghcr-pull-secret
+      chartRef:
+        chartName: postgresql
+        chartVersion: 16.7.27
+        repoURL: oci://ghcr.io/einyx/charts
+      name: postgres
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: storage-engine
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - postgres
+      name: storage-engine
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: ghcr-pull-secret
+      chartRef:
+        chartName: kafka
+        chartVersion: 29.3.14
+        repoURL: oci://ghcr.io/einyx/charts
+      dependsOn:
+      - postgres
+      name: kafka
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: backend
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - postgres
+      - kafka
+      name: backend
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: frontend
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      name: frontend
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: watcher
+        chartVersion: 2.7.3
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      name: watcher
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: opa
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      name: opa
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: scheduler
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      name: scheduler
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: processor
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      name: processor
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: acr-pull-secret
+      chartRef:
+        chartName: trino
+        chartVersion: 1.36.0
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/trinodb-charts
+      dependsOn:
+      - opa
+      - storage-engine
+      name: trino
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: product-ai
+        chartVersion: 0.1.2
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
+      dependsOn:
+      - backend
+      - postgres
+      name: ai
+      scope: Namespaced
+    description: Product data mesh platform (tenant product-b)
+    title: Product B (demo)
+
+  mode: Direct
+  operators:
+    agentFW: true
+    certManager: false
+    istio: false
+    spark: false
+    vault: false

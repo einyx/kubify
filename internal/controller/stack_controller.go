@@ -51,6 +51,8 @@ type StackReconciler struct {
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stackdefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=platform.kubo.io,resources=stackreleases,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=platform.kubo.io,resources=stackreleases/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=serviceaccounts;services;configmaps;persistentvolumeclaims;pods,verbs=get;list;watch;create;update;patch;delete
@@ -112,11 +114,18 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			bundleCharts = ec
 			bundleImages = ei
 		} else {
+			// ponytail: add-only merge — extra bundles fill missing keys, never overwrite
+			// main bundle charts. This prevents dai-bundle's "backend" chart from
+			// shadowing the product bundle's "backend" chart.
 			for k, v := range ec {
-				bundleCharts[k] = v
+				if _, exists := bundleCharts[k]; !exists {
+					bundleCharts[k] = v
+				}
 			}
 			for k, v := range ei {
-				bundleImages[k] = v
+				if _, exists := bundleImages[k]; !exists {
+					bundleImages[k] = v
+				}
 			}
 		}
 	}
@@ -264,14 +273,16 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if firstErr == nil {
 				firstErr = err
 			}
+			r.upsertStackRelease(ctx, &stack, st)
 			continue
 		}
 		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Revision = rel.Version
 		st.Message = rel.Info.Description
 		statuses = append(statuses, st)
+		r.upsertStackRelease(ctx, &stack, st)
 	}
-	if firstErr == nil && len(rest) > 0 {
+	if len(rest) > 0 {
 		var more []platformv1alpha1.ComponentStatus
 		switch mode {
 		case platformv1alpha1.DeploymentModeFlux:
@@ -279,6 +290,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			requeue = time.Minute
 		default:
 			more, firstErr = r.deployDirect(ctx, &stack, rest, byName)
+		}
+		for _, st := range more {
+			r.upsertStackRelease(ctx, &stack, st)
 		}
 		statuses = append(statuses, more...)
 	}
@@ -595,4 +609,26 @@ func (r *StackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			}),
 		).
 		Complete(r)
+}
+
+// upsertStackRelease creates or updates a StackRelease for the given component status.
+func (r *StackReconciler) upsertStackRelease(ctx context.Context, stack *platformv1alpha1.Stack, st platformv1alpha1.ComponentStatus) {
+	name := stack.Name + "-" + st.Name
+	sr := &platformv1alpha1.StackRelease{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: stack.Namespace},
+	}
+	_, err := controllerutil.CreateOrPatch(ctx, r.Client, sr, func() error {
+		sr.Spec = platformv1alpha1.StackReleaseSpec{StackRef: stack.Name, Component: st.Name}
+		sr.Status.Phase = st.Phase
+		sr.Status.Revision = st.Revision
+		sr.Status.Message = st.Message
+		if st.Phase == platformv1alpha1.ComponentPhaseReady {
+			now := metav1.Now()
+			sr.Status.LastDeployedAt = &now
+		}
+		return controllerutil.SetOwnerReference(stack, sr, r.Scheme)
+	})
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "failed to upsert StackRelease", "component", st.Name)
+	}
 }
