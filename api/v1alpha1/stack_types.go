@@ -180,6 +180,10 @@ type ClusterOperators struct {
 	// namespace. Agents route egress through it for DLP and injection scanning.
 	// +optional
 	AgentFW bool `json:"agentFW,omitempty"`
+	// Kubeflow installs the Kubeflow training-operator into the operators
+	// namespace. Stacks can then run PyTorchJob, TFJob, and MPIJob workloads.
+	// +optional
+	Kubeflow bool `json:"kubeflow,omitempty"`
 }
 
 // BundleSource is an OCI artifact that carries the stack's charts.

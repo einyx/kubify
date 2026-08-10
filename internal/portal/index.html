@@ -143,14 +143,14 @@ async function refresh() {
       return;
     }
     tb.innerHTML = stacks.map(s => `
-      <tr class="stack-row" onclick="showDetail('${s.namespace}','${s.name}')">
-        <td>${s.namespace}</td>
-        <td><b>${s.name}</b></td>
-        <td class="muted">${s.mode}</td>
-        <td><span class="phase ${s.phase}">${s.phase}</span>
+      <tr class="stack-row" onclick="showDetail('${esc(s.namespace)}','${esc(s.name)}')">
+        <td>${esc(s.namespace)}</td>
+        <td><b>${esc(s.name)}</b></td>
+        <td class="muted">${esc(s.mode)}</td>
+        <td><span class="phase ${esc(s.phase)}">${esc(s.phase)}</span>
             ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}</td>
         <td>${s.ready}/${s.total}</td>
-        <td class="muted">${s.age}</td>
+        <td class="muted">${esc(s.age)}</td>
       </tr>`).join('');
   } catch (e) {
     document.getElementById('list-error').textContent = e.message;
@@ -168,9 +168,9 @@ async function showDetail(ns, name) {
       `${d.phase} · ${d.mode} · ${d.ready}/${d.total} components ready · age ${d.age}`;
     document.getElementById('comp-rows').innerHTML = d.components.map(c => `
       <tr>
-        <td><b>${c.name}</b></td>
-        <td><span class="comp-phase ${c.phase}">${c.phase}</span></td>
-        <td class="muted">${c.revision || ''}</td>
+        <td><b>${esc(c.name)}</b></td>
+        <td><span class="comp-phase ${esc(c.phase)}">${esc(c.phase)}</span></td>
+        <td class="muted">${esc(String(c.revision || ''))}</td>
         <td class="muted">${esc((c.message || '').slice(0, 200))}</td>
       </tr>`).join('') || '<tr><td colspan="4" class="muted">no component status yet</td></tr>';
   } catch (e) { toast(e.message); }
@@ -212,7 +212,7 @@ async function create() {
 }
 
 const tenantVal = () => document.getElementById('tenant').value.trim();
-const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
 function toast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.display = 'block';

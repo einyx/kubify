@@ -83,7 +83,7 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 
 	adminSrv := &http.Server{
 		Addr:        adminAddr,
-		Handler:     ks.AdminHandler(),
+		Handler:     adminMux(ks),
 		ReadTimeout: 5 * time.Second,
 	}
 
