@@ -119,33 +119,7 @@ spec:
           profiles_sample_rate: "0.1"
           enabled: "false"
       virtualService:
-        enabled: true
-        name: frontend
-        gateway: product-gateway
-        gatewayNamespace: product
-        host: product-a.demo.kubify.product
-        http:
-          cors:
-            allowHeaders:
-            - X-Account
-            - Content-Type
-            - Authorization
-            allowMethods:
-            - GET
-            - POST
-            - PUT
-            - DELETE
-            - OPTIONS
-            allowOrigins:
-            - exact: https://product-a.demo.kubify.product
-          destination:
-            host: frontend
-            port: 3000
-          matchPrefix: /
-          name: frontend
-          responseHeaders:
-            StrictTransportSecurity: max-age=31536000
-          timeout: 50s
+        enabled: false
 
     kafka:
       extraConfig: ''
@@ -672,53 +646,65 @@ spec:
     istio: false
     spark: false
     vault: true
----
-apiVersion: networking.istio.io/v1
-kind: VirtualService
-metadata:
-  name: product-a-extra-routes
-  namespace: product-a
-spec:
-  hosts:
-    - product-a.demo.kubify.product
-  gateways:
-    - product/product-gateway
-  http:
-    - name: dai
-      match:
-        - uri:
-            prefix: /dai
-      route:
-        - destination:
-            host: dai-frontend
-            port:
-              number: 3000
-      timeout: 50s
-    - name: mcp
-      match:
-        - uri:
-            prefix: /mcp
-      route:
-        - destination:
-            host: backend
-            port:
-              number: 8765
-      timeout: 300s
-    - name: ai-root-redirect
-      match:
-        - uri:
-            exact: /ai
-      redirect:
-        uri: /ai/dev
-    - name: ai
-      match:
-        - uri:
-            prefix: /ai/
-      rewrite:
-        uri: /
-      route:
-        - destination:
-            host: ai-product-ai
-            port:
-              number: 8000
-      timeout: 300s
+
+  virtualService:
+    gateway: product/product-gateway
+    host: product-a.demo.kubify.product
+    http:
+      - name: dai
+        match:
+          - uri:
+              prefix: /dai
+        route:
+          - destination:
+              host: dai-frontend
+              port:
+                number: 3000
+        timeout: 50s
+      - name: mcp
+        match:
+          - uri:
+              prefix: /mcp
+        route:
+          - destination:
+              host: backend
+              port:
+                number: 8765
+        timeout: 300s
+      - name: ai-root-redirect
+        match:
+          - uri:
+              exact: /ai
+        redirect:
+          uri: /ai/dev
+      - name: ai
+        match:
+          - uri:
+              prefix: /ai/
+        rewrite:
+          uri: /
+        route:
+          - destination:
+              host: ai-product-ai
+              port:
+                number: 8000
+        timeout: 300s
+      - name: frontend
+        match:
+          - uri:
+              prefix: /
+        route:
+          - destination:
+              host: frontend
+              port:
+                number: 3000
+        timeout: 50s
+        corsPolicy:
+          allowHeaders: [X-Account, Content-Type, Authorization]
+          allowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+          allowOrigins:
+            - exact: https://product-a.demo.kubify.product
+        headers:
+          response:
+            set:
+              Strict-Transport-Security: max-age=31536000

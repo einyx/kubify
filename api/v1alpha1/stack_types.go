@@ -95,6 +95,29 @@ type StackSpec struct {
 	// reusing Flux's existing auth secrets.
 	// +optional
 	GitRef *GitRefSource `json:"gitRef,omitempty"`
+
+	// VirtualService defines an Istio VirtualService the operator manages for
+	// this Stack. All HTTP routes are reconciled on every cycle, so extra `---`
+	// documents in the Stack file are not needed.
+	// +optional
+	VirtualService *StackVirtualService `json:"virtualService,omitempty"`
+}
+
+// StackVirtualService describes a managed Istio VirtualService.
+type StackVirtualService struct {
+	// Name of the VirtualService. Defaults to "<stack-name>-routes".
+	// +optional
+	Name string `json:"name,omitempty"`
+	// Gateway reference in "namespace/name" or just "name" form.
+	// +kubebuilder:validation:MinLength=1
+	Gateway string `json:"gateway"`
+	// Host is the virtual host (DNS name).
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+	// HTTP is the ordered list of route rules, passed verbatim into the VS spec.
+	// Use the same structure as Istio's HTTPRoute.
+	// +kubebuilder:validation:MinItems=1
+	HTTP []apiextensionsv1.JSON `json:"http"`
 }
 
 // GitRefSource references a git repository as a chart source.

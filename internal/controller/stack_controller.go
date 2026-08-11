@@ -96,6 +96,10 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
+	if err := r.ensureVirtualService(ctx, &stack); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
+	}
+
 	var bundleCharts map[string]*chart.Chart
 	var bundleImages map[string]bundleImage
 	if stack.Spec.Bundle != nil && stack.Spec.Bundle.URL != "" {
