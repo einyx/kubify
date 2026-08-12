@@ -138,7 +138,7 @@ func (r *StackReconciler) reconcileOperators(ctx context.Context, stack *platfor
 			// (vault-tenant, agentfw) are cleaned up, in finalize.
 			continue
 		}
-		if op.name == "vault-tenant" || op.name == "agentfw" {
+		if op.name == "vault-operator" || op.name == "vault-tenant" || op.name == "agentfw" {
 			st := platformv1alpha1.ComponentStatus{Name: op.name, Phase: platformv1alpha1.ComponentPhaseReady}
 			var perr error
 			switch op.name {

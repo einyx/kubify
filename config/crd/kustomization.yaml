@@ -4,6 +4,7 @@
 resources:
 - bases/platform.kubo.io_stackdefinitions.yaml
 - bases/platform.kubo.io_stacks.yaml
+- bases/platform.kubo.io_stackbackups.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

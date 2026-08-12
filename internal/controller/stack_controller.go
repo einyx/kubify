@@ -12,6 +12,7 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -210,11 +211,17 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if isClusterOperator(name) || isClusterOperator(comp.ChartRef.ChartName) {
 			continue
 		}
-		ch := bundleCharts[comp.ChartRef.ChartName]
-		fromBundle := ch != nil
-		if ch == nil {
-			ch = bundleCharts[name]
+		// An explicit chartRef.RepoURL means the component pins a specific chart
+		// source — don't let a bundle chart with the same name shadow it.
+		var ch *chart.Chart
+		fromBundle := false
+		if comp.ChartRef.RepoURL == "" {
+			ch = bundleCharts[comp.ChartRef.ChartName]
 			fromBundle = ch != nil
+			if ch == nil {
+				ch = bundleCharts[name]
+				fromBundle = ch != nil
+			}
 		}
 		if ch == nil && stack.Spec.Bundle != nil {
 			var err error
@@ -597,6 +604,7 @@ func (r *StackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.Stack{}).
 		Named("stack").
+		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
 		Watches(
 			&helmv2.HelmRelease{},
 			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {

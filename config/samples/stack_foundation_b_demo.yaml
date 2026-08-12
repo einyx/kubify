@@ -32,6 +32,8 @@ spec:
       to: dai-backend
     - from: product-b-dai-frontend
       to: dai-frontend
+    - from: product-b-product-scheduler-user-credentials
+      to: product-scheduler-user-credentials
   componentValues:
     backend:
       image:
@@ -81,6 +83,12 @@ spec:
         value: auth0-stg.kubify.app
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
         value: kubify-stg.eu.auth0.com
+      secret:
+        auth0:
+          enabled: false
+      dependencies:
+        productBackendConfigMap: ""
+        hiveMetastoreSecret: ""
       sidecar:
         mcp:
           enabled: true
@@ -192,7 +200,7 @@ spec:
       migrations:
         enabled: false
       serviceAccount:
-        name: product-processor
+        name: product-b-processor
       resources:
         limits:
           cpu: "1"
@@ -504,7 +512,7 @@ spec:
           user: product
           existingSecret: postgres-postgresql
           existingSecretSuperUserKey: postgres-password
-      fullnameOverride: watcher
+      fullnameOverride: watcher-product-b
 
   extraBundles:
   - url: oci://ghcr.io/einyx/dai-bundle:0.0.7
