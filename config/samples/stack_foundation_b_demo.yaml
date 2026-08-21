@@ -575,7 +575,7 @@ spec:
         name: kubifyregistry-helm-secret
       chartRef:
         chartName: watcher
-        chartVersion: 2.7.3
+        chartVersion: 2.7.4
         repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/product-charts
       dependsOn:
       - backend
