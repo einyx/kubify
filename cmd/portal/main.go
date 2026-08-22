@@ -13,6 +13,7 @@ import (
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:9090", "listen address (loopback by default)")
+	templatesDir := flag.String("templates", portal.DefaultTemplatesDir, "local templates dir")
 	allowRemote := flag.Bool("allow-remote", false,
 		"bind non-loopback addresses — the portal has NO authentication; "+
 			"only do this behind an authenticating proxy or NetworkPolicy")
@@ -26,6 +27,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("portal: %v", err)
 	}
+	p.SetTemplateDir(*templatesDir)
 	log.Printf("kubo portal listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, p.Mux()); err != nil {
 		log.Fatalf("portal: %v", err)

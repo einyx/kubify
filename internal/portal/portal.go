@@ -1,6 +1,5 @@
 // Package portal serves a light operator UI over Stack resources: list
-// stacks, inspect component phases, and create new stacks from the
-// product demo template.
+// stacks, inspect component phases, and create new stacks from templates.
 package portal
 
 import (
@@ -21,21 +20,31 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-//go:embed template.yaml
-var templateFS string
-
 //go:embed index.html
 var indexHTML string
 
+// defaultTemplatesDir is the local template source, relative to the working
+// directory. The dir is optional; environment-specific templates live here
+// (config/samples/ is gitignored).
+const defaultTemplatesDir = "config/samples/portal-templates"
+
+// DefaultTemplatesDir exposes the default for the CLI flag default.
+const DefaultTemplatesDir = defaultTemplatesDir
+
 // Portal is the operator portal server.
 type Portal struct {
-	client client.Client
+	client   client.Client
+	registry *Registry
 }
 
-// New builds a Portal using the provided client.
-func New(c client.Client) *Portal { return &Portal{client: c} }
+// New builds a Portal using the provided client and the default template
+// sources (embedded built-ins + default local dir; no ConfigMap source).
+func New(c client.Client) *Portal {
+	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, nil)}
+}
 
 // NewInCluster builds a Portal from the ambient kubeconfig / service account.
+// The ConfigMap template source is enabled.
 func NewInCluster() (*Portal, error) {
 	sch := kubescheme.Scheme
 	if err := v1alpha1.AddToScheme(sch); err != nil {
@@ -45,7 +54,7 @@ func NewInCluster() (*Portal, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Portal{client: c}, nil
+	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, c)}, nil
 }
 
 // StackSummary is one row in the stacks table.
@@ -102,7 +111,20 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 // StackDetail is the deep view of a single stack.
 type StackDetail struct {
 	StackSummary
+	Operators  map[string]bool `json:"operators,omitempty"`
+	Exclude    []string        `json:"exclude,omitempty"`
+	Bundle     string          `json:"bundle,omitempty"`
+	Conditions []ConditionView `json:"conditions,omitempty"`
 	Components []ComponentView `json:"components"`
+}
+
+// ConditionView is one status condition row.
+type ConditionView struct {
+	Type         string `json:"type"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason,omitempty"`
+	Message      string `json:"message,omitempty"`
+	LastTransion string `json:"lastTransition,omitempty"`
 }
 
 // ComponentView is one component row.
@@ -126,7 +148,27 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 			Mode: string(s.Spec.Mode), Phase: s.Status.Phase,
 			Age: since(s.CreationTimestamp.Time),
 		},
+		Operators:  map[string]bool{},
+		Exclude:    s.Spec.Exclude,
 		Components: make([]ComponentView, 0, len(s.Status.Components)),
+	}
+	if s.Spec.Bundle != nil {
+		d.Bundle = s.Spec.Bundle.URL
+	}
+	op := s.Spec.Operators
+	if op != nil {
+		d.Operators = map[string]bool{
+			"agentFW": op.AgentFW, "vault": op.Vault, "istio": op.Istio,
+			"spark": op.Spark, "certManager": op.CertManager, "kafka": op.Kafka,
+			"postgres": op.Postgres, "kubeflow": op.Kubeflow,
+		}
+	}
+	for _, c := range s.Status.Conditions {
+		d.Conditions = append(d.Conditions, ConditionView{
+			Type: c.Type, Status: string(c.Status), Reason: c.Reason,
+			Message:      truncate(c.Message, 200),
+			LastTransion: c.LastTransitionTime.Format("2006-01-02 15:04"),
+		})
 	}
 	if d.Mode == "" {
 		d.Mode = "Direct"
@@ -146,21 +188,123 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 	return d, nil
 }
 
-// CreateFromTemplate renders the product demo template for the given
-// tenant slug and creates the Namespace + Stack. dryRun just returns YAML.
-func (p *Portal) CreateFromTemplate(ctx context.Context, tenant, mode string, dryRun bool) (string, error) {
-	tenant = strings.ToLower(strings.TrimSpace(tenant))
+// SetTemplateDir overrides the local templates dir (must be called before
+// serving).
+func (p *Portal) SetTemplateDir(dir string) {
+	local := NewRegistry(dir, nil)
+	local.client = p.registry.client
+	p.registry = local
+}
+
+// GetStackYAML returns the live Stack manifest as YAML.
+func (p *Portal) GetStackYAML(ctx context.Context, ns, name string) (string, error) {
+	var s v1alpha1.Stack
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	if err := p.client.Get(ctx, key, &s); err != nil {
+		return "", err
+	}
+	// Typed objects from the client cache carry no TypeMeta.
+	s.APIVersion, s.Kind = v1alpha1.GroupVersion.String(), "Stack"
+	b, err := yaml.Marshal(&s)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+// DeleteStack removes the Stack CR. confirm must equal the namespace (typed
+// by the operator in the UI). purgeNamespace also deletes the tenant
+// namespace; default is to keep it.
+func (p *Portal) DeleteStack(ctx context.Context, ns, name, confirm string, purgeNamespace bool) error {
+	if confirm != ns {
+		return fmt.Errorf("confirmation does not match namespace %q — nothing deleted", ns)
+	}
+	var s v1alpha1.Stack
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	if err := p.client.Get(ctx, key, &s); err != nil {
+		return err
+	}
+	if err := p.client.Delete(ctx, &s); err != nil {
+		return fmt.Errorf("delete stack: %w", err)
+	}
+	if purgeNamespace {
+		var n corev1.Namespace
+		n.Name = ns
+		if err := p.client.Delete(ctx, &n); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete namespace: %w", err)
+		}
+	}
+	return nil
+}
+
+// CreateRequest is the POST /api/stacks payload.
+type CreateRequest struct {
+	Template  string          `json:"template"`
+	Tenant    string          `json:"tenant"`
+	Mode      string          `json:"mode"`
+	Exclude   []string        `json:"exclude"`
+	Operators map[string]bool `json:"operators"`
+}
+
+// CreateFromTemplate renders the chosen template for the given tenant slug
+// and creates the Namespace + Stack. Request params override the template
+// defaults (mode, exclude, operators). DryRun just returns YAML.
+func (p *Portal) CreateFromTemplate(ctx context.Context, req CreateRequest, dryRun bool) (string, error) {
+	if req.Template == "" {
+		req.Template = "product-full"
+	}
+	tmpl, err := p.registry.Get(ctx, req.Template)
+	if err != nil {
+		return "", err
+	}
+
+	tenant := strings.ToLower(strings.TrimSpace(req.Tenant))
 	if !validTenant(tenant) {
 		return "", fmt.Errorf("tenant must be a lowercase RFC-1123 label (a-z, 0-9, '-')")
 	}
 
-	objs, err := renderTemplate(tenant)
+	objs, err := renderTemplate(tmpl.Body, tenant)
 	if err != nil {
 		return "", err
 	}
+
+	// Parameter overrides on the Stack object.
+	mode := req.Mode
+	if mode == "" {
+		mode = tmpl.Meta.Defaults.Mode
+	}
+	exclude := req.Exclude
+	if exclude == nil {
+		exclude = tmpl.Meta.Defaults.Exclude
+	}
+	operators := tmpl.Meta.Defaults.Operators
+	for k, v := range req.Operators {
+		if operators == nil {
+			operators = map[string]bool{}
+		}
+		operators[k] = v
+	}
 	for i := range objs {
-		if s, ok := objs[i].(*v1alpha1.Stack); ok && mode == "Flux" {
+		s, ok := objs[i].(*v1alpha1.Stack)
+		if !ok {
+			continue
+		}
+		switch mode {
+		case "Flux":
 			s.Spec.Mode = v1alpha1.DeploymentModeFlux
+		case "", "Direct":
+			s.Spec.Mode = v1alpha1.DeploymentModeDirect
+		default:
+			return "", fmt.Errorf("invalid mode %q (want Direct or Flux)", mode)
+		}
+		s.Spec.Exclude = exclude
+		if operators != nil {
+			op := s.Spec.Operators
+			if op == nil {
+				op = &v1alpha1.ClusterOperators{}
+				s.Spec.Operators = op
+			}
+			applyOperators(op, operators)
 		}
 	}
 
@@ -168,11 +312,11 @@ func (p *Portal) CreateFromTemplate(ctx context.Context, tenant, mode string, dr
 	for i := range objs {
 		obj := objs[i]
 		b.WriteString("---\n")
-		if data, err := yaml.Marshal(obj); err != nil {
+		data, err := yaml.Marshal(obj)
+		if err != nil {
 			return "", err
-		} else {
-			b.Write(data)
 		}
+		b.Write(data)
 	}
 	if dryRun {
 		return b.String(), nil
@@ -187,8 +331,32 @@ func (p *Portal) CreateFromTemplate(ctx context.Context, tenant, mode string, dr
 	return b.String(), nil
 }
 
-func renderTemplate(tenant string) ([]client.Object, error) {
-	tmpl, err := template.New("stack").Parse(templateFS)
+// applyOperators sets only the toggles present in the request map.
+func applyOperators(op *v1alpha1.ClusterOperators, m map[string]bool) {
+	for k, v := range m {
+		switch strings.ToLower(k) {
+		case "agentfw":
+			op.AgentFW = v
+		case "vault":
+			op.Vault = v
+		case "istio":
+			op.Istio = v
+		case "spark":
+			op.Spark = v
+		case "certmanager":
+			op.CertManager = v
+		case "kafka":
+			op.Kafka = v
+		case "postgres":
+			op.Postgres = v
+		case "kubeflow":
+			op.Kubeflow = v
+		}
+	}
+}
+
+func renderTemplate(body, tenant string) ([]client.Object, error) {
+	tmpl, err := template.New("stack").Parse(body)
 	if err != nil {
 		return nil, err
 	}
