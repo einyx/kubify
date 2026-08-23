@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -23,13 +24,13 @@ import (
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+
+	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/yaml"
-
-	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
 
 // HelmEngine renders and deploys a component chart into a namespace.
@@ -217,6 +218,36 @@ func dockerAuthFor(restCfg *rest.Config, ns, secretName, repoURL string) (user, 
 		user, pass, _ = strings.Cut(string(decoded), ":")
 	}
 	return user, pass, nil
+}
+
+// imageLineRe matches `image: <value>` in rendered Helm manifests. The value
+// must be a plausible image reference and the whole value on one line, so
+// prose containing "image:" is not picked up.
+var imageLineRe = regexp.MustCompile(`(?m)^\s*-?\s*image:\s*"?([\w][\w./:@-]+)"?\s*$`)
+
+// extractImages pulls the container images out of a rendered Helm manifest
+// (deployments, statefulsets, daemonsets, jobs) and returns them deduped,
+// split into repository/tag/digest.
+func extractImages(manifest string) []platformv1alpha1.ComponentImage {
+	seen := map[string]bool{}
+	var out []platformv1alpha1.ComponentImage
+	for _, m := range imageLineRe.FindAllStringSubmatch(manifest, -1) {
+		ref := m[1]
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		img := platformv1alpha1.ComponentImage{}
+		if i := strings.Index(ref, "@"); i >= 0 {
+			img.Repository, img.Digest = ref[:i], ref[i+1:]
+		} else if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+			img.Repository, img.Tag = ref[:i], ref[i+1:]
+		} else {
+			img.Repository = ref
+		}
+		out = append(out, img)
+	}
+	return out
 }
 
 // Deploy installs or upgrades the release and returns the resulting release.
