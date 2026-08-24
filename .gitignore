@@ -31,3 +31,4 @@ config/samples/
 internal/portal/template.yaml
 graphify-out/
 bundle
+Makefile
