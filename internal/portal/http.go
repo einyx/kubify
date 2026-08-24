@@ -14,6 +14,9 @@ import (
 //	GET  /api/stacks              JSON list of all stacks
 //	GET  /api/stacks/{ns}/{name}  component-level detail
 //	GET  /api/stacks/{ns}/{name}/yaml  live manifest
+//	POST /api/stacks/{ns}/{name}/reconcile  trigger a controller reconcile
+//	PATCH /api/stacks/{ns}/{name}  partial spec update (mode/bundle/exclude/operators)
+//	GET  /api/stacks/{ns}/events  recent namespace events
 //	DELETE /api/stacks/{ns}/{name}?confirm=<ns>&purge=true
 //	GET  /api/templates           template registry (metadata only)
 //	GET  /api/template            rendered YAML preview (template + tenant)
@@ -67,6 +70,31 @@ func (p *Portal) Mux() http.Handler {
 	mux.HandleFunc("GET /api/stacks/{namespace}/{name}/yaml", func(w http.ResponseWriter, r *http.Request) {
 		out, err := p.GetStackYAML(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
 		respondYAML(w, r, out, err)
+	})
+	mux.HandleFunc("POST /api/stacks/{namespace}/{name}/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		err := p.ReconcileStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"reconciled": true}, nil)
+	})
+	mux.HandleFunc("PATCH /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var req PatchRequest
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		if err := p.PatchStackSpec(r.Context(), r.PathValue("namespace"), r.PathValue("name"), req); err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"patched": true}, nil)
+	})
+	mux.HandleFunc("GET /api/stacks/{namespace}/events", func(w http.ResponseWriter, r *http.Request) {
+		events, err := p.ListStackEvents(r.Context(), r.PathValue("namespace"))
+		respond(w, r, events, err)
 	})
 	mux.HandleFunc("DELETE /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

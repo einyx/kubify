@@ -588,7 +588,11 @@
         <div class="detail-title" id="detail-title"></div>
         <div class="detail-sub" id="detail-sub"></div>
       </div>
-      <button class="btn secondary" id="delete-btn" onclick="askDelete()" style="margin-left:auto;color:var(--err)">Delete…</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn secondary" onclick="doReconcile()">Reconcile</button>
+        <button class="btn secondary" onclick="openEdit()">Edit spec…</button>
+        <button class="btn secondary" id="delete-btn" onclick="askDelete()" style="color:var(--err)">Delete…</button>
+      </div>
     </div>
     <div class="detail-spec card-outer" style="animation-delay:60ms">
       <div class="card-inner" id="spec-chips"></div>
@@ -618,6 +622,15 @@
       </div>
     </div>
     <div class="card-outer" style="animation-delay:180ms">
+      <div class="card-inner">
+        <div class="section-title">Recent events</div>
+        <table>
+          <thead><tr><th>Type</th><th>Reason</th><th>Object</th><th>Count</th><th>Last seen</th><th>Message</th></tr></thead>
+          <tbody id="event-rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:220ms">
       <div class="card-inner">
         <div class="section-title">Live manifest</div>
         <pre id="stack-yaml" style="max-height:420px">loading…</pre>
@@ -690,6 +703,45 @@
   </div>
 </dialog>
 
+<!-- Edit spec dialog -->
+<dialog id="edit">
+  <div class="dialog-header">
+    <h2>Edit stack spec</h2>
+    <p>Patches the live Stack resource — the operator reconciles the change.
+       Only fields you change are applied.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label>Cluster operators</label>
+      <div id="edit-operators" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+    </div>
+    <div class="field">
+      <label for="edit-exclude">Excluded components <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(comma-separated)</span></label>
+      <input id="edit-exclude" placeholder="e.g. kafka, spark" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="edit-bundle">Bundle URL <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(empty string clears)</span></label>
+      <input id="edit-bundle" placeholder="oci://ghcr.io/org/product-bundle:tag" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="edit-mode">Deployment mode</label>
+      <select id="edit-mode">
+        <option value="">Keep current</option>
+        <option value="Direct">Direct — embedded helm engine</option>
+        <option value="Flux">Flux — helm-controller</option>
+      </select>
+    </div>
+    <div class="field-error" id="edit-error"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="edit-btn" onclick="savePatch()">
+      Apply patch
+      <span class="btn-icon" style="font-size:13px">↗</span>
+    </button>
+  </div>
+</dialog>
+
 <div id="toast">
   <span id="toast-icon"></span>
   <span id="toast-msg"></span>
@@ -703,6 +755,7 @@ const api = async (path, opts) => {
 };
 
 let currentDetail = null; // {ns, name}
+let currentData = null;   // last StackDetail for prefilling the edit dialog
 
 async function refresh() {
   try {
@@ -774,6 +827,7 @@ async function fetchDetail(ns, name) {
       fetch(`/api/stacks/${ns}/${name}/yaml`).then(r => r.ok ? r.text() : '(unavailable)'),
     ]);
     if (!currentDetail || currentDetail.ns !== ns || currentDetail.name !== name) return;
+    currentData = d;
     document.getElementById('list-view').style.display = 'none';
     document.getElementById('detail').style.display = 'block';
     document.getElementById('detail-title').textContent = `${ns} / ${name}`;
@@ -788,6 +842,7 @@ async function fetchDetail(ns, name) {
       </tr>`).join('')
       || '<tr class="empty-row"><td colspan="4">No component status yet.</td></tr>';
     renderSpec(d);
+    loadEvents(ns);
     document.getElementById('cond-rows').innerHTML = (d.conditions || []).map(c => `
       <tr>
         <td class="cell-name">${esc(c.type)}</td>
@@ -845,8 +900,96 @@ async function doDelete() {
 
 function hideDetail() {
   currentDetail = null;
+  currentData = null;
   document.getElementById('detail').style.display = 'none';
   document.getElementById('list-view').style.display = 'block';
+}
+
+async function loadEvents(ns) {
+  try {
+    const events = await api(`/api/stacks/${ns}/events`);
+    document.getElementById('event-rows').innerHTML = events.map(e => `
+      <tr>
+        <td><span class="comp-phase ${e.type === 'Warning' ? 'Failed' : 'Ready'}">${esc(e.type || 'Normal')}</span></td>
+        <td class="cell-name">${esc(e.reason)}</td>
+        <td class="cell-mode">${esc(e.object)}</td>
+        <td class="cell-mode">${e.count}</td>
+        <td class="cell-mode">${esc(e.lastSeen)}</td>
+        <td class="cell-ns">${esc(e.message)}</td>
+      </tr>`).join('')
+      || '<tr class="empty-row"><td colspan="6">No recent events.</td></tr>';
+  } catch (e) { /* events are best-effort */ }
+}
+
+async function doReconcile() {
+  if (!currentDetail) return;
+  const { ns, name } = currentDetail;
+  try {
+    await fetch(`/api/stacks/${ns}/${name}/reconcile`, { method: 'POST' })
+      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(`Reconcile triggered for ${ns}/${name}`, true);
+    fetchDetail(ns, name);
+  } catch (e) { toast(e.message, false); }
+}
+
+const OPERATORS = ['agentFW', 'vault', 'istio', 'spark', 'certManager', 'kafka', 'postgres', 'kubeflow'];
+
+function openEdit() {
+  if (!currentData) return;
+  const d = currentData;
+  const wrap = document.getElementById('edit-operators');
+  wrap.innerHTML = OPERATORS.map(k => {
+    const on = d.operators && d.operators[k];
+    return `<label style="display:flex;gap:6px;align-items:center;cursor:pointer;text-transform:none;font-size:12px;font-weight:500;
+      padding:5px 12px;border-radius:9999px;border:1px solid ${on ? 'rgba(62,207,142,.35)' : 'var(--border)'};
+      background:${on ? 'rgba(62,207,142,.08)' : 'rgba(255,255,255,.04)'};color:${on ? 'var(--ok)' : 'var(--muted2)'}">
+      <input type="checkbox" data-op="${k}" ${on ? 'checked' : ''} style="width:auto"
+        onchange="this.parentElement.style.borderColor=this.checked?'rgba(62,207,142,.35)':'var(--border)';
+        this.parentElement.style.background=this.checked?'rgba(62,207,142,.08)':'rgba(255,255,255,.04)';
+        this.parentElement.style.color=this.checked?'var(--ok)':'var(--muted2)'">
+      ${esc(k)}</label>`;
+  }).join('');
+  document.getElementById('edit-exclude').value = (d.exclude || []).join(', ');
+  document.getElementById('edit-bundle').value = d.bundle || '';
+  document.getElementById('edit-mode').value = '';
+  document.getElementById('edit-error').textContent = '';
+  document.getElementById('edit').showModal();
+}
+
+async function savePatch() {
+  if (!currentDetail) return;
+  const { ns, name } = currentDetail;
+  const err = document.getElementById('edit-error');
+  err.textContent = '';
+  const body = {};
+  const exclude = document.getElementById('edit-exclude').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+  if (JSON.stringify(exclude) !== JSON.stringify(currentData.exclude || [])) body.exclude = exclude;
+  const bundle = document.getElementById('edit-bundle').value.trim();
+  if (bundle !== (currentData.bundle || '')) body.bundle = bundle;
+  const mode = document.getElementById('edit-mode').value;
+  if (mode) body.mode = mode;
+  const operators = {};
+  let opsChanged = false;
+  document.querySelectorAll('#edit-operators input[data-op]').forEach(cb => {
+    const was = !!(currentData.operators && currentData.operators[cb.dataset.op]);
+    if (cb.checked !== was) { operators[cb.dataset.op] = cb.checked; opsChanged = true; }
+  });
+  if (opsChanged) body.operators = operators;
+  if (!Object.keys(body).length) { document.getElementById('edit').close(); return; }
+  const btn = document.getElementById('edit-btn');
+  btn.disabled = true;
+  try {
+    await fetch(`/api/stacks/${ns}/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast('Spec patched — operator will reconcile', true);
+    document.getElementById('edit').close();
+    fetchDetail(ns, name);
+  } catch (e) { err.textContent = e.message; }
+  btn.disabled = false;
 }
 
 async function loadTemplates() {

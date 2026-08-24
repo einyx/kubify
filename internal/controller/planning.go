@@ -100,14 +100,6 @@ func topoOrder(comps []platformv1alpha1.StackComponentSpec) ([]string, error) {
 				return err
 			}
 		}
-		for _, dep := range c.DependsOnReady {
-			if _, ok := byName[dep]; !ok {
-				return fmt.Errorf("component %q depends on unknown component %q (dependsOnReady)", name, dep)
-			}
-			if err := visit(dep); err != nil {
-				return err
-			}
-		}
 		state[name] = 2
 		order = append(order, name)
 		return nil
