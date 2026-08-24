@@ -1,6 +1,6 @@
 apiVersion: v2
 name: kubo
-description: Kubo operator — Product stack provisioner
+description: Kubo operator — stack provisioner
 type: application
 version: 0.1.6
 appVersion: v0.1.1

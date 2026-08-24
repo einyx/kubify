@@ -56,11 +56,11 @@ spec:
               The kubo\ncontroller wraps it in a one-shot Job and surfaces its outcome
               — the\nbootstrap logic itself lives entirely in the image, so any product/script\ncan
               bootstrap itself without touching the controller.\n\nExample: run the
-              product-bootstrap product against this namespace:\n\n\tapiVersion:
+              product bootstrap against this namespace:\n\n\tapiVersion:
               platform.kubo.io/v1alpha1\n\tkind: StackBootstrap\n\tmetadata:\n\t  name:
-              product\n\tspec:\n\t  image: ghcr.io/einyx/product-bootstrap:latest\n\t
-              \ params:\n\t    STACK_NAME: product\n\t    TENANT: acme\n\t  secrets:\n\t
-              \ - name: product-acme-ai-secrets"
+              acme\n\tspec:\n\t  image: ghcr.io/example/product-bootstrap:latest\n\t
+              \ params:\n\t    STACK_NAME: acme\n\t    TENANT: acme\n\t  secrets:\n\t
+              \ - name: acme-ai-secrets"
             properties:
               args:
                 description: Args are passed to the entrypoint. +optional

@@ -81,7 +81,7 @@ type ChartRef struct {
 }
 
 // StackDefinitionSpec is the pluggable description of a stack product
-// (e.g. product, dai, product-ai, or anything else).
+// (any product identifier).
 type StackDefinitionSpec struct {
 	// Title is a human readable name.
 	Title string `json:"title"`

@@ -136,7 +136,7 @@ func readBundleImages(ctx context.Context, repo *remote.Repository, layer ocispe
 	return out, nil
 }
 
-// splitRegistry splits "ghcr.io/einyx/opa" into ("ghcr.io", "einyx/opa").
+// splitRegistry splits "ghcr.io/example/opa" into ("ghcr.io", "example-org/opa").
 // A repo with no "/" returns ("", repo).
 func splitRegistry(repo string) (registry, path string) {
 	if i := strings.Index(repo, "/"); i >= 0 {
@@ -159,15 +159,11 @@ func splitImage(ref string) (name, repo, tag string) {
 }
 
 func matchBundleImage(component string, images map[string]bundleImage) (bundleImage, bool) {
-	if img, ok := aliasedImage(component); ok {
-		return img, true
-	}
 	if img, ok := images[component]; ok {
 		return img, true
 	}
-	if img, ok := images["product-"+component]; ok {
-		return img, true
-	}
+	// Bundle image names may carry a product prefix (e.g. "<product>-backend");
+	// a suffix match keeps this product-agnostic.
 	for name, img := range images {
 		if strings.HasSuffix(name, "-"+component) {
 			return img, true
@@ -246,34 +242,17 @@ func lookupBundleImage(repo string, images map[string]bundleImage) (bundleImage,
 	if i := strings.LastIndex(repo, "/"); i >= 0 {
 		name = repo[i+1:]
 	}
-	if img, ok := aliasedImage(name); ok {
-		return img, true
-	}
-	name = strings.TrimPrefix(name, "product-")
 	if img, ok := images[name]; ok {
 		return img, true
 	}
-	if img, ok := images["product-"+name]; ok {
-		return img, true
-	}
+	// Bundle image names may carry a product prefix (e.g. "<product>-backend");
+	// a suffix match keeps this product-agnostic.
 	for n, img := range images {
-		if n == name || strings.HasSuffix(n, "-"+name) || strings.TrimPrefix(n, "product-") == name {
+		if n == name || strings.HasSuffix(n, "-"+name) {
 			return img, true
 		}
 	}
 	return bundleImage{}, false
-}
-
-func aliasedImage(name string) (bundleImage, bool) {
-	aliases := map[string]string{
-		"s3proxy":        "product-storage-engine",
-		"storage-engine": "product-storage-engine",
-	}
-	target, ok := aliases[name]
-	if !ok {
-		return bundleImage{}, false
-	}
-	return bundleImage{Name: target, Repo: "ghcr.io/einyx/" + target, Tag: "latest"}, true
 }
 
 func applyBundleImage(values map[string]interface{}, img bundleImage, pullSecret string) {

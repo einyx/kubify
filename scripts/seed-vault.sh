@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Seed per-tenant Vault with Auth0 credentials read from product-compose/.env.
+# Seed per-tenant Vault with Auth0 credentials read from stack-compose/.env.
 #
 # Usage: scripts/seed-vault.sh <namespace> [<namespace> ...]
 # Requires: vault CLI, kubectl, and the tenant Stack already deployed with
 # operators.vault: true (per-tenant Vault initialized by bank-vaults).
 set -euo pipefail
 
-NS_ARGS=("${@:-product}")
-ENV_FILE="${ENV_FILE:-../product-compose/.env}"
+NS_ARGS=("${@:-stack}")
+ENV_FILE="${ENV_FILE:-../stack-compose/.env}"
 
 # .env is not strict shell — pull only the vars we need.
 getenv() { rg "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2-; }

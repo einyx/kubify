@@ -13,9 +13,9 @@ import (
 func testBootstrap() *platformv1alpha1.StackBootstrap {
 	d := 5 * time.Minute
 	return &platformv1alpha1.StackBootstrap{
-		ObjectMeta: metav1.ObjectMeta{Name: "product", Namespace: "product-x", Generation: 3},
+		ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "acme-x", Generation: 3},
 		Spec: platformv1alpha1.StackBootstrapSpec{
-			Image:   "ghcr.io/einyx/product-bootstrap:latest",
+			Image:   "ghcr.io/example/product-bootstrap:latest",
 			Command: []string{"/bootstrap/run"},
 			Params: map[string]string{
 				"Z_PARAM": "z",
@@ -34,9 +34,9 @@ func testBootstrap() *platformv1alpha1.StackBootstrap {
 func TestBuildBootstrapJob(t *testing.T) {
 	r := &StackBootstrapReconciler{}
 	sb := testBootstrap()
-	job := r.buildJob(sb, "stackbootstrap-product-1")
+	job := r.buildJob(sb, "stackbootstrap-acme-1")
 
-	if job.Namespace != "product-x" || job.Name != "stackbootstrap-product-1" {
+	if job.Namespace != "acme-x" || job.Name != "stackbootstrap-acme-1" {
 		t.Fatalf("job coordinates: %s/%s", job.Namespace, job.Name)
 	}
 	c := job.Spec.Template.Spec.Containers[0]

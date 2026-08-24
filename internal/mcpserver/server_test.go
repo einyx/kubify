@@ -103,7 +103,7 @@ func TestListStacks_empty(t *testing.T) {
 func TestListStacks_withStack(t *testing.T) {
 	st := &platformv1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "acme"},
-		Spec:       platformv1alpha1.StackSpec{StackRef: "product", Mode: platformv1alpha1.DeploymentModeDirect},
+		Spec:       platformv1alpha1.StackSpec{StackRef: "acme", Mode: platformv1alpha1.DeploymentModeDirect},
 	}
 	s := newServer(st)
 	text := toolCall(t, s, "list_stacks", map[string]string{})
@@ -117,11 +117,11 @@ func TestListStacks_withStack(t *testing.T) {
 func TestGetStack(t *testing.T) {
 	st := &platformv1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "acme"},
-		Spec:       platformv1alpha1.StackSpec{StackRef: "product"},
+		Spec:       platformv1alpha1.StackSpec{StackRef: "acme"},
 	}
 	s := newServer(st)
 	text := toolCall(t, s, "get_stack", map[string]string{"name": "acme", "namespace": "acme"})
-	if !strings.Contains(text, `"stackRef": "product"`) {
+	if !strings.Contains(text, `"stackRef": "acme"`) {
 		t.Errorf("expected stackRef in response, got %q", text)
 	}
 }
@@ -143,7 +143,7 @@ func TestGetStack_notFound(t *testing.T) {
 func TestPauseResume(t *testing.T) {
 	st := &platformv1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "acme"},
-		Spec:       platformv1alpha1.StackSpec{StackRef: "product"},
+		Spec:       platformv1alpha1.StackSpec{StackRef: "acme"},
 	}
 	s := newServer(st)
 

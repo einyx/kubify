@@ -190,7 +190,7 @@ func mirrorImages(ctx context.Context, images []imageRef, mirrorHost string) ([]
 	for _, img := range images {
 		src := img.Ref
 		// Build dest: mirrorHost + "/" + last two path components of src (repo:tag).
-		// e.g. ghcr.io/einyx/foo:1.0 → myacr.azurecr.io/mirror/foo:1.0
+		// e.g. ghcr.io/example/foo:1.0 → myacr.azurecr.io/mirror/foo:1.0
 		dst := mirrorDest(mirrorHost, src)
 		fmt.Printf("copying %s → %s\n", src, dst)
 		if err := crane.Copy(src, dst, crane.WithContext(ctx)); err != nil {
