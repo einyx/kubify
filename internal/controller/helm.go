@@ -218,7 +218,6 @@ func dockerAuthFor(restCfg *rest.Config, ns, secretName, repoURL string) (user, 
 	return user, pass, nil
 }
 
-
 // isPendingStatus reports whether a release is stuck mid-operation
 // (install/upgrade/rollback that never completed). Helm refuses new
 // operations on such releases until they are rolled back or removed.
