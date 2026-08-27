@@ -370,6 +370,11 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if desired[prev.Name] {
 			continue
 		}
+		// Operator-managed components (spec.operators) are re-added every
+		// pass and are lifecycle-managed by releaseOperators, never pruned.
+		if prev.Scope == platformv1alpha1.ComponentScopeCluster || isPlatformOperator(prev.Name) {
+			continue
+		}
 		if err := r.uninstallComponent(ctx, &stack, prev); err != nil {
 			log.Info("prune uninstall failed", "component", prev.Name, "err", err.Error())
 		} else {
