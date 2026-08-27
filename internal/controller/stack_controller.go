@@ -110,20 +110,20 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// credentials + static shared credentials copied from canonical sources).
 	if stack.Spec.SeedVault != nil {
 		if err := r.ensureVaultSeedSecrets(ctx, stack.Spec.SeedVault); err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BootstrapSeedFailed", err)
+			return ctrl.Result{}, r.fail(ctx, &stack, "BootstrapSeedFailed", err)
 		}
 	}
 
 	secretsReady, err := r.ensureSecrets(ctx, &stack, cpVault)
 	if err != nil {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", err)
+		return ctrl.Result{}, r.fail(ctx, &stack, "SecretSyncFailed", err)
 	}
 	if !secretsReady {
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	if err := r.ensureVirtualService(ctx, &stack); err != nil {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
+		return ctrl.Result{}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
 	}
 
 	var bundleCharts map[string]*chart.Chart
@@ -132,13 +132,13 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		var err error
 		bundleCharts, bundleImages, err = r.chartsFromBundle(ctx, &stack)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
+			return ctrl.Result{}, r.fail(ctx, &stack, "BundlePullFailed", err)
 		}
 	}
 	for _, extra := range stack.Spec.ExtraBundles {
 		ec, ei, err := r.chartsFromBundleSource(ctx, &stack, extra)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
+			return ctrl.Result{}, r.fail(ctx, &stack, "BundlePullFailed", err)
 		}
 		if bundleCharts == nil {
 			bundleCharts = ec
@@ -162,7 +162,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if stack.Spec.GitRef != nil {
 		gitCharts, err := r.chartsFromGitRepository(ctx, &stack)
 		if err != nil {
-			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "GitPullFailed", err)
+			return ctrl.Result{}, r.fail(ctx, &stack, "GitPullFailed", err)
 		}
 		if bundleCharts == nil {
 			bundleCharts = gitCharts
@@ -185,7 +185,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			})
 			stack.Status.Phase = "Failed"
 			_ = r.Status().Update(ctx, &stack)
-			return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
+			return ctrl.Result{}, client.IgnoreNotFound(err)
 		}
 	} else {
 		excluded := map[string]bool{}
@@ -349,7 +349,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// control-plane vault may not be ready in this pass — acceptable, the
 	// primary pass already mirrored what it could.
 	if _, serr := r.ensureSecrets(ctx, &stack, cpVault); serr != nil {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", serr)
+		return ctrl.Result{}, r.fail(ctx, &stack, "SecretSyncFailed", serr)
 	}
 
 	allReady := true
