@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -80,5 +82,34 @@ func TestResolveComponentValuesPrecedence(t *testing.T) {
 	img := got["image"].(map[string]interface{})
 	if img["tag"] != "v2" {
 		t.Errorf("component override lost: %v", img)
+	}
+}
+
+func TestGenerateValueKinds(t *testing.T) {
+	hexv, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "hex", Length: 16})
+	if err != nil || len(hexv.data) != 16 {
+		t.Fatalf("hex: %q %v", hexv.data, err)
+	}
+	if _, err := hex.DecodeString(hexv.data); err != nil {
+		t.Errorf("hex not hex: %v", err)
+	}
+	b64, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "base64", Length: 32})
+	if err != nil || len(b64.data) < 40 {
+		t.Fatalf("base64: %v", err)
+	}
+	u, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "uuid"})
+	if err != nil || len(u.data) != 36 || u.data[14] != '4' {
+		t.Fatalf("uuid: %q %v", u.data, err)
+	}
+	bc, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "bcrypt"})
+	if err != nil || len(bc.data) < 59 || bc.data[:4] != "$2a$" && bc.data[:4] != "$2b$" && bc.data[:4] != "$2y$" {
+		t.Fatalf("bcrypt hash: %q %v", bc.data, err)
+	}
+	tls, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "tls"})
+	if err != nil || !strings.Contains(tls.cert, "BEGIN CERTIFICATE") || !strings.Contains(tls.key, "PRIVATE KEY") {
+		t.Fatalf("tls: %v", err)
+	}
+	if _, err := generateValue(platformv1alpha1.GeneratedKey{Kind: "nope"}); err == nil {
+		t.Error("unknown kind should error")
 	}
 }

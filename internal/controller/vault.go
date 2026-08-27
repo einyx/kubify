@@ -161,25 +161,25 @@ type vaultClient struct {
 // Generated entries create fresh random per-tenant values. Existing Secrets
 // are never overwritten; Generated merges only still-missing keys.
 func (r *StackReconciler) ensureVaultSeedSecrets(ctx context.Context, seed *platformv1alpha1.VaultSeed) error {
-	const srcNS = "kubo-system"
+	const sysNS = "kubo-system"
 	for _, list := range [][]platformv1alpha1.VaultSeedSecret{seed.Static, seed.Generated} {
 		for _, bs := range list {
 			var existing corev1.Secret
-			err := r.Get(ctx, types.NamespacedName{Namespace: srcNS, Name: bs.Name}, &existing)
+			err := r.Get(ctx, types.NamespacedName{Namespace: sysNS, Name: bs.Name}, &existing)
 			if err != nil && !apierrors.IsNotFound(err) {
 				return err
 			}
 			exists := err == nil
 
+			// Merge semantics: keep existing values, fill only what is
+			// missing. Nothing is ever overwritten.
 			data := map[string][]byte{}
+			secretType := bs.Type
 			if exists {
-				// Merge mode (Generated into an existing Secret): keep
-				// existing values, fill only what's missing.
 				for k, v := range existing.Data {
 					data[k] = v
 				}
-			} else if bs.Type != "" {
-				existing.Type = bs.Type
+				secretType = existing.Type
 			}
 
 			for k, v := range bs.Literal {
@@ -188,25 +188,41 @@ func (r *StackReconciler) ensureVaultSeedSecrets(ctx context.Context, seed *plat
 				}
 			}
 			if bs.CopyFrom != nil {
+				srcNS := bs.CopyFrom.Namespace
+				if srcNS == "" {
+					srcNS = sysNS
+				}
 				var src corev1.Secret
 				if err := r.Get(ctx, types.NamespacedName{Namespace: srcNS, Name: bs.CopyFrom.Name}, &src); err != nil {
 					if apierrors.IsNotFound(err) {
-						return fmt.Errorf("bootstrap copyFrom source %s not found", bs.CopyFrom.Name)
+						return fmt.Errorf("bootstrap copyFrom source %s/%s not found", srcNS, bs.CopyFrom.Name)
 					}
 					return err
+				}
+				if len(bs.CopyFrom.Keys) == 0 {
+					// Whole-secret copy: all keys, source type preserved
+					// when the entry does not pin a type.
+					for k, v := range src.Data {
+						if _, ok := data[k]; !ok {
+							data[k] = v
+						}
+					}
+					if bs.Type == "" && !exists {
+						secretType = src.Type
+					}
 				}
 				for dst, srck := range bs.CopyFrom.Keys {
 					if _, ok := data[dst]; !ok {
 						v, ok := src.Data[srck]
 						if !ok {
-							return fmt.Errorf("bootstrap copyFrom %s missing key %s", bs.CopyFrom.Name, srck)
+							return fmt.Errorf("bootstrap copyFrom %s/%s missing key %s", srcNS, bs.CopyFrom.Name, srck)
 						}
 						data[dst] = v
 					}
 				}
 			}
 			for k, g := range bs.Generate {
-				if _, ok := data[k]; ok && exists {
+				if _, ok := data[k]; ok {
 					continue // never overwrite an existing value
 				}
 				v, err := generateValue(g)
@@ -214,7 +230,7 @@ func (r *StackReconciler) ensureVaultSeedSecrets(ctx context.Context, seed *plat
 					return fmt.Errorf("generate %s/%s: %w", bs.Name, k, err)
 				}
 				if g.Kind == "tls" {
-					// tls produces two keys out of one entry; skip the
+					// tls produces two keys out of one entry; drop the
 					// complementary key if it is also declared.
 					if k == "tls.key" {
 						delete(data, "tls.crt")
@@ -228,21 +244,21 @@ func (r *StackReconciler) ensureVaultSeedSecrets(ctx context.Context, seed *plat
 				data[k] = []byte(v.data)
 			}
 
+			if secretType == "" {
+				secretType = corev1.SecretTypeOpaque
+			}
 			desired := corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      bs.Name,
-					Namespace: srcNS,
+					Namespace: sysNS,
 					Labels:    map[string]string{"app.kubernetes.io/managed-by": "kubo"},
 				},
-				Type: bs.Type,
+				Type: secretType,
 				Data: data,
-				// type defaults to Opaque when not set on new secrets
-			}
-			if desired.Type == "" {
-				desired.Type = corev1.SecretTypeOpaque
 			}
 			if exists {
 				existing.Data = desired.Data
+				existing.Type = desired.Type
 				if uerr := r.Update(ctx, &existing); uerr != nil {
 					return fmt.Errorf("update %s: %w", bs.Name, uerr)
 				}
