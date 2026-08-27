@@ -153,12 +153,100 @@ type GitRefSource struct {
 // VaultSeed configures automatic seeding of the per-tenant Vault.
 type VaultSeed struct {
 	// SourceSecret is a Secret in the Stack namespace whose keys are copied
-	// into Vault. +kubebuilder:validation:MinLength=1
-	SourceSecret string `json:"sourceSecret"`
+	// into Vault. Required when Entries is set.
+	// +optional
+	SourceSecret string `json:"sourceSecret,omitempty"`
 
 	// Entries map Vault KV paths to the source Secret keys to copy.
-	// +kubebuilder:validation:MinItems=1
-	Entries []VaultSeedEntry `json:"entries"`
+	// +optional
+	Entries []VaultSeedEntry `json:"entries,omitempty"`
+
+	// Static copies pre-generated SHARED credentials (Auth0 clients, vendor
+	// API keys) from canonical kubo-system Secrets into tenant Secrets.
+	// Auth0 clients cannot be generated — they exist in the Auth0 tenant and
+	// are shared across demo deployments. Created only if the target Secret
+	// does not exist; never overwritten.
+	// +optional
+	Static []BootstrapSecret `json:"static,omitempty"`
+
+	// Generated creates fresh RANDOM per-tenant credentials (Trino JWT/S3
+	// keys, DB passwords, session secrets). Every tenant gets its own values.
+	// Created only if the target Secret does not exist; for Secrets that
+	// already exist (e.g. created by Static), only keys that are still
+	// missing are added — existing values are never overwritten.
+	// +optional
+	Generated []BootstrapSecret `json:"generated,omitempty"`
+}
+
+// BootstrapSecret describes one kubo-system Secret kubo creates at bootstrap.
+type BootstrapSecret struct {
+	// Name of the kubo-system Secret, e.g. product-c-trino-s3-credentials.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Type of the Secret. Defaults to Opaque; use kubernetes.io/tls for
+	// generated key pairs.
+	// +kubebuilder:validation:Enum=Opaque;kubernetes.io/tls
+	// +kubebuilder:default=Opaque
+	// +optional
+	Type corev1.SecretType `json:"type,omitempty"`
+
+	// Literal key/values written verbatim (non-secret identifiers, domains,
+	// audiences).
+	// +optional
+	Literal map[string]string `json:"literal,omitempty"`
+
+	// Generate creates cryptographically random values for these keys
+	// (per-tenant credentials).
+	// +optional
+	Generate map[string]GeneratedKey `json:"generate,omitempty"`
+
+	// CopyFrom copies keys from an existing kubo-system Secret (the
+	// canonical source of shared credentials such as Auth0 clients).
+	// +optional
+	CopyFrom *BootstrapCopyFrom `json:"copyFrom,omitempty"`
+}
+
+// GeneratedKey describes a random value to generate for a Secret key.
+type GeneratedKey struct {
+	// Kind of value to generate:
+	//   hex    — Length random hex characters (default 32).
+	//   base64 — Length random bytes, base64-encoded (default 32).
+	//   uuid   — random UUID v4.
+	//   bcrypt — random password, bcrypt-hashed; writes only the hash (for
+	//            Trino password.db style files).
+	//   tls    — self-signed RSA key pair; produces tls.key and tls.crt keys
+	//            (Length ignored). Only valid with Secret type
+	//            kubernetes.io/tls.
+	// +kubebuilder:validation:Enum=hex;base64;uuid;bcrypt;tls
+	Kind string `json:"kind"`
+
+	// Length of the generated value (kind-dependent, see Kind).
+	// +kubebuilder:validation:Minimum=8
+	// +optional
+	Length int `json:"length,omitempty"`
+}
+
+// BootstrapCopyFrom copies keys from an existing kubo-system Secret.
+type BootstrapCopyFrom struct {
+	// Name of the source kubo-system Secret.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Keys maps this Secret's key → source Secret key.
+	// +kubebuilder:validation:MinProperties=1
+	Keys map[string]string `json:"keys"`
+}
+
+// BootstrapCopyFrom copies keys from an existing kubo-system Secret.
+type BootstrapCopyFrom struct {
+	// Name of the source kubo-system Secret.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Keys maps this Secret's key → source Secret key.
+	// +kubebuilder:validation:MinProperties=1
+	Keys map[string]string `json:"keys"`
 }
 
 // VaultSeedEntry copies a set of source Secret keys into one Vault path.
