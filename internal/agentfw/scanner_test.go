@@ -22,7 +22,7 @@ func TestDLPRedactsAWSKey(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/api", strings.NewReader(body))
 	req.ContentLength = int64(len(body))
 	s := newScanner("redact")
-	if err := s.InspectRequest(req); err != nil {
+	if _, err := s.InspectRequest(req); err != nil {
 		t.Fatalf("unexpected block: %v", err)
 	}
 	got, _ := io.ReadAll(req.Body)
@@ -39,7 +39,7 @@ func TestDLPBlocksOnBlockAction(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/api", strings.NewReader(body))
 	req.ContentLength = int64(len(body))
 	s := newScanner("block")
-	err := s.InspectRequest(req)
+	_, err := s.InspectRequest(req)
 	if err == nil {
 		t.Error("expected block error for GitHub token, got nil")
 	}
@@ -49,7 +49,7 @@ func TestSSRFBlocksPrivateIP(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://192.168.1.1/secrets", nil)
 	req.Host = "192.168.1.1"
 	s := newScanner("redact")
-	err := s.InspectRequest(req)
+	_, err := s.InspectRequest(req)
 	if err == nil {
 		t.Error("expected SSRF block for private IP")
 	}
@@ -77,7 +77,7 @@ func TestKillSwitchBlocksAll(t *testing.T) {
 	ks.Trip()
 	s.KillSwitch = ks
 	req := httptest.NewRequest(http.MethodGet, "http://api.example.com/query", nil)
-	if err := s.InspectRequest(req); err == nil {
+	if _, err := s.InspectRequest(req); err == nil {
 		t.Error("expected kill switch block, got nil")
 	}
 }
@@ -263,7 +263,7 @@ func TestCleanRequestPassesThrough(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "http://api.example.com/query", strings.NewReader(body))
 	req.ContentLength = int64(len(body))
 	s := newScanner("redact")
-	if err := s.InspectRequest(req); err != nil {
+	if _, err := s.InspectRequest(req); err != nil {
 		t.Fatalf("clean request blocked: %v", err)
 	}
 	got, _ := io.ReadAll(req.Body)

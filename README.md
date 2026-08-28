@@ -39,6 +39,21 @@ make bundle
 kubectl apply -f config/samples/stack_product_bundle.yaml
 ```
 
+## agentfw
+
+The repo also ships **agentfw** — an egress firewall proxy for AI agents
+(DLP, prompt-injection scanning, SSRF floor, rate limits, kill switch,
+signed audit receipts). It includes **view**, a built-in agentsview-style
+session archive: every proxied LLM call is stored in SQLite and browsable,
+searchable, and cost-accounted from a web UI on the admin port. See
+[docs/agentfw-view.md](docs/agentfw-view.md).
+
+```sh
+go build -o agentfw ./cmd/agentfw
+./agentfw -addr :8080 -admin :8081 -policy policy.yaml   # UI on :8081
+./agentfw view -db view.db                               # browse an archive
+```
+
 ## License
 
 Apache 2.0
