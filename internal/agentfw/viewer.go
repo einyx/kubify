@@ -1,31 +1,48 @@
 package agentfw
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
 // Viewer serves the agentsview-style archive UI and API on the admin port.
 type Viewer struct {
-	archive atomic.Pointer[Archive] // nil until wired; handlers degrade to 503
-	mux     *http.ServeMux
+	archive  atomic.Pointer[Archive] // nil until wired; handlers degrade to 503
+	basePath string                  // optional mount prefix, e.g. "/agentfw"
+	mux      *http.ServeMux
 }
 
-// NewViewer builds the viewer route table.
-func NewViewer() *Viewer {
-	v := &Viewer{}
+// NewViewer builds the viewer route table at the root.
+func NewViewer() *Viewer { return newViewerWithBase("") }
+
+// WithBasePath returns a viewer whose routes mount under prefix
+// (e.g. "/agentfw"), for embedding behind a reverse proxy that keeps
+// the prefix. The served UI picks the prefix up automatically.
+func WithBasePath(prefix string) *Viewer {
+	if prefix != "" && prefix[0] != '/' {
+		prefix = "/" + prefix
+	}
+	return newViewerWithBase(strings.TrimSuffix(prefix, "/"))
+}
+
+func newViewerWithBase(base string) *Viewer {
+	v := &Viewer{basePath: base}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/stats", v.handleStats)
-	mux.HandleFunc("GET /api/v1/sessions", v.handleSessions)
-	mux.HandleFunc("GET /api/v1/sessions/{id}", v.handleSessionDetail)
-	mux.HandleFunc("GET /api/v1/requests", v.handleRequests)
-	mux.HandleFunc("GET /api/v1/requests/{id}", v.handleRequest)
-	mux.HandleFunc("GET /api/v1/usage", v.handleUsage)
-	mux.HandleFunc("GET /api/v1/healthz", v.handleHealth)
-	mux.HandleFunc("GET /", v.handleUI)
+	p := func(suffix string) string { return "GET " + base + suffix }
+	mux.HandleFunc(p("/api/v1/stats"), v.handleStats)
+	mux.HandleFunc(p("/api/v1/sessions"), v.handleSessions)
+	mux.HandleFunc(p("/api/v1/sessions/{id}"), v.handleSessionDetail)
+	mux.HandleFunc(p("/api/v1/requests"), v.handleRequests)
+	mux.HandleFunc(p("/api/v1/requests/{id}"), v.handleRequest)
+	mux.HandleFunc(p("/api/v1/usage"), v.handleUsage)
+	mux.HandleFunc(p("/api/v1/healthz"), v.handleHealth)
+	mux.HandleFunc(p("/"), v.handleUI)
+	mux.HandleFunc("GET /{$}", v.handleUI)
 	v.mux = mux
 	return v
 }
@@ -184,12 +201,20 @@ func (v *Viewer) handleUsage(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleUI serves the embedded single-page app.
+// handleUI serves the embedded single-page app, injecting the configured
+// base path so the SPA prefixes its API calls when mounted under a proxy.
 func (v *Viewer) handleUI(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" && r.URL.Path != "/view" && r.URL.Path != "/view/" {
+	if r.URL.Path != "/" && r.URL.Path != v.basePath && r.URL.Path != v.basePath+"/" {
 		http.NotFound(w, r)
 		return
 	}
+	html := viewerIndexHTML
+	if v.basePath != "" {
+		html = bytes.Replace(viewerIndexHTML,
+			[]byte("<script>"),
+			[]byte("<script>window.__AFW_BASE__="+strconv.Quote(v.basePath)+";</script><script>"),
+			1)
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(viewerIndexHTML)
+	_, _ = w.Write(html)
 }

@@ -80,6 +80,7 @@
 
 <script>
 const $ = sel => document.querySelector(sel);
+const API_BASE = window.__AFW_BASE__ || "";
 const app = $('#app');
 const state = { tab: 'dashboard', q: '', action: '', session: '', page: 0, timer: null };
 const fmtInt = n => (n ?? 0).toLocaleString('en-US');
@@ -90,7 +91,7 @@ const esc = s => (s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>'
 const shortURL = u => { try { const x = new URL(u); return x.host + x.pathname; } catch { return u; } };
 
 async function api(path) {
-  const r = await fetch(path);
+  const r = await fetch(API_BASE + path);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }

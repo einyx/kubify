@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"io"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -247,6 +249,39 @@ func TestViewerWithoutArchiveIs503(t *testing.T) {
 	defer r.Body.Close()
 	if r.StatusCode != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503 without archive, got %d", r.StatusCode)
+	}
+}
+
+func TestViewerBasePath(t *testing.T) {
+	a := newTestArchive(t)
+	v := WithBasePath("/agentfw")
+	v.SetArchive(a)
+	srv := httptest.NewServer(v.Handler())
+	defer srv.Close()
+
+	// Prefixed routes work.
+	r, err := http.Get(srv.URL + "/agentfw/api/v1/stats")
+	if err != nil || r.StatusCode != 200 {
+		t.Fatalf("prefixed stats: %v %d", err, r.StatusCode)
+	}
+	r.Body.Close()
+
+	// Bare routes do not exist under a base path.
+	r, err = http.Get(srv.URL + "/api/v1/stats")
+	if err != nil || r.StatusCode != 404 {
+		t.Fatalf("bare stats under base path = %d, want 404", r.StatusCode)
+	}
+	r.Body.Close()
+
+	// UI is served at the prefix and injects the base for the SPA.
+	r, err = http.Get(srv.URL + "/agentfw/")
+	if err != nil || r.StatusCode != 200 {
+		t.Fatalf("prefixed UI: %v %d", err, r.StatusCode)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if !strings.Contains(string(body), `window.__AFW_BASE__="/agentfw"`) {
+		t.Fatal("UI does not inject the base path")
 	}
 }
 
