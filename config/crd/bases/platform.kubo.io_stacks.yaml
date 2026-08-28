@@ -594,6 +594,52 @@ spec:
                   StackRef names the cluster-scoped StackDefinition to deploy.
                   Mutually exclusive with Inline.
                 type: string
+              tunnel:
+                description: |-
+                  Tunnel configures a per-tenant cloudflared tunnel connector for
+                  clusters without public ingress or tenants with their own domain.
+                  With token-mode connectors, the public hostname routing is configured
+                  in Cloudflare (public hostname → http://frontend.<ns>:80); kubo
+                  guarantees the connector Deployment is running and current.
+                properties:
+                  hostname:
+                    description: |-
+                      Hostname routed to this Stack through the tunnel. Informational —
+                      recorded as an annotation on the connector Deployment for operators.
+                    minLength: 1
+                    type: string
+                  tokenSecret:
+                    description: |-
+                      TokenSecret references a Secret in the Stack namespace holding the
+                      cloudflared tunnel token. Provision it via VaultSeed (static) or
+                      out-of-band; rotate by updating the Secret and restarting. Key
+                      defaults to "token".
+                    properties:
+                      key:
+                        description: The key of the secret to select from.  Must be
+                          a valid secret key.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the Secret or its key must be
+                          defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                required:
+                - hostname
+                - tokenSecret
+                type: object
               values:
                 description: |-
                   Values overrides applied on top of the StackDefinition defaults for
