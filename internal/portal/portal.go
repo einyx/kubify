@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -39,12 +40,13 @@ const DefaultTemplatesDir = defaultTemplatesDir
 type Portal struct {
 	client   client.Client
 	registry *Registry
+	metrics  *Metrics
 }
 
 // New builds a Portal using the provided client and the default template
 // sources (embedded built-ins + default local dir; no ConfigMap source).
 func New(c client.Client) *Portal {
-	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, nil)}
+	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, nil), metrics: NewMetrics()}
 }
 
 // NewInCluster builds a Portal from the ambient kubeconfig / service account.
@@ -58,7 +60,7 @@ func NewInCluster() (*Portal, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, c)}, nil
+	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, c), metrics: NewMetrics()}, nil
 }
 
 // StackSummary is one row in the stacks table.
@@ -457,6 +459,64 @@ func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchR
 	return nil
 }
 
+// atoiDefault parses s as an int, falling back to def when empty/invalid.
+func atoiDefault(s string, def int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// contextWithTimeout wraps context.WithTimeout for the handlers file.
+func contextWithTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, d)
+}
+
+// DeleteStackBackup removes a backup record. The copy Job is owned by the
+// CR and garbage-collected with it.
+func (p *Portal) DeleteStackBackup(ctx context.Context, ns, name string) error {
+	var bk v1alpha1.StackBackup
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &bk); err != nil {
+		return err
+	}
+	if err := p.client.Delete(ctx, &bk); err != nil {
+		return fmt.Errorf("delete backup: %w", err)
+	}
+	return nil
+}
+
+// RetryStackBackup creates a fresh copy of a backup's spec; the controller
+// skips Succeeded/Failed records, so a retry is a new object.
+func (p *Portal) RetryStackBackup(ctx context.Context, ns, name string) (*BackupView, error) {
+	var bk v1alpha1.StackBackup
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &bk); err != nil {
+		return nil, err
+	}
+	retry := &v1alpha1.StackBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:    bk.Namespace,
+			GenerateName: "sbk-",
+		},
+		Spec: *bk.Spec.DeepCopy(),
+	}
+	if err := p.client.Create(ctx, retry); err != nil {
+		return nil, fmt.Errorf("create backup retry: %w", err)
+	}
+	return &BackupView{
+		Namespace: retry.Namespace,
+		Name:      retry.Name,
+		Source:    retry.Spec.SourceNamespace,
+		Target:    retry.Spec.TargetNamespace,
+		Include:   retry.Spec.Include,
+		Phase:     "Pending",
+		Age:       "0s",
+	}, nil
+}
+
 // BackupRequest is the POST /api/backups payload.
 type BackupRequest struct {
 	SourceNamespace string   `json:"sourceNamespace"`
@@ -555,8 +615,8 @@ type EventView struct {
 }
 
 // ListStackEvents returns recent events in the stack's namespace, newest
-// first, capped at 50.
-func (p *Portal) ListStackEvents(ctx context.Context, ns string) ([]EventView, error) {
+// first. limit is capped at 50; <=0 uses the cap.
+func (p *Portal) ListStackEvents(ctx context.Context, ns string, limit int) ([]EventView, error) {
 	var list corev1.EventList
 	if err := p.client.List(ctx, &list, client.InNamespace(ns)); err != nil {
 		return nil, fmt.Errorf("portal: list events: %w", err)
@@ -568,8 +628,11 @@ func (p *Portal) ListStackEvents(ctx context.Context, ns string) ([]EventView, e
 		}
 		return ti.After(tj)
 	})
-	if len(list.Items) > 50 {
-		list.Items = list.Items[:50]
+	if limit <= 0 || limit > 50 {
+		limit = 50
+	}
+	if len(list.Items) > limit {
+		list.Items = list.Items[:limit]
 	}
 	out := make([]EventView, 0, len(list.Items))
 	for _, e := range list.Items {
