@@ -10,10 +10,10 @@ import (
 func TestTunnelDeploymentSpec(t *testing.T) {
 	tun := &platformv1alpha1.StackTunnel{
 		Hostname:    "acme.customer.com",
-		TokenSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "tunnel-token"}, Key: "token"},
+		TokenSecret: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "tunnel-token"}, Key: "token"},
 	}
 	labels := map[string]string{"app.kubernetes.io/managed-by": "kubo"}
-	spec := tunnelDeploymentSpec(tun, "product-x-tunnel", labels)
+	spec := tunnelDeploymentSpec(tun.TokenSecret, "product-x-tunnel", labels)
 
 	c := spec.Template.Spec.Containers[0]
 	if c.Image != tunnelImage {
@@ -39,14 +39,14 @@ func TestTunnelTokenKeyDefaults(t *testing.T) {
 	// render an empty secretKeyRef.
 	tun := &platformv1alpha1.StackTunnel{
 		Hostname:    "x.example",
-		TokenSecret: corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "tok"}},
+		TokenSecret: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: "tok"}},
 	}
 	if tun.TokenSecret.Key != "" {
 		t.Fatal("precondition: key empty")
 	}
 	// mirrored default applied in ensureTunnel; simulate:
 	tun.TokenSecret.Key = "token"
-	spec := tunnelDeploymentSpec(tun, "n", map[string]string{})
+	spec := tunnelDeploymentSpec(tun.TokenSecret, "n", map[string]string{})
 	if spec.Template.Spec.Containers[0].Env[0].ValueFrom.SecretKeyRef.Key != "token" {
 		t.Error("key default not applied")
 	}

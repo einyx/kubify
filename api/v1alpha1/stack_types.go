@@ -118,11 +118,12 @@ type StackTunnel struct {
 	// +kubebuilder:validation:MinLength=1
 	Hostname string `json:"hostname"`
 
-	// TokenSecret references a Secret in the Stack namespace holding the
-	// cloudflared tunnel token. Provision it via VaultSeed (static) or
-	// out-of-band; rotate by updating the Secret and restarting. Key
-	// defaults to "token".
-	TokenSecret corev1.SecretKeySelector `json:"tokenSecret"`
+	// TokenSecret overrides where the tunnel token comes from. By
+	// convention the token lives in the "<stack>-tunnel-token" Secret, key
+	// "token", provisioned via VaultSeed (static, copyFrom canonical) —
+	// like every other tenant credential. Only set this to deviate.
+	// +optional
+	TokenSecret *corev1.SecretKeySelector `json:"tokenSecret,omitempty"`
 }
 
 // StackVirtualService describes a managed Istio VirtualService.
