@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -209,7 +210,70 @@ func (p *Portal) Mux() http.Handler {
 		}
 		respond(w, r, map[string]bool{"deleted": true}, nil)
 	})
-	return rateLimitMutations(loopbackHostOnly(mux))
+	return rateLimitMutations(sameOriginMutations(loopbackHostOnly(mux)))
+}
+
+// sameOriginMutations blocks cross-site browser-initiated mutations (CSRF).
+// The loopback Host check defeats DNS rebinding but not a malicious page
+// form-posting to http://localhost:9090 from the user's browser. State
+// -changing requests are therefore accepted only when:
+//
+//   - an Origin header is present and its host matches the request Host
+//     (same-origin), or
+//   - Sec-Fetch-Site says same-origin / none, or
+//   - neither header is present (curl, scripts — non-browser clients).
+//
+// Read-only GETs are exempt: the portal sets no cookies or ambient
+// credentials, so cross-site GETs leak nothing and CORS blocks the reads.
+func sameOriginMutations(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPatch, http.MethodDelete:
+		default:
+			next.ServeHTTP(w, r)
+			return
+		}
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, err := url.Parse(origin)
+			if err != nil {
+				rejectCrossSite(w, "malformed Origin")
+				return
+			}
+			ohost := u.Hostname()
+			if !sameHost(ohost, host) {
+				rejectCrossSite(w, "cross-site Origin")
+				return
+			}
+		} else if site := r.Header.Get("Sec-Fetch-Site"); site != "" &&
+			site != "same-origin" && site != "none" {
+			rejectCrossSite(w, "cross-site request")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// sameHost compares hosts, tolerating an explicit loopback alias
+// (127.0.0.1 vs ::1 vs localhost all belong to this portal).
+func sameHost(a, b string) bool {
+	if a == b {
+		return true
+	}
+	ipA, ipB := net.ParseIP(a), net.ParseIP(b)
+	if ipA != nil && ipB != nil && ipA.IsLoopback() && ipB.IsLoopback() {
+		return true
+	}
+	loopNames := map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
+	return loopNames[a] && loopNames[b]
+}
+
+func rejectCrossSite(w http.ResponseWriter, why string) {
+	w.WriteHeader(http.StatusForbidden)
+	w.Write([]byte(`{"error":"portal: ` + why + ` — mutating requests must be same-origin"}`))
 }
 
 // rateLimitMutations caps mutating requests (POST/PATCH/DELETE) per client
