@@ -32,3 +32,6 @@ internal/portal/template.yaml
 graphify-out/
 bundle
 Makefile
+
+# agent skills installed locally (third-party, never committed)
+.agents/
