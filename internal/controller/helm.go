@@ -104,6 +104,16 @@ func (r *restConfigGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 
 func slogInfo(format string, v ...interface{}) { slog.Info(fmt.Sprintf(format, v...)) }
 
+// normalizeManifest strips trailing whitespace per line so renders that
+// differ only in formatting compare equal.
+func normalizeManifest(m string) string {
+	lines := strings.Split(strings.TrimSpace(m), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight(l, " \t\r")
+	}
+	return strings.Join(lines, "\n")
+}
+
 // EnsureChart pulls the chart and returns the loaded chart. When pullSecret
 // is set (a dockerconfigjson Secret in namespace ns), its credentials are
 // used for private OCI chart registries.
@@ -282,6 +292,30 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 			return nil, fmt.Errorf("helm install %s: %w", compName, err)
 		}
 		return rel, nil
+	}
+
+	// No-op detection: render the upgrade (dry-run) and skip the real one
+	// when the output matches the deployed release. Without this, every
+	// reconcile re-upgraded every release (~1/min/component), causing
+	// revision storms, helm "another operation in progress" lock contention
+	// between concurrent upgrades, and workload restarts on non-deterministic
+	// renders (e.g. bitnami's default NetworkPolicy toggling).
+	if existing.Info != nil && existing.Info.Status == release.StatusDeployed {
+		dr := action.NewUpgrade(cfg)
+		dr.DryRun = true
+		dr.DryRunOption = "client"
+		dr.Namespace = namespace
+		dr.SkipSchemaValidation = true
+		dr.ReuseValues = false
+		dr.Version = chartVersion(ch)
+		rendered, derr := dr.Run(compName, ch, values)
+		if derr != nil {
+			// Dry-run render failed (some charts need cluster access);
+			// fall through to the real upgrade rather than skipping it.
+			slogInfo("dry-run render failed for %s, proceeding with upgrade: %v", compName, derr)
+		} else if normalizeManifest(rendered.Manifest) == normalizeManifest(existing.Manifest) {
+			return existing, nil // nothing changed — skip the upgrade
+		}
 	}
 
 	up := action.NewUpgrade(cfg)
