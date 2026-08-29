@@ -101,38 +101,6 @@ type StackSpec struct {
 	// documents in the Stack file are not needed.
 	// +optional
 	VirtualService *StackVirtualService `json:"virtualService,omitempty"`
-
-	// Tunnel configures a per-tenant cloudflared tunnel connector for
-	// clusters without public ingress or tenants with their own domain.
-	// With token-mode connectors, the public hostname routing is configured
-	// in Cloudflare (public hostname → http://frontend.<ns>:80); kubo
-	// guarantees the connector Deployment is running and current.
-	// +optional
-	Tunnel *StackTunnel `json:"tunnel,omitempty"`
-}
-
-// StackTunnel describes one cloudflared tunnel connector for the Stack.
-// The connector runs in credentials-file mode with a locally rendered
-// config: `hostname → http://frontend:80` (plus a 404 catch-all), so
-// routing needs no manual Cloudflare dashboard steps. The tunnel itself is
-// created out-of-band (cloudflared tunnel create) and its UUID +
-// credentials are seeded like any other tenant credential.
-type StackTunnel struct {
-	// Hostname routed to this Stack through the tunnel.
-	// +kubebuilder:validation:MinLength=1
-	Hostname string `json:"hostname"`
-
-	// TunnelID is the Cloudflare tunnel UUID (cloudflared tunnel create).
-	// +kubebuilder:validation:MinLength=1
-	TunnelID string `json:"tunnelID"`
-
-	// CredentialsSecret overrides where the tunnel credentials JSON comes
-	// from. By convention it lives in the "<stack>-tunnel-credentials"
-	// Secret, key "credentials.json", provisioned via VaultSeed (static,
-	// copyFrom canonical) — like every other tenant credential. Only set
-	// this to deviate.
-	// +optional
-	CredentialsSecret *corev1.SecretKeySelector `json:"credentialsSecret,omitempty"`
 }
 
 // StackVirtualService describes a managed Istio VirtualService.
@@ -146,6 +114,7 @@ type StackVirtualService struct {
 	// Host is the virtual host (DNS name).
 	// +kubebuilder:validation:MinLength=1
 	Host string `json:"host"`
+
 	// AdditionalHosts are extra virtual hosts served by the same routes
 	// (e.g. the canonical tenant URL alongside a legacy one).
 	// +optional
