@@ -208,6 +208,52 @@ func (p *Portal) Mux() http.Handler {
 		}
 		respond(w, r, map[string]bool{"deleted": true}, nil)
 	})
+
+	// --- Vault (per-tenant bank-vaults KV) ---
+	// Values are redacted unless the request explicitly passes reveal=true.
+	// The Vault root token never appears in any response.
+	handle("GET /api/namespaces/{namespace}/vault/health", func(w http.ResponseWriter, r *http.Request) {
+		h, err := p.VaultHealth(r.Context(), r.PathValue("namespace"))
+		respond(w, r, h, err)
+	})
+	handle("GET /api/namespaces/{namespace}/vault/tree", func(w http.ResponseWriter, r *http.Request) {
+		entries, folders, err := p.VaultList(r.Context(), r.PathValue("namespace"), strings.Trim(r.URL.Query().Get("path"), "/"))
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]interface{}{"entries": entries, "folders": folders}, nil)
+	})
+	handle("GET /api/namespaces/{namespace}/vault/entry", func(w http.ResponseWriter, r *http.Request) {
+		reveal := r.URL.Query().Get("reveal") == "true"
+		e, err := p.VaultRead(r.Context(), r.PathValue("namespace"), strings.Trim(r.URL.Query().Get("path"), "/"), reveal)
+		respond(w, r, e, err)
+	})
+	handle("PUT /api/namespaces/{namespace}/vault/entry", func(w http.ResponseWriter, r *http.Request) {
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		var req VaultWriteRequest
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		if err := p.VaultWrite(r.Context(), r.PathValue("namespace"), req); err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"written": true}, nil)
+	})
+	handle("DELETE /api/namespaces/{namespace}/vault/entry", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if permanent := q.Get("permanent") == "true"; permanent && q.Get("confirm") != r.PathValue("namespace") {
+			respond(w, r, nil, fmt.Errorf("permanent delete requires confirm=<namespace>"))
+			return
+		}
+		if err := p.VaultDelete(r.Context(), r.PathValue("namespace"), strings.Trim(q.Get("path"), "/"), q.Get("permanent") == "true"); err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"deleted": true}, nil)
+	})
 	handle("DELETE /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		err := p.DeleteStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"),
