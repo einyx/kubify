@@ -112,18 +112,27 @@ type StackSpec struct {
 }
 
 // StackTunnel describes one cloudflared tunnel connector for the Stack.
+// The connector runs in credentials-file mode with a locally rendered
+// config: `hostname → http://frontend:80` (plus a 404 catch-all), so
+// routing needs no manual Cloudflare dashboard steps. The tunnel itself is
+// created out-of-band (cloudflared tunnel create) and its UUID +
+// credentials are seeded like any other tenant credential.
 type StackTunnel struct {
-	// Hostname routed to this Stack through the tunnel. Informational —
-	// recorded as an annotation on the connector Deployment for operators.
+	// Hostname routed to this Stack through the tunnel.
 	// +kubebuilder:validation:MinLength=1
 	Hostname string `json:"hostname"`
 
-	// TokenSecret overrides where the tunnel token comes from. By
-	// convention the token lives in the "<stack>-tunnel-token" Secret, key
-	// "token", provisioned via VaultSeed (static, copyFrom canonical) —
-	// like every other tenant credential. Only set this to deviate.
+	// TunnelID is the Cloudflare tunnel UUID (cloudflared tunnel create).
+	// +kubebuilder:validation:MinLength=1
+	TunnelID string `json:"tunnelID"`
+
+	// CredentialsSecret overrides where the tunnel credentials JSON comes
+	// from. By convention it lives in the "<stack>-tunnel-credentials"
+	// Secret, key "credentials.json", provisioned via VaultSeed (static,
+	// copyFrom canonical) — like every other tenant credential. Only set
+	// this to deviate.
 	// +optional
-	TokenSecret *corev1.SecretKeySelector `json:"tokenSecret,omitempty"`
+	CredentialsSecret *corev1.SecretKeySelector `json:"credentialsSecret,omitempty"`
 }
 
 // StackVirtualService describes a managed Istio VirtualService.
