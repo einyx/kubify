@@ -41,8 +41,20 @@ func (r *StackReconciler) ensureVirtualService(ctx context.Context, stack *platf
 		routes[i] = rule
 	}
 
+	// Hosts: primary host first, then any additional hosts (deduped, order
+	// stable). Extra hosts let a stack serve a canonical URL alongside a
+	// legacy one during hostname cutovers.
+	hosts := []interface{}{vs.Host}
+	seenHosts := map[string]bool{vs.Host: true}
+	for _, h := range vs.AdditionalHosts {
+		if h != "" && !seenHosts[h] {
+			hosts = append(hosts, h)
+			seenHosts[h] = true
+		}
+	}
+
 	spec := map[string]interface{}{
-		"hosts":    []interface{}{vs.Host},
+		"hosts":    hosts,
 		"gateways": []interface{}{vs.Gateway},
 		"http":     routes,
 	}

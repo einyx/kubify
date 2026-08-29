@@ -659,6 +659,13 @@ spec:
                   this Stack. All HTTP routes are reconciled on every cycle, so extra `---`
                   documents in the Stack file are not needed.
                 properties:
+                  additionalHosts:
+                    description: |-
+                      AdditionalHosts are extra virtual hosts served by the same routes
+                      (e.g. the canonical tenant URL alongside a legacy one).
+                    items:
+                      type: string
+                    type: array
                   gateway:
                     description: Gateway reference in "namespace/name" or just "name"
                       form.

@@ -146,6 +146,10 @@ type StackVirtualService struct {
 	// Host is the virtual host (DNS name).
 	// +kubebuilder:validation:MinLength=1
 	Host string `json:"host"`
+	// AdditionalHosts are extra virtual hosts served by the same routes
+	// (e.g. the canonical tenant URL alongside a legacy one).
+	// +optional
+	AdditionalHosts []string `json:"additionalHosts,omitempty"`
 	// HTTP is the ordered list of route rules, passed verbatim into the VS spec.
 	// Use the same structure as Istio's HTTPRoute.
 	// +kubebuilder:validation:MinItems=1
