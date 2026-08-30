@@ -39,6 +39,9 @@
   .card { padding:1.5px; border-radius:18px; background:linear-gradient(135deg,rgba(15,18,25,0.08),rgba(15,18,25,0.02));
     margin:28px 0; }
   .card-inner { border-radius:calc(18px - 1.5px); background:#16181d; padding:26px 28px; overflow-x:auto; }
+  .mermaid-wrap { background:var(--surface); }
+  .mermaid-wrap .mermaid { display:flex; justify-content:center; }
+  .mermaid-wrap svg { max-width:100%; height:auto; }
   pre { font-family:'SF Mono','Fira Code',monospace; font-size:12.5px; line-height:1.75; color:#c9cede; white-space:pre; }
   footer { border-top:1px solid var(--border); margin-top:48px; padding:32px 0;
     display:flex; justify-content:space-between; color:var(--muted); font-size:13.5px; }
@@ -115,5 +118,27 @@ flowchart TD
     <div><a href="index.html">Home</a> · <a href="https://github.com/einyx/kubo">GitHub</a></div>
   </footer>
 </main>
+
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+    themeVariables: {
+      primaryColor: '#f0efff',
+      primaryTextColor: '#16181d',
+      primaryBorderColor: '#5b54ec',
+      lineColor: '#565d6b',
+      secondaryColor: '#e9f6f1',
+      tertiaryColor: '#f6f6f4',
+      clusterBkg: '#ffffff',
+      clusterBorder: 'rgba(15,18,25,0.14)',
+      edgeLabelBackground: '#ffffff',
+      fontSize: '14px',
+    },
+    flowchart: { curve: 'basis', padding: 18 },
+  });
+</script>
 </body>
 </html>

@@ -26,14 +26,12 @@ flowchart TD
 
     subgraph OCI["OCI Registries (ghcr.io)"]
         FBUNDLE["product-bundle\n(backend, frontend,\nscheduler, processor…)"]
-        DAIBUNDLE["dai-bundle\n(dai-backend,\ndai-frontend)"]
     end
 
     WEB -->|"kubectl apply / ArgoCD\nStack manifest"| STACK
     STACK -->|"watched by"| OP
     OP -->|"reads CRD schema"| CRDS
     OP -->|"pulls OCI artifacts"| FBUNDLE
-    OP -->|"pulls OCI artifacts"| DAIBUNDLE
     OP -->|"Helm install/upgrade"| HELM
     OP -->|"copies secrets (secretsRef)"| SECRETS
     OP -->|"reconciles"| VS
