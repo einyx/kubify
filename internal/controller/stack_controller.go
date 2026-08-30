@@ -536,6 +536,11 @@ func deployWaves(order []string, byName map[string]platformv1alpha1.StackCompone
 				m = level[dep]
 			}
 		}
+		for _, dep := range byName[name].DependsOnReady {
+			if level[dep] > m {
+				m = level[dep]
+			}
+		}
 		return m
 	}
 	var waves [][]string
@@ -566,6 +571,17 @@ func (r *StackReconciler) deployComponent(
 	st := platformv1alpha1.ComponentStatus{Name: comp.Name, Phase: platformv1alpha1.ComponentPhaseDeploying}
 	if isClusterComponent(comp) {
 		st.Scope = platformv1alpha1.ComponentScopeCluster
+	}
+
+	// Gate on dependsOnReady: the dependency workloads must be Running and
+	// Ready before this component deploys (e.g. migrations before a
+	// reachable postgres). Wave ordering already sequences the deploy.
+	for _, dep := range comp.DependsOnReady {
+		if ok, why := r.componentReady(ctx, stack.Namespace, dep); !ok {
+			st.Phase = platformv1alpha1.ComponentPhasePending
+			st.Message = fmt.Sprintf("waiting for dependency %q to be Ready: %s", dep, why)
+			return st, nil
+		}
 	}
 
 	pullSecret := ""
@@ -605,7 +621,32 @@ func (r *StackReconciler) deployComponent(
 	if rel.Info != nil {
 		st.Revision = rel.Version
 	}
+	st.Images = extractImages(rel.Manifest)
 	return st, nil
+}
+
+// componentReady reports whether the workloads of a component release are
+// Running and Ready (matched by the standard Helm instance label).
+func (r *StackReconciler) componentReady(ctx context.Context, ns, name string) (bool, string) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(ns),
+		client.MatchingLabels{"app.kubernetes.io/instance": name}); err != nil {
+		return false, err.Error()
+	}
+	if len(pods.Items) == 0 {
+		return false, "no pods found yet"
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodRunning {
+			return false, fmt.Sprintf("pod %s is %s", p.Name, p.Status.Phase)
+		}
+		for _, c := range p.Status.ContainerStatuses {
+			if !c.Ready {
+				return false, fmt.Sprintf("pod %s container %s not Ready", p.Name, c.Name)
+			}
+		}
+	}
+	return true, ""
 }
 
 func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stack, reason string, err error) error {

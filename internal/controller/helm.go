@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -256,6 +257,18 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	// values. Merged defaults must not leak them back in.
 	delete(values, "_internal_defaults_do_not_set")
 
+	// Skip the upgrade when nothing would change: rendering the chart with
+	// the target values must produce the exact manifest of the deployed
+	// release (and the chart version must match). Prevents one Helm revision
+	// per reconcile on unchanged stacks. If the dry-run render fails, fall
+	// through to a real upgrade rather than guessing.
+	if existing.Chart != nil && existing.Chart.Metadata != nil &&
+		existing.Chart.Metadata.Version == chartVersion(ch) {
+		if rendered, rerr := renderManifest(cfg, compName, namespace, ch, values); rerr == nil && rendered == existing.Manifest {
+			return existing, nil
+		}
+	}
+
 	// A failed or interrupted (pending-*) release blocks upgrades; recover
 	// by rolling back to the last deployed revision, or uninstalling when
 	// there is nothing to roll back to, so the next pass is clean.
@@ -426,4 +439,49 @@ func chartVersion(ch *chart.Chart) string {
 		return ch.Metadata.Version
 	}
 	return ""
+}
+
+// imageLineRe matches `image: <value>` in rendered Helm manifests. The
+// value must be a plausible image reference filling the whole line.
+var imageLineRe = regexp.MustCompile(`(?m)^\s*-?\s*image:\s*"?([\w][\w./:@-]+)"?\s*$`)
+
+// extractImages pulls the container images out of a rendered Helm manifest
+// and returns them deduped, split into repository/tag/digest.
+func extractImages(manifest string) []platformv1alpha1.ComponentImage {
+	seen := map[string]bool{}
+	var out []platformv1alpha1.ComponentImage
+	for _, m := range imageLineRe.FindAllStringSubmatch(manifest, -1) {
+		ref := m[1]
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		img := platformv1alpha1.ComponentImage{}
+		if i := strings.Index(ref, "@"); i >= 0 {
+			img.Repository, img.Digest = ref[:i], ref[i+1:]
+		} else if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
+			img.Repository, img.Tag = ref[:i], ref[i+1:]
+		} else {
+			img.Repository = ref
+		}
+		out = append(out, img)
+	}
+	return out
+}
+
+// renderManifest dry-run renders the chart with the given values client-side
+// and returns the resulting manifest, without touching the cluster.
+func renderManifest(cfg *action.Configuration, compName, namespace string, ch *chart.Chart, values map[string]interface{}) (string, error) {
+	up := action.NewUpgrade(cfg)
+	up.Namespace = namespace
+	up.DryRun = true
+	up.DryRunOption = "client"
+	up.Wait = false
+	up.SkipSchemaValidation = true
+	up.Version = chartVersion(ch)
+	rel, err := up.Run(compName, ch, values)
+	if err != nil {
+		return "", err
+	}
+	return rel.Manifest, nil
 }
