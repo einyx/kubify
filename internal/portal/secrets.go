@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/einyx/kubo/internal/vaultkv"
+	"k8s.io/client-go/rest"
 )
 
 // VaultEntryView is a Vault KV entry as returned by the API. Data values are
@@ -45,6 +46,11 @@ func redact(data map[string]string) map[string]string {
 
 // vaultClientFor returns an authenticated client for the namespace's Vault.
 // The root token stays in server memory; responses never contain it.
+//
+// When the portal runs outside the cluster (local kubeconfig), Vault API
+// calls are routed through the Kubernetes API server's service proxy —
+// no port-forward or address override needed. In-cluster runs talk to
+// vault.<ns>.svc directly. An explicit address override wins over both.
 func (p *Portal) vaultClientFor(ctx context.Context, ns string) (*vaultkv.Client, error) {
 	if !validTenant(ns) {
 		return nil, fmt.Errorf("invalid namespace %q", ns)
@@ -55,6 +61,13 @@ func (p *Portal) vaultClientFor(ctx context.Context, ns string) (*vaultkv.Client
 	}
 	if p.vaultAddrOverride != nil {
 		return vaultkv.NewWithAddr(p.vaultAddrOverride(ns), vc.Token()), nil
+	}
+	if p.outOfCluster && p.restCfg != nil {
+		if hc, hcErr := rest.HTTPClientFor(p.restCfg); hcErr == nil {
+			addr := strings.TrimSuffix(p.restCfg.Host, "/") +
+				"/api/v1/namespaces/" + ns + "/services/http:vault:8200/proxy"
+			return vaultkv.NewWithAddr(addr, vc.Token()).WithHTTPClient(hc), nil
+		}
 	}
 	return vc, nil
 }

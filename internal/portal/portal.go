@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,7 +25,8 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	kubescheme "k8s.io/client-go/kubernetes/scheme"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/yaml"
@@ -52,6 +54,12 @@ type Portal struct {
 	// template (http://vault.<ns>.svc:8200) — used for local development
 	// against a port-forwarded Vault.
 	vaultAddrOverride func(ns string) string
+
+	// restCfg + outOfCluster: when the portal runs outside the cluster
+	// (local kubeconfig), Vault calls are proxied through the Kubernetes
+	// API server's service proxy — no port-forward needed.
+	restCfg      *rest.Config
+	outOfCluster bool
 }
 
 // SetVaultAddrFunc overrides how the portal derives the Vault address for a
@@ -67,15 +75,28 @@ func New(c client.Client) *Portal {
 // NewInCluster builds a Portal from the ambient kubeconfig / service account.
 // The ConfigMap template source is enabled.
 func NewInCluster() (*Portal, error) {
-	sch := kubescheme.Scheme
+	sch := clientgoscheme.Scheme
 	if err := v1alpha1.AddToScheme(sch); err != nil {
 		return nil, err
 	}
-	c, err := client.New(config.GetConfigOrDie(), client.Options{Scheme: sch})
+	restCfg, err := config.GetConfig()
 	if err != nil {
 		return nil, err
 	}
-	return &Portal{client: c, registry: NewRegistry(defaultTemplatesDir, c), metrics: NewMetrics()}, nil
+	c, err := client.New(restCfg, client.Options{Scheme: sch})
+	if err != nil {
+		return nil, err
+	}
+	// Local runs (kubeconfig, no in-cluster env) reach in-cluster Vaults
+	// through the API server's service proxy.
+	outOfCluster := os.Getenv("KUBERNETES_SERVICE_HOST") == ""
+	return &Portal{
+		client:       c,
+		registry:     NewRegistry(defaultTemplatesDir, c),
+		metrics:      NewMetrics(),
+		restCfg:      restCfg,
+		outOfCluster: outOfCluster,
+	}, nil
 }
 
 // StackSummary is one row in the stacks table.
