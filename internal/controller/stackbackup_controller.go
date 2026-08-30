@@ -87,6 +87,44 @@ func (r *StackBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.fail(ctx, &bk, "create SA: "+err.Error())
 	}
 
+	// Target-side credentials live in the TARGET namespace; the Job runs in
+	// the SOURCE namespace and cannot reference them (k8s Secrets are
+	// namespaced). Copy the referenced values into a job-local Secret here,
+	// refreshed on every reconcile so rotation propagates.
+	targetSecrets := []struct{ localName, srcName, key string }{
+		{"stackbackup-target-pg", "postgres-postgresql", "postgres-password"},
+		{"stackbackup-target-s3", "storage-engine", "auth-credential"},
+	}
+	for _, ts := range targetSecrets {
+		var src corev1.Secret
+		if err := r.Get(ctx, types.NamespacedName{Namespace: bk.Spec.TargetNamespace, Name: ts.srcName}, &src); err != nil {
+			if errors.IsNotFound(err) {
+				return r.fail(ctx, &bk, fmt.Sprintf("target secret %s/%s not found", bk.Spec.TargetNamespace, ts.srcName))
+			}
+			return r.fail(ctx, &bk, "get target secret: "+err.Error())
+		}
+		local := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: ts.localName, Namespace: bk.Spec.SourceNamespace,
+				Labels: map[string]string{"app.kubernetes.io/managed-by": "kubo"}},
+			Type: corev1.SecretTypeOpaque,
+			Data: src.Data,
+		}
+		existing := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: ts.localName, Namespace: bk.Spec.SourceNamespace}}
+		err := r.Get(ctx, client.ObjectKeyFromObject(existing), existing)
+		if errors.IsNotFound(err) {
+			if err := r.Create(ctx, local); err != nil && !errors.IsAlreadyExists(err) {
+				return r.fail(ctx, &bk, "create target-cred copy: "+err.Error())
+			}
+		} else if err == nil {
+			existing.Data = local.Data
+			if err := r.Update(ctx, existing); err != nil {
+				return r.fail(ctx, &bk, "update target-cred copy: "+err.Error())
+			}
+		} else {
+			return r.fail(ctx, &bk, "get target-cred copy: "+err.Error())
+		}
+	}
+
 	job := &batchv1.Job{}
 	err := r.Get(ctx, types.NamespacedName{Namespace: bk.Spec.SourceNamespace, Name: jobName}, job)
 	if errors.IsNotFound(err) {
@@ -163,6 +201,7 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 	user := pg.User
 	srcPgSec, srcPgKey := secretRef(pg.SourcePasswordSecret, defaultPGSecret, defaultPGPwdKey)
 	dstPgSec, dstPgKey := secretRef(pg.TargetPasswordSecret, defaultPGSecret, defaultPGPwdKey)
+// (overridden below: target-ns values are copied to the source ns at create-time)
 
 	s3 := bk.Spec.S3
 	if s3 == nil {
@@ -173,6 +212,12 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 	dstS3Sec, dstS3Key := secretRef(s3.TargetCredentialsSecret, defaultS3Secret, "")
 	srcS3Key = firstNonEmpty(srcS3Key, defaultS3SkKey)
 	dstS3Key = firstNonEmpty(dstS3Key, defaultS3SkKey)
+
+	// The Job runs in the source namespace; target-side credentials were
+	// copied there by the reconciler into fixed-name Secrets. Always use
+	// those copies (rotation-safe: reconciler refreshes them).
+	dstPgSec, dstPgKey = "stackbackup-target-pg", "postgres-password"
+	dstS3Sec, dstS3Key = "stackbackup-target-s3", "auth-credential"
 
 	include := bk.Spec.Include
 	if len(include) == 0 {
