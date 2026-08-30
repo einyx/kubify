@@ -734,12 +734,12 @@
         <table id="stacks">
           <thead>
             <tr>
-              <th>Namespace</th>
-              <th>Stack</th>
-              <th>Mode</th>
-              <th>Phase</th>
+              <th class="sortable" data-sort="namespace">Namespace</th>
+              <th class="sortable" data-sort="name">Stack</th>
+              <th class="sortable" data-sort="mode">Mode</th>
+              <th class="sortable" data-sort="phase">Phase</th>
               <th>Components</th>
-              <th>Age</th>
+              <th class="sortable" data-sort="age">Age</th>
             </tr>
           </thead>
           <tbody id="rows">
@@ -1142,11 +1142,13 @@ async function refresh() {
     document.getElementById('list-error').textContent = '';
     document.getElementById('api-banner').style.display = 'none';
     renderStats(stacks);
+    renderSortHeaders();
     const q = document.getElementById('search').value.trim().toLowerCase();
     const phase = document.getElementById('phase-filter').value;
-    const visible = stacks.filter(s =>
+    let visible = stacks.filter(s =>
       (!phase || s.phase === phase) &&
       (!q || s.namespace.includes(q) || s.name.includes(q)));
+    visible = sortStacks(visible);
     if (!visible.length) {
       tb.innerHTML = `<tr class="empty-row"><td colspan="6">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet — create one from a template.'}</td></tr>`;
       return;
@@ -1161,7 +1163,7 @@ async function refresh() {
         <td class="cell-mode">${esc(s.mode)}</td>
         <td>
           <span class="phase ${esc(s.phase)}">${esc(s.phase)}</span>
-          ${(s.failing || []).map(f => `<span class="fail-chip" title="${esc(s.failureMsg || '')}" onclick="event.stopPropagation();showDetail('${esc(s.namespace)}','${esc(s.name)}')">${esc(f)}</span>`).join('')}
+          ${(s.failing || []).map(f => `<span class="fail-chip" title="${esc(s.failureMsg || '')} — click for events" onclick="event.stopPropagation();showDetail('${esc(s.namespace)}','${esc(s.name)}','events')">${esc(f)}</span>`).join('')}
           ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}
         </td>
         <td>
@@ -1678,7 +1680,7 @@ async function create() {
   const err = document.getElementById('create-error');
   const tenant = tenantVal();
   if (!validTenantSlug(tenant)) {
-    err.textContent = 'Tenant must be a lowercase RFC-1123 label (a-z, 0-9, \'-').';
+    err.textContent = "Tenant must be a lowercase RFC-1123 label (a-z, 0-9, '-').";
     return;
   }
   err.textContent = '';
@@ -1757,6 +1759,39 @@ function copyText(t) {
 }
 window.copyText = copyText;
 
+// ── Column sorting ─────────────────────────────────────────────────────
+let sortState = { key: null, dir: 1 };
+const PHASE_ORDER = { Ready: 0, Progressing: 1, Pending: 2, Failed: 3 };
+function sortStacks(rows) {
+  if (!sortState.key) return rows;
+  const { key, dir } = sortState;
+  return [...rows].sort((a, b) => {
+    let va = a[key], vb = b[key];
+    if (key === 'phase') { va = PHASE_ORDER[va] ?? 9; vb = PHASE_ORDER[vb] ?? 9; }
+    if (key === 'age') { // "3d" style — compare by unit magnitude
+      const parse = v => parseInt(v) * ({ s: 1, m: 60, h: 3600, d: 86400 }[String(v).slice(-1)] || 1);
+      return (parse(va) - parse(vb)) * dir;
+    }
+    return String(va).localeCompare(String(vb)) * dir;
+  });
+}
+function renderSortHeaders() {
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (th.dataset.sort === sortState.key) {
+      th.classList.add(sortState.dir === 1 ? 'sorted-asc' : 'sorted-desc');
+    }
+  });
+}
+document.querySelectorAll('th.sortable').forEach(th =>
+  th.addEventListener('click', () => {
+    const k = th.dataset.sort;
+    if (sortState.key === k) sortState.dir *= -1;
+    else sortState = { key: k, dir: 1 };
+    renderSortHeaders();
+    refresh();
+  }));
+
 // ── Refresh cadence ────────────────────────────────────────────────────
 let refreshMs = 10000;
 let lastRefreshAt = Date.now();
@@ -1795,7 +1830,15 @@ window.addEventListener('popstate', routeFromHash);
 routeFromHash();
 
 // ── Keyboard ───────────────────────────────────────────────────────────
+let kbdRow = -1;
+function kbdRows() { return [...document.querySelectorAll('#rows tr.stack-row')]; }
+function kbdHighlight() {
+  kbdRows().forEach((r, i) => r.classList.toggle('kbd-focus', i === kbdRow));
+  const el = kbdRows()[kbdRow];
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
 document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') {
     if (e.key === 'Escape') e.target.blur();
     return;
@@ -1803,6 +1846,18 @@ document.addEventListener('keydown', (e) => {
   if (e.key === '/') { e.preventDefault(); document.getElementById('search').focus(); }
   else if (e.key === 'r') { tick(); }
   else if (e.key === 'Escape') { hideDetail(); }
+  else if (e.key === 'n') { document.getElementById('create').showModal(); }
+  else if (e.key === '?') { document.getElementById('keys').showModal(); }
+  else if (e.key === 'j' || e.key === 'k') {
+    const rows = kbdRows();
+    if (!rows.length) return;
+    e.preventDefault();
+    kbdRow = e.key === 'j' ? Math.min(rows.length - 1, kbdRow + 1) : Math.max(0, kbdRow - 1);
+    kbdHighlight();
+  } else if (e.key === 'Enter' && kbdRow >= 0) {
+    const el = kbdRows()[kbdRow];
+    if (el) el.click();
+  }
 });
 
 // ── Vault ──────────────────────────────────────────────────────────────
