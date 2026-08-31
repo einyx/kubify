@@ -42,11 +42,32 @@
   .mermaid-wrap { background:var(--surface); }
   .mermaid-wrap .mermaid { display:flex; justify-content:center; }
   .mermaid-wrap svg { max-width:100%; height:auto; }
+  .modes { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  .mode { border-radius:18px; padding:1.5px; background:linear-gradient(135deg,rgba(15,18,25,0.08),rgba(15,18,25,0.02)); }
+  .mode > * { border-radius:calc(18px - 1.5px); background:var(--surface); padding:24px 24px; min-height:100%; }
+  .mode h3 { font-family:'Space Grotesk',sans-serif; font-size:18px; letter-spacing:-0.02em; margin-bottom:8px; }
+  .mode p { font-size:14.5px; }
+  .mode code { display:inline-block; margin-top:12px; padding:3px 10px; background:#f3f4f7;
+    border:1px solid var(--border); border-radius:8px; font-family:'SF Mono','Fira Code',monospace;
+    font-size:12px; color:var(--accent); }
+  .inv-wrap { background:var(--surface); padding:8px 4px; }
+  table.inv { width:100%; border-collapse:collapse; font-size:14px; }
+  table.inv th { text-align:left; padding:10px 14px; border-bottom:1px solid var(--border);
+    font-size:11px; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); }
+  table.inv td { padding:12px 14px; border-bottom:1px solid var(--border); vertical-align:top; color:var(--muted2); }
+  table.inv td b { color:var(--text); }
+  table.inv tr:last-child td { border-bottom:0; }
   pre { font-family:'SF Mono','Fira Code',monospace; font-size:12.5px; line-height:1.75; color:#c9cede; white-space:pre; }
   footer { border-top:1px solid var(--border); margin-top:48px; padding:32px 0;
     display:flex; justify-content:space-between; color:var(--muted); font-size:13.5px; }
   footer a { color:var(--muted2); text-decoration:none; }
   footer a:hover { color:var(--accent); }
+  @media (max-width: 820px) {
+    .modes { grid-template-columns: 1fr; }
+    nav { margin: 12px 14px 0; border-radius: 18px; }
+    header { padding: 48px 0 32px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>
 <body>
@@ -100,6 +121,88 @@ flowchart TD
     OP -- "reconciles" --> VS
     PULL -- "secretsRef propagation" --> SECRETS
 </pre>
+  </div></div>
+
+  <h2>The reconcile loop</h2>
+  <p>Every change to a Stack — a new bundle tag, a values override, a pause, or a manual
+     reconcile trigger — re-enters the same loop. Components are planned into dependency
+     waves, deployed in order, and status rolls back up into the Stack CR.</p>
+
+  <div class="card"><div class="card-inner mermaid-wrap">
+<pre class="mermaid">
+flowchart LR
+    EVT["Stack event<br/>(spec change, bundle tag,<br/>reconcile trigger, un-pause)"]
+    PLAN["Plan dependency waves<br/>(topological order over<br/>dependsOn / dependsOnReady)"]
+    DEPLOY{"Deployment mode"}
+    DIRECT["Direct<br/>embedded Helm engine:<br/>install / upgrade in order"]
+    FLUX["Flux<br/>compile to HelmReleases,<br/>helm-controller deploys"]
+    STATUS["Roll up per-component phase,<br/>revision & conditions<br/>into Stack status"]
+    PRUNE["Prune releases dropped<br/>from the spec"]
+
+    EVT --> PLAN --> DEPLOY
+    DEPLOY -- "Direct" --> DIRECT
+    DEPLOY -- "Flux" --> FLUX
+    DIRECT --> STATUS
+    FLUX --> STATUS
+    STATUS --> PRUNE --> EVT
+</pre>
+  </div></div>
+
+  <h2>Shared operators, tenant workloads</h2>
+  <p>Cluster-scoped operators (Vault, Spark, Istio, …) install once into a shared operators
+     namespace and watch every tenant namespace. Tenant charts never duplicate them — a tenant
+     Stack declares <em>which</em> operators it needs, and the operator wires credentials,
+     secrets, and routing across namespace boundaries.</p>
+
+  <div class="card"><div class="card-inner mermaid-wrap">
+<pre class="mermaid">
+flowchart TD
+    subgraph OPS["operators namespace (shared, one per cluster)"]
+        VAULT["Vault"]
+        SPARK["Spark"]
+        ISTIO["Istio"]
+    end
+    subgraph TA["tenant namespace"]
+        STACK["Stack<br/>operators: vault ✓ istio ✓"]
+        SECRETS["tenant secrets<br/>(seeded from kubo-system)"]
+        APPS["app workloads"]
+    end
+    STACK -- "enables" --> VAULT
+    STACK -- "enables" --> ISTIO
+    VAULT -- "watches tenant ns" --> SECRETS
+    ISTIO -- "watches tenant ns" --> APPS
+</pre>
+  </div></div>
+
+  <h2>Deployment modes</h2>
+  <div class="modes">
+    <div class="mode"><div>
+      <h3>Direct</h3>
+      <p>The operator's embedded Helm engine installs and upgrades releases itself, in
+         dependency order. No extra moving parts — simplest path, full status detail
+         per component.</p>
+      <code>spec.mode: Direct</code>
+    </div></div>
+    <div class="mode"><div>
+      <h3>Flux</h3>
+      <p>The operator compiles each component into a Flux HelmRelease and hands execution to
+         helm-controller. Choose it when the cluster already standardizes on Flux for
+         GitOps continuity.</p>
+      <code>spec.mode: Flux</code>
+    </div></div>
+  </div>
+
+  <h2>Where everything lives</h2>
+  <div class="card"><div class="card-inner inv-wrap">
+    <table class="inv">
+      <thead><tr><th>Location</th><th>Contents</th><th>Role</th></tr></thead>
+      <tbody>
+        <tr><td><b>kubo-system</b></td><td>operator (controller-manager), Stack + StackDefinition CRDs, seeded secrets, pull secrets</td><td>control plane — watches every Stack, propagates credentials</td></tr>
+        <tr><td><b>operators ns</b></td><td>Vault, Spark, Istio, cert-manager, …</td><td>cluster-scoped services, installed once, watching all tenants</td></tr>
+        <tr><td><b>tenant ns</b></td><td>Stack CR, Helm releases, propagated secrets, Istio VirtualServices</td><td>the running product — one namespace per tenant</td></tr>
+        <tr><td><b>OCI registry</b></td><td>product bundles (charts + images + values, versioned)</td><td>the delivery artifact — portable across clusters and orgs</td></tr>
+      </tbody>
+    </table>
   </div></div>
 
   <h2>Bundle once, deploy anywhere</h2>
