@@ -14,9 +14,9 @@ flowchart TD
 
         subgraph TenantNS["stack-a namespace (tenant)"]
             STACK["Stack CR\n(stack-a)"]
-            HELM["Helm releases\n(backend, frontend,\nprocessor, ai, …)"]
+            HELM["Helm releases\n(one per declared component)"]
             SECRETS["Propagated secrets\n(from kubo-system)"]
-            VS["Istio VirtualService\n(extraHttp routes)"]
+            VS["Istio VirtualService\n(routing)"]
         end
 
         subgraph KuboSys["kubo-system secrets"]
@@ -25,7 +25,7 @@ flowchart TD
     end
 
     subgraph OCI["OCI Registries (ghcr.io)"]
-        FBUNDLE["product-bundle\n(backend, frontend,\nscheduler, processor…)"]
+        FBUNDLE["product-bundle\n(charts + images + values,\nversioned)"]
     end
 
     WEB -->|"kubectl apply / ArgoCD\nStack manifest"| STACK

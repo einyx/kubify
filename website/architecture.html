@@ -105,12 +105,12 @@ flowchart TD
         end
         subgraph TEN["stack-a namespace (tenant)"]
             STACK["Stack CR (stack-a)"]
-            HELM["Helm releases<br/>(backend, frontend, processor, ai, …)"]
+            HELM["Helm releases<br/>(one per declared component)"]
             SECRETS["Propagated secrets<br/>(from kubo-system)"]
-            VS["Istio VirtualService<br/>(extraHttp routes)"]
+            VS["Istio VirtualService<br/>(routing)"]
         end
     end
-    OCI["OCI registries (ghcr.io)<br/>product-bundle: backend, frontend, scheduler, processor, …"]
+    OCI["OCI registries (ghcr.io)<br/>product bundle: charts + images + values, versioned"]
 
     WEB -- "kubectl apply / ArgoCD Stack manifest" --> STACK
     STACK -- "watched by" --> OP
