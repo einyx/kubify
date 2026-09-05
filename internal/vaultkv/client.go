@@ -186,6 +186,9 @@ type Entry struct {
 
 // List returns the raw LIST keys under path (folders carry a trailing
 // slash — use SplitList to separate them).
+// List returns the entry and folder names under a path. An empty or absent
+// directory (Vault answers 404 on empty prefixes) yields a nil slice — not
+// an error — so fresh Vaults don't produce error noise in the UI.
 func (c *Client) List(ctx context.Context, path string) ([]string, error) {
 	if err := c.detectKV(ctx); err != nil {
 		return nil, err
@@ -201,7 +204,18 @@ func (c *Client) List(ctx context.Context, path string) ([]string, error) {
 	} else {
 		apiPath = "/v1/" + c.mount + "/" + path + "?list=true"
 	}
-	if err := c.do(ctx, http.MethodGet, apiPath, nil, &out); err != nil {
+	resp, err := c.roundTrip(ctx, http.MethodGet, apiPath, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, nil // empty directory
+	}
+	if resp.StatusCode >= 300 {
+		return nil, statusErr(http.MethodGet, apiPath, resp)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, err
 	}
 	return out.Data.Keys, nil
