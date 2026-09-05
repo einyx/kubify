@@ -10,7 +10,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/einyx/kubo/internal/mcpserver"
 	"github.com/einyx/kubo/internal/portal"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 func main() {
@@ -33,6 +39,17 @@ func main() {
 	p, err := portal.NewInCluster()
 	if err != nil {
 		log.Fatalf("portal: %v", err)
+	}
+
+	// Bridge the portal's MCP section to the in-process MCP dispatch.
+	sch := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(sch)
+	_ = corev1.AddToScheme(sch)
+	restCfg, cfgErr := config.GetConfig()
+	if cfgErr == nil {
+		if k8sClient, err := client.New(restCfg, client.Options{Scheme: sch}); err == nil {
+			p.SetMCPCaller(mcpserver.New(k8sClient, ""))
+		}
 	}
 	p.SetTemplateDir(*templatesDir)
 	if *vaultAddrTpl != "" {

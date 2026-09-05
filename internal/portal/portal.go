@@ -60,6 +60,9 @@ type Portal struct {
 	// API server's service proxy — no port-forward needed.
 	restCfg      *rest.Config
 	outOfCluster bool
+
+	// mcpCaller bridges portal endpoints to the MCP tool dispatch.
+	mcpCaller MCPCaller
 }
 
 // SetVaultAddrFunc overrides how the portal derives the Vault address for a
@@ -360,6 +363,14 @@ func (p *Portal) SetTemplateDir(dir string) {
 	local := NewRegistry(dir, nil)
 	local.client = p.registry.client
 	p.registry = local
+}
+
+// EnableOutOfCluster marks the portal as running outside the cluster so
+// in-cluster Vault calls route through the API server proxy. Must be called
+// before serving.
+func (p *Portal) EnableOutOfCluster(cfg *rest.Config) {
+	p.restCfg = cfg
+	p.outOfCluster = true
 }
 
 // GetStackYAML returns the live Stack manifest as YAML.
@@ -920,4 +931,9 @@ func since(t time.Time) string {
 	default:
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
+}
+
+// ListTemplates exposes the template registry for API/MCP consumers.
+func (p *Portal) ListTemplates(ctx context.Context) ([]Template, error) {
+	return p.registry.List(ctx)
 }

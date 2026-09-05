@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -712,4 +713,74 @@ func mustJSON(v interface{}) string {
 		return fmt.Sprintf("%v", v)
 	}
 	return string(b)
+}
+
+// --- Portal bridge ----------------------------------------------------------
+// The portal calls these in-process (it cannot import this package without
+// an import cycle, so main.go wires an adapter through the Portal's caller
+// interface).
+
+// CallTool runs one tool by name with the given arguments and returns the
+// decoded result payload (what result.content[0].text holds as JSON).
+func (s *Server) CallTool(ctx context.Context, name string, arguments json.RawMessage) (json.RawMessage, error) {
+	req := &jsonRPCRequest{ID: 1, Method: "tools/call", Params: rawJSON(map[string]interface{}{
+		"name":      name,
+		"arguments": arguments,
+	})}
+	resp := s.dispatch(ctx, req)
+	if resp.Error != nil {
+		return nil, fmt.Errorf("%s", resp.Error.Message)
+	}
+	content, _ := json.Marshal(resp.Result)
+	var envelope struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(content, &envelope); err != nil {
+		return nil, err
+	}
+	for _, c := range envelope.Content {
+		if c.Type == "text" {
+			return json.RawMessage(c.Text), nil
+		}
+	}
+	return json.RawMessage("{}"), nil
+}
+
+// ToolCount returns the number of registered tools.
+func (s *Server) ToolCount() int { return len(toolList()) }
+
+// AuthEnabled reports whether the SSE transport requires a bearer token.
+func (s *Server) AuthEnabled() bool { return s.Token != "" }
+
+func rawJSON(v interface{}) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return json.RawMessage(b)
+}
+
+func rawJSONMap(v interface{}) json.RawMessage {
+	b, _ := json.Marshal(v)
+	return json.RawMessage(b)
+}
+
+// ListTools returns the sorted tool names.
+func (s *Server) ListTools(ctx context.Context) ([]string, error) {
+	names := []string{}
+	for _, t := range toolList() {
+		names = append(names, t.Name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// ToolSchemas returns the full tool definitions (name, description,
+// inputSchema) for clients that want to render forms.
+func (s *Server) ToolSchemas(ctx context.Context) (json.RawMessage, error) {
+	b, err := json.Marshal(toolList())
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
 }

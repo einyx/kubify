@@ -212,6 +212,38 @@ func (p *Portal) Mux() http.Handler {
 	// --- Vault (per-tenant bank-vaults KV) ---
 	// Values are redacted unless the request explicitly passes reveal=true.
 	// The Vault root token never appears in any response.
+	handle("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
+		info := p.MCPInfo(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(info)
+	})
+	handle("GET /api/mcp/tools", func(w http.ResponseWriter, r *http.Request) {
+		if p.mcpCaller == nil {
+			respond(w, r, nil, fmt.Errorf("MCP is not wired into this portal"))
+			return
+		}
+		schemas, err := p.mcpCaller.ToolSchemas(r.Context())
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		w.Write(schemas)
+	})
+	handle("POST /api/mcp/call", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Name      string          `json:"name"`
+			Arguments json.RawMessage `json:"arguments"`
+		}
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		out, err := p.MCPCall(r.Context(), req.Name, req.Arguments)
+		respond(w, r, out, err)
+	})
 	handle("GET /api/namespaces/{namespace}/vault/health", func(w http.ResponseWriter, r *http.Request) {
 		h, err := p.VaultHealth(r.Context(), r.PathValue("namespace"))
 		respond(w, r, h, err)
