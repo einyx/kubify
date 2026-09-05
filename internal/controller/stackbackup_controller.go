@@ -270,7 +270,7 @@ if %t; then
   echo "[s3] mirror %s -> %s"
   if ! command -v mc >/dev/null 2>&1; then
     apk add --no-cache curl ca-certificates >/dev/null 2>&1 || true
-    curl -sSL https://dl.min.io/client/mc/release/linux-amd64/mc -o /usr/local/bin/mc
+    curl -sSL https://github.com/minio/mc/releases/download/RELEASE.2025-08-13T08-35-41Z/mc.linux-amd64.RELEASE.2025-08-13T08-35-41Z -o /usr/local/bin/mc
     chmod +x /usr/local/bin/mc
   fi
   mc alias set src %s "$SRC_S3_AK" "$SRC_S3_SK"
