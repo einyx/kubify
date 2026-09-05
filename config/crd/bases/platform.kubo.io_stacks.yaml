@@ -235,8 +235,18 @@ spec:
                           - chartName
                           type: object
                         dependsOn:
-                          description: DependsOn lists component names that must be
-                            Ready before this one.
+                          description: |-
+                            DependsOn lists component names that must deploy before this one
+                            (gate type "Deployed": only requires the dependency's Helm release to
+                            exist). Ordering is enforced topologically.
+                          items:
+                            type: string
+                          type: array
+                        dependsOnReady:
+                          description: |-
+                            DependsOnReady lists component names whose workloads must be Running
+                            and Ready before this component is deployed. Use for migration jobs
+                            and app charts that need a reachable database. Implies dependsOn.
                           items:
                             type: string
                           type: array
@@ -650,6 +660,30 @@ spec:
                   description: ComponentStatus is the observed state of one component
                     of the stack.
                   properties:
+                    images:
+                      description: |-
+                        Images lists the container images rendered into this component's
+                        workloads at last deploy.
+                      items:
+                        description: ComponentImage is one container image observed
+                          in a component's workloads.
+                        properties:
+                          digest:
+                            description: Digest is set when the image is pinned by
+                              digest (repo@sha256:...).
+                            type: string
+                          repository:
+                            description: Repository is the image name without tag
+                              (e.g. ghcr.io/org/app).
+                            type: string
+                          tag:
+                            description: Tag is the image tag (e.g. v1.2.3). Empty
+                              when pinned by digest only.
+                            type: string
+                        required:
+                        - repository
+                        type: object
+                      type: array
                     lastDeployed:
                       format: date-time
                       type: string
