@@ -69,7 +69,10 @@ func (r *StackBootstrapReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	jobName := sb.Status.JobName
 	if jobName == "" {
-		jobName = fmt.Sprintf("stackbootstrap-%s-%d", sb.Name, time.Now().Unix())
+		// Deterministic per generation: concurrent reconciles (SA/ConfigMap
+		// creates force a requeue) Get the same Job instead of minting
+		// duplicates, and a spec change naturally produces a fresh name.
+		jobName = fmt.Sprintf("stackbootstrap-%s-g%d", sb.Name, sb.Generation)
 	}
 
 	// Identity for the Job (no special perms — products use their own creds).
