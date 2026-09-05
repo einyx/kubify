@@ -241,6 +241,161 @@ func TestListAndSplit(t *testing.T) {
 	}
 }
 
+// mountFake serves a fake Vault whose KV engine lives at a custom mount
+// and version — everything the real detection has to handle.
+type mountFake struct {
+	t     *testing.T
+	mux   *http.ServeMux
+	srv   *httptest.Server
+	mount string
+	kv2   bool
+	mu    map[string]map[string]string
+}
+
+func newMountFake(t *testing.T, mountsJSON string, mount string, kv2 bool) *mountFake {
+	f := &mountFake{t: t, mux: http.NewServeMux(), mount: mount, kv2: kv2, mu: map[string]map[string]string{}}
+	f.mux.HandleFunc("/v1/sys/mounts", func(w http.ResponseWriter, r *http.Request) {
+		if mountsJSON == "" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Write([]byte(mountsJSON))
+	})
+	prefix := "/v1/" + mount + "/"
+	f.mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, prefix)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method {
+		case http.MethodGet:
+			if r.URL.Query().Get("list") == "true" {
+				lp := path
+				if !strings.HasSuffix(lp, "/") {
+					lp += "/"
+				}
+				keys := []string{}
+				for k := range f.mu {
+					if strings.HasPrefix(k, lp) {
+						keys = append(keys, strings.TrimPrefix(k, lp))
+					}
+				}
+				w.Write([]byte(`{"data":{"keys":[`))
+				for i, k := range keys {
+					if i > 0 {
+						w.Write([]byte(","))
+					}
+					w.Write([]byte(`"` + k + `"`))
+				}
+				w.Write([]byte(`]}}`))
+				return
+			}
+			v, ok := f.mu[path]
+			if !ok {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			if kv2 {
+				w.Write([]byte(`{"data":{"data":` + jsonString(v) + `,"metadata":{"version":1,"created_time":"now"}}}`))
+			} else {
+				w.Write([]byte(`{"data":` + jsonString(v) + `}`))
+			}
+		case http.MethodPost:
+			var body map[string]interface{}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if kv2 {
+				body = body["data"].(map[string]interface{})
+			}
+			m := map[string]string{}
+			for k, v := range body {
+				m[k], _ = v.(string)
+			}
+			f.mu[path] = m
+			w.WriteHeader(http.StatusNoContent)
+		case http.MethodDelete:
+			delete(f.mu, path)
+			w.WriteHeader(http.StatusNoContent)
+		}
+	})
+	f.srv = httptest.NewServer(f.mux)
+	t.Cleanup(f.srv.Close)
+	return f
+}
+
+func jsonString(m map[string]string) string {
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
+func TestDetectCustomV2Mount(t *testing.T) {
+	mounts := `{"data":{"secret-kv/":{"type":"kv","options":{"version":"2"}},"pki/":{"type":"pki"}}}`
+	f := newMountFake(t, mounts, "secret-kv", true)
+	c := clientFor(t, f.srv.URL, "root-token")
+	if err := c.Write(context.Background(), "app/x", map[string]string{"k": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	m, v2 := c.Mount()
+	if m != "secret-kv" || !v2 {
+		t.Fatalf("mount = %q v2=%v", m, v2)
+	}
+	e, err := c.Read(context.Background(), "app/x")
+	if err != nil || e.Data["k"] != "v" || e.Version != 1 {
+		t.Fatalf("read = %+v err=%v", e, err)
+	}
+}
+
+func TestDetectV1Mount(t *testing.T) {
+	mounts := `{"data":{"kv/":{"type":"kv","options":{"version":"1"}}}}`
+	f := newMountFake(t, mounts, "kv", false)
+	c := clientFor(t, f.srv.URL, "root-token")
+	if err := c.Write(context.Background(), "app/x", map[string]string{"k": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	m, v2 := c.Mount()
+	if m != "kv" || v2 {
+		t.Fatalf("mount = %q v2=%v", m, v2)
+	}
+	e, err := c.Read(context.Background(), "app/x")
+	if err != nil || e.Data["k"] != "v" || e.Version != 0 {
+		t.Fatalf("read = %+v err=%v", e, err)
+	}
+	keys, err := c.List(context.Background(), "app")
+	if err != nil || len(keys) != 1 || keys[0] != "x" {
+		t.Fatalf("list = %v err=%v", keys, err)
+	}
+	if err := c.Delete(context.Background(), "app/x", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.mu) != 0 {
+		t.Fatal("v1 delete should remove the entry")
+	}
+}
+
+func TestDetectPrefersSecretMount(t *testing.T) {
+	mounts := `{"data":{"other/":{"type":"kv","options":{"version":"2"}},"secret/":{"type":"kv","options":{"version":"1"}}}}`
+	f := newMountFake(t, mounts, "secret", false)
+	c := clientFor(t, f.srv.URL, "root-token")
+	if _, err := c.List(context.Background(), ""); err != nil { // triggers detection
+		t.Fatal(err)
+	}
+	m, v2 := c.Mount()
+	if m != "secret" || v2 {
+		t.Fatalf("mount = %q v2=%v (secret/ must win)", m, v2)
+	}
+}
+
+func TestDetectFailureFallsBackToSecretV2(t *testing.T) {
+	// Empty mounts payload → 403 from the fake: detection fails, the
+	// fallback keeps working.
+	f := newMountFake(t, ``, "secret", true)
+	c := clientFor(t, f.srv.URL, "root-token")
+	if err := c.Write(context.Background(), "app/x", map[string]string{"k": "v"}); err != nil {
+		t.Fatal(err)
+	}
+	m, v2 := c.Mount()
+	if m != "secret" || !v2 {
+		t.Fatalf("fallback mount = %q v2=%v", m, v2)
+	}
+}
+
 func TestDeleteSoftVsPermanent(t *testing.T) {
 	f := newFakeVault(t, false)
 	c := clientFor(t, f.srv.URL, "root-token")
