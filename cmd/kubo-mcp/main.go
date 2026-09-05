@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/mcpserver"
 	"github.com/einyx/kubo/internal/portal"
 	corev1 "k8s.io/api/core/v1"
@@ -28,6 +29,9 @@ func main() {
 		os.Exit(1)
 	}
 	if err := corev1.AddToScheme(sch); err != nil {
+		os.Exit(1)
+	}
+	if err := platformv1alpha1.AddToScheme(sch); err != nil {
 		os.Exit(1)
 	}
 
