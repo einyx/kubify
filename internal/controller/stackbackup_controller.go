@@ -26,7 +26,7 @@ import (
 
 const (
 	stackBackupSA   = "kubo-stackbackup"
-	defaultPGImage  = "postgres:17-alpine" // ponytail: matches tenant PG17 servers; has pg_dump/psql; script curls mc at runtime so no custom image needed
+	defaultPGImage  = "meshxregistry.azurecr.io/kubo/stack-backup:pg17" // pg_dump/psql v17 + mc bundled (runtime downloads break behind proxies)
 	defaultPGHost   = "postgres-postgresql"
 	defaultPGSecret = "postgres-postgresql"
 	defaultPGPwdKey = "postgres-password"
@@ -314,6 +314,7 @@ echo "done."
 				Spec: corev1.PodSpec{
 					ServiceAccountName: stackBackupSA,
 					RestartPolicy:      corev1.RestartPolicyNever,
+					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "acr-pull-secret"}},
 					Containers: []corev1.Container{{
 						Name:    "backup",
 						Image:   image,
