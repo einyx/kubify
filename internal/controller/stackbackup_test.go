@@ -202,3 +202,20 @@ func TestJobBackoffExceeded(t *testing.T) {
 		t.Error("7 failures at default limit 6 should be exceeded")
 	}
 }
+
+func TestJobNameDeterministicPerGeneration(t *testing.T) {
+	bk := &platformv1alpha1.StackBackup{
+		ObjectMeta: metav1.ObjectMeta{Name: "a-to-b", Namespace: "stack-a", Generation: 3},
+		Spec: platformv1alpha1.StackBackupSpec{
+			SourceNamespace: "stack-a",
+			TargetNamespace: "stack-b",
+			Include:         []string{"s3"},
+		},
+	}
+	r := &StackBackupReconciler{}
+	j1 := r.buildJob(bk, "stackbackup-a-to-b-g3")
+	j2 := r.buildJob(bk, "stackbackup-a-to-b-g3")
+	if j1.Name != j2.Name || j1.Name != "stackbackup-a-to-b-g3" {
+		t.Errorf("same generation must reuse the job name, got %q vs %q", j1.Name, j2.Name)
+	}
+}

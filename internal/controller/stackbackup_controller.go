@@ -78,7 +78,10 @@ func (r *StackBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	jobName := bk.Status.JobName
 	if jobName == "" {
-		jobName = fmt.Sprintf("stackbackup-%s-%d", bk.Name, time.Now().Unix())
+		// Deterministic per generation: concurrent reconciles Get the same
+		// Job instead of racing out timestamped duplicates (seen live: two
+		// identical backups running at once).
+		jobName = fmt.Sprintf("stackbackup-%s-g%d", bk.Name, bk.Generation)
 	}
 
 	// Ensure ServiceAccount in source namespace (no special perms, just an identity).
