@@ -55,7 +55,9 @@ func (p *Portal) Mux() http.Handler {
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Write([]byte(strings.Replace(p.GetIndexHTML(), "<!-- agentfw-nav -->", p.agentfwNav(), 1)))
+		html := strings.Replace(p.GetIndexHTML(), "<!-- mcp-nav -->", p.mcpNav(), 1)
+		html = strings.Replace(html, "<!-- agentfw-nav -->", p.agentfwNav(), 1)
+		w.Write([]byte(html))
 	})
 	// agentfw view archive (agentsview-style session browser), proxied to
 	// the agentfw admin port when configured via SetAgentfwURL.
