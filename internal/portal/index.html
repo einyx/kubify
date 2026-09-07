@@ -568,6 +568,12 @@
     font-size: 10px; color: var(--accent2); text-transform: uppercase;
     letter-spacing: .18em; font-weight: 600; padding: 16px 16px 4px;
   }
+
+  .mcp-tools { display: grid; grid-template-columns: repeat(auto-fill,minmax(260px,1fr)); gap: 10px; padding: 14px 16px; }
+  .mcp-tool { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+  .mcp-tool:hover { border-color: var(--accent); }
+  .mcp-tool-name { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+
   .detail-head .btn.secondary { color: var(--err); border-color: rgba(248,81,73,.4); }
 
   @keyframes slideUp {
@@ -794,7 +800,7 @@
     </div>
     <div id="paused-note" style="display:none;margin:-8px 0 16px">
       <span class="phase Progressing" style="color:var(--warn);border-color:rgba(180,120,10,.3)">
-        Paused — reconciliation is stopped; deployed components keep running
+        Paused - reconciliation is stopped; deployed components keep running
       </span>
     </div>
     <div class="detail-spec card-outer" style="animation-delay:60ms">
@@ -897,7 +903,7 @@
         <div class="muted" id="vault-path" style="font-size:11px;margin:4px 8px"></div>
         <table>
           <thead><tr><th>Name</th><th>Version</th><th>Updated</th><th style="text-align:right">Actions</th></tr></thead>
-          <tbody id="vault-rows"><tr><td colspan="4" class="muted">—</td></tr></tbody>
+          <tbody id="vault-rows"><tr><td colspan="4" class="muted">-</td></tr></tbody>
         </table>
       </div>
     </div>
@@ -926,7 +932,7 @@
     </div>
     <div class="card-outer" style="animation-delay:60ms">
       <div class="card-inner">
-        <div class="section-title">Tools — click to load a form, then Run</div>
+        <div class="section-title">Tools: click to load a form, then run</div>
         <div class="mcp-tools" id="mcp-tools"></div>
       </div>
     </div>
@@ -967,8 +973,8 @@
       <label for="mode">Deployment mode</label>
       <select id="mode">
         <option value="" selected>Template default</option>
-        <option value="Direct">Direct — embedded helm engine</option>
-        <option value="Flux">Flux — helm-controller</option>
+        <option value="Direct">Direct - embedded helm engine</option>
+        <option value="Flux">Flux - helm-controller</option>
       </select>
     </div>
     <div class="field-error" id="create-error"></div>
@@ -988,7 +994,7 @@
 <dialog id="del">
   <div class="dialog-header">
     <h2 style="color:var(--err)">Delete stack</h2>
-    <p>Deletes the Stack resource — the operator will uninstall its releases.
+    <p>Deletes the Stack resource - the operator will uninstall its releases.
        Type <b id="del-ns"></b> to confirm.</p>
   </div>
   <div class="dialog-body">
@@ -999,7 +1005,7 @@
     <div class="field">
       <label style="display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none">
         <input type="checkbox" id="purge" style="width:auto">
-        Also delete the namespace (destructive — removes everything in it)
+        Also delete the namespace (destructive - removes everything in it)
       </label>
     </div>
     <div class="field-error" id="del-error"></div>
@@ -1014,7 +1020,7 @@
 <dialog id="edit">
   <div class="dialog-header">
     <h2>Edit stack spec</h2>
-    <p>Patches the live Stack resource — the operator reconciles the change.
+    <p>Patches the live Stack resource - the operator reconciles the change.
        Only fields you change are applied.</p>
   </div>
   <div class="dialog-body">
@@ -1034,8 +1040,8 @@
       <label for="edit-mode">Deployment mode</label>
       <select id="edit-mode">
         <option value="">Keep current</option>
-        <option value="Direct">Direct — embedded helm engine</option>
-        <option value="Flux">Flux — helm-controller</option>
+        <option value="Direct">Direct - embedded helm engine</option>
+        <option value="Flux">Flux - helm-controller</option>
       </select>
     </div>
     <div class="field-error" id="edit-error"></div>
@@ -1084,7 +1090,7 @@
 <dialog id="backup">
   <div class="dialog-header">
     <h2>New backup</h2>
-    <p>Creates a StackBackup — copies Postgres databases and storage-engine
+    <p>Creates a StackBackup - copies Postgres databases and storage-engine
        buckets from this stack's namespace into the target.</p>
   </div>
   <div class="dialog-body">
@@ -1181,7 +1187,7 @@ async function refresh() {
     const headers = stacksETag ? { 'If-None-Match': stacksETag } : {};
     const r = await fetch('/api/stacks', { headers });
     if (r.status === 304) {
-      stacks = lastStacks; // unchanged — skip re-render
+      stacks = lastStacks; // unchanged - skip re-render
     } else if (!r.ok) {
       throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
     } else {
@@ -1202,7 +1208,7 @@ async function refresh() {
       (!q || s.namespace.includes(q) || s.name.includes(q)));
     visible = sortStacks(visible);
     if (!visible.length) {
-      tb.innerHTML = `<tr class="empty-row"><td colspan="6">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet — create one from a template.'}</td></tr>`;
+      tb.innerHTML = `<tr class="empty-row"><td colspan="6">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet - create one from a template.'}</td></tr>`;
       return;
     }
     tb.innerHTML = visible.map(s => {
@@ -1215,7 +1221,7 @@ async function refresh() {
         <td class="cell-mode">${esc(s.mode)}</td>
         <td>
           <span class="phase ${esc(s.phase)}">${esc(s.phase)}</span>
-          ${(s.failing || []).map(f => `<span class="fail-chip" title="${esc(s.failureMsg || '')} — click for events" onclick="event.stopPropagation();showDetail('${esc(s.namespace)}','${esc(s.name)}','events')">${esc(f)}</span>`).join('')}
+          ${(s.failing || []).map(f => `<span class="fail-chip" title="${esc(s.failureMsg || '')} - click for events" onclick="event.stopPropagation();showDetail('${esc(s.namespace)}','${esc(s.name)}','events')">${esc(f)}</span>`).join('')}
           ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}
         </td>
         <td>
@@ -1232,7 +1238,7 @@ async function refresh() {
     const banner = document.getElementById('api-banner');
     if (banner) {
       document.getElementById('api-banner-msg').textContent =
-        'API unreachable — ' + e.message + '. Retrying automatically.';
+        'API unreachable - ' + e.message + '. Retrying automatically.';
       banner.style.display = 'flex';
     }
   }
@@ -1292,7 +1298,7 @@ async function fetchDetail(ns, name) {
         + [].concat(c.dependsOnReady || []).map(x => `<span class="dep-badge" title="waits for Ready">⏳ ${esc(x)}</span>`).join('');
       const imgs = (c.images || []).map(im =>
         `<span class="img-chip" title="click to copy" onclick="copyText('${esc(im.repository)}${im.tag ? ':' + esc(im.tag) : ''}')">${esc(im.repository.split('/').pop())}${im.tag ? ':' + esc(im.tag) : ''}</span>`
-      ).join('') || '<span class="muted">—</span>';
+      ).join('') || '<span class="muted">-</span>';
       const mid = `msg-${seq}-${i}`;
       return `
       <tr>
@@ -1302,7 +1308,7 @@ async function fetchDetail(ns, name) {
         <td>${imgs}</td>
         <td class="cell-ns"><div class="msg-wrap">
           <button class="copy-btn" onclick="copyText(this.previousElementSibling ? this.parentElement.querySelector('.msg-text').textContent : '')">copy</button>
-          <div class="msg-text" id="${mid}">${esc(msg) || '—'}</div>
+          <div class="msg-text" id="${mid}">${esc(msg) || '-'}</div>
           ${msg.length > 160 ? `<button class="msg-toggle" onclick="const el=document.getElementById('${mid}');el.classList.toggle('open');this.textContent=el.classList.contains('open')?'less':'more'">more</button>` : ''}
         </div></td>
       </tr>`;}).join('')
@@ -1360,7 +1366,7 @@ async function doDelete() {
   err.textContent = '';
   if (confirmVal !== ns) { err.textContent = `Type "${ns}" to confirm.`; return; }
   if (purge && !window.__purgeConfirmed) {
-    // Namespace purge is destructive beyond the stack — require an explicit
+    // Namespace purge is destructive beyond the stack - require an explicit
     // second confirmation each time the dialog reopens.
     if (!confirm(`Purging namespace "${ns}" deletes EVERYTHING in it, not just this stack.\nContinue?`)) return;
     window.__purgeConfirmed = true;
@@ -1440,7 +1446,7 @@ async function togglePause() {
   const { ns, name } = currentDetail;
   const paused = !currentData.paused;
   const btn = document.getElementById('pause-btn');
-  // Optimistic flip — reconciliation takes seconds; the label shouldn't.
+  // Optimistic flip - reconciliation takes seconds; the label shouldn't.
   currentData.paused = paused;
   btn.textContent = paused ? 'Resume' : 'Pause';
   btn.textContent += '…';
@@ -1475,7 +1481,7 @@ function renderValues(d) {
 
 async function openValues(comp = '') {
   document.getElementById('values-title').textContent = comp
-    ? `Values override — ${comp}` : 'Component values override';
+    ? `Values override - ${comp}` : 'Component values override';
   document.getElementById('values-component').value = comp;
   document.getElementById('values-component').disabled = !!comp;
   // The textarea starts empty; what you submit replaces the override wholesale
@@ -1602,7 +1608,7 @@ async function createBackup() {
         include,
       }),
     });
-    toast(`Backup ${bk.name} created — the controller will run the copy job`, true);
+    toast(`Backup ${bk.name} created - the controller will run the copy job`, true);
     try {
       const targets = JSON.parse(localStorage.getItem('kubo.backupTargets') || '{}');
       targets[currentDetail.ns] = bk.target;
@@ -1681,7 +1687,7 @@ async function savePatch() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
-    toast('Spec patched — operator will reconcile', true);
+    toast('Spec patched - operator will reconcile', true);
     document.getElementById('edit').close();
     fetchDetail(ns, name);
   } catch (e) { err.textContent = e.message; }
@@ -1697,7 +1703,7 @@ async function loadTemplates() {
     const syncDesc = () => {
       const t = templates.find(t => t.id === sel.value);
       document.getElementById('template-desc').textContent =
-        t ? (t.description || '') + (t.source ? ` — source: ${t.source}` : '') : '';
+        t ? (t.description || '') + (t.source ? ` - source: ${t.source}` : '') : '';
     };
     sel.onchange = syncDesc;
     try { // remember the last template the operator used
@@ -1751,7 +1757,7 @@ async function create() {
       body: JSON.stringify(body),
     });
     try { localStorage.setItem('kubo.lastTemplate', body.template); } catch (e) {}
-    toast('Stack created — opening it…', true);
+    toast('Stack created - opening it…', true);
     document.getElementById('create').close();
     document.getElementById('preview').style.display = 'none';
     // Deep-link into the new stack once the list sees it.
@@ -1760,7 +1766,7 @@ async function create() {
     if (created) {
       showDetail(created.namespace, created.name);
     } else {
-      toast('Created — but it is not visible yet; the list will catch up', true);
+      toast('Created - but it is not visible yet; the list will catch up', true);
     }
   } catch (e) { err.textContent = e.message; }
   btn.disabled = false;
@@ -1915,7 +1921,7 @@ function sortStacks(rows) {
   return [...rows].sort((a, b) => {
     let va = a[key], vb = b[key];
     if (key === 'phase') { va = PHASE_ORDER[va] ?? 9; vb = PHASE_ORDER[vb] ?? 9; }
-    if (key === 'age') { // "3d" style — compare by unit magnitude
+    if (key === 'age') { // "3d" style - compare by unit magnitude
       const parse = v => parseInt(v) * ({ s: 1, m: 60, h: 3600, d: 86400 }[String(v).slice(-1)] || 1);
       return (parse(va) - parse(vb)) * dir;
     }
@@ -2017,26 +2023,26 @@ async function loadVault(ns) {
     const health = await api(`/api/namespaces/${ns}/vault/health`);
     setBadge('badge-secrets', 0, false);
     if (!health.installed) {
-      healthEl.textContent = '— not installed';
+      healthEl.textContent = '- not installed';
       rows.innerHTML = '<tr><td colspan="4" class="muted">No Vault in this namespace (operators.vault is off).</td></tr>';
       return;
     }
     if (health.error) {
       setBadge('badge-secrets', 1, true);
-      healthEl.textContent = '— unreachable';
+      healthEl.textContent = '- unreachable';
       rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(health.error)}<br>
-        The portal routes Vault calls through the Kubernetes API server automatically —
+        The portal routes Vault calls through the Kubernetes API server automatically -
         check your kubeconfig context and RBAC (services/proxy on the Vault namespace).</td></tr>`;
       return;
     }
     if (health.sealed) {
-      healthEl.textContent = '— SEALED';
+      healthEl.textContent = '- SEALED';
       rows.innerHTML = '<tr><td colspan="4" class="muted">Vault is sealed. Unseal it to manage secrets.</td></tr>';
       return;
     }
-    healthEl.textContent = '— unsealed';
+    healthEl.textContent = '- unsealed';
   } catch (e) {
-    healthEl.textContent = '— unreachable';
+    healthEl.textContent = '- unreachable';
     rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(String(e.message || e))}</td></tr>`;
     return;
   }
