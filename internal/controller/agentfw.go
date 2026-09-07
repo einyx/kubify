@@ -65,6 +65,7 @@ injectionAction: block
 
 func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string) error {
 	replicas := int32(1)
+	fsGroup := int64(65532)
 	desired := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns},
 		Spec: appsv1.DeploymentSpec{
@@ -73,6 +74,10 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": agentfwName}},
 				Spec: corev1.PodSpec{
+					SecurityContext: &corev1.PodSecurityContext{
+						// Let the nonroot agentfw (65532) write the viewer archive.
+						FSGroup: &fsGroup,
+					},
 					Containers: []corev1.Container{{
 						Name:  agentfwName,
 						Image: agentfwImage,
@@ -82,6 +87,11 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 							Name:      "policy",
 							MountPath: "/etc/agentfw",
 							ReadOnly:  true,
+						}, {
+							// Viewer archive (SQLite) — /var/lib/agentfw must
+							// exist and be writable by uid 65532.
+							Name:      "viewer-archive",
+							MountPath: "/var/lib/agentfw",
 						}},
 						Resources: corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
@@ -100,6 +110,11 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 							ConfigMap: &corev1.ConfigMapVolumeSource{
 								LocalObjectReference: corev1.LocalObjectReference{Name: agentfwName},
 							},
+						},
+					}, {
+						Name: "viewer-archive",
+						VolumeSource: corev1.VolumeSource{
+							EmptyDir: &corev1.EmptyDirVolumeSource{},
 						},
 					}},
 				},
