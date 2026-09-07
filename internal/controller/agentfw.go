@@ -81,8 +81,11 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 					Containers: []corev1.Container{{
 						Name:  agentfwName,
 						Image: agentfwImage,
-						Args:  []string{"-addr=:8080", "-policy=/etc/agentfw/policy.yaml"},
-						Ports: []corev1.ContainerPort{{ContainerPort: agentfwPort, Protocol: corev1.ProtocolTCP}},
+						// :main is a mutable tracking tag — always re-pull so
+						// nodes pick up fresh pushes instead of stale cache.
+						ImagePullPolicy: corev1.PullAlways,
+						Args:            []string{"-addr=:8080", "-policy=/etc/agentfw/policy.yaml"},
+						Ports:           []corev1.ContainerPort{{ContainerPort: agentfwPort, Protocol: corev1.ProtocolTCP}},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "policy",
 							MountPath: "/etc/agentfw",
