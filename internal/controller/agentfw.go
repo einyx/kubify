@@ -133,7 +133,13 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 	if err != nil {
 		return err
 	}
+	// Sync the pod-spec fields this controller owns. Containers alone is
+	// not enough: a container that gains a volumeMount while Volumes stays
+	// stale renders an invalid Deployment (volumeMounts[x].name not found)
+	// that the API server rejects on every reconcile.
 	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
+	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
+	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
 	return r.Update(ctx, &existing)
 }
 
