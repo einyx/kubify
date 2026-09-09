@@ -349,7 +349,9 @@
   .phase.Pending::before { background: var(--muted); }
 
   .comp-phase { font-size: 12px; font-weight: 600; }
-  .comp-phase.Ready      { color: var(--ok); }
+  .comp-phase.Ready,
+  .comp-phase.Running,
+  .comp-phase.Succeeded { color: var(--ok); }
   .comp-phase.Deploying,
   .comp-phase.Pending    { color: var(--warn); }
   .comp-phase.Failed     { color: var(--err); }
@@ -706,6 +708,24 @@
     *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
   }
 
+  /* ── UX: expandable component deployments ── */
+  tr.comp-row { cursor: pointer; }
+  tr.comp-open td { background: rgba(91,84,236,0.05); }
+  .comp-chevron { display: inline-block; width: 12px; color: var(--accent); font-size: 10px; }
+  tr.comp-expand > td { padding: 0 16px 14px; background: rgba(91,84,236,0.03); border-bottom: 1px solid var(--border); }
+  .comp-detail { padding-top: 12px; display: grid; grid-template-columns: 1.4fr 1fr; gap: 14px 22px; }
+  .comp-detail-label {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 6px;
+  }
+  .comp-detail .msg-text.open { max-height: none; }
+  .pods-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .pods-table th { text-align: left; padding: 4px 10px 4px 0; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.1em; color: var(--muted); border-bottom: 1px solid var(--border); }
+  .pods-table td { padding: 4px 10px 4px 0; border-bottom: 1px solid var(--border); }
+  .pods-table tr:last-child td { border-bottom: 0; }
+  @media (max-width: 768px) { .comp-detail { grid-template-columns: 1fr; } }
+
   /* ── Entry animation ── */
   @keyframes fadeUp {
     to { opacity: 1; transform: translateY(0); }
@@ -805,22 +825,6 @@
     </div>
     <div class="detail-spec card-outer" style="animation-delay:60ms">
       <div class="card-inner" id="spec-chips"></div>
-    </div>
-    <div class="card-outer" style="animation-delay:100ms">
-      <div class="card-inner">
-        <table>
-          <thead>
-            <tr>
-              <th>Component</th>
-              <th>Phase</th>
-              <th>Rev</th>
-              <th>Images</th>
-              <th>Message</th>
-            </tr>
-          </thead>
-          <tbody id="comp-rows"></tbody>
-        </table>
-      </div>
     </div>
     <div class="tabbar" id="tabbar">
       <button data-tab="components" class="active">Components <span class="badge" id="badge-components"></span></button>
@@ -1291,8 +1295,7 @@ async function fetchDetail(ns, name) {
     document.getElementById('detail-sub').textContent =
       `${d.phase} · ${d.mode} · ${d.ready}/${d.total} components ready · age ${d.age}`;
     window.__compMsgSeq = (window.__compMsgSeq || 0) + 1;
-    const seq = window.__compMsgSeq;
-    document.getElementById('comp-rows').innerHTML = d.components.map((c, i) => {
+    const seq = window.__compMsgSeq;    document.getElementById('comp-rows').innerHTML = d.components.map((c, i) => {
       const msg = c.message || '';
       const deps = [].concat(c.dependsOn || []).map(x => `<span class="dep-badge" title="waits for deploy">⟵ ${esc(x)}</span>`).join('')
         + [].concat(c.dependsOnReady || []).map(x => `<span class="dep-badge" title="waits for Ready">⏳ ${esc(x)}</span>`).join('');
@@ -1300,19 +1303,22 @@ async function fetchDetail(ns, name) {
         `<span class="img-chip" title="click to copy" onclick="copyText('${esc(im.repository)}${im.tag ? ':' + esc(im.tag) : ''}')">${esc(im.repository.split('/').pop())}${im.tag ? ':' + esc(im.tag) : ''}</span>`
       ).join('') || '<span class="muted">-</span>';
       const mid = `msg-${seq}-${i}`;
+      const open = expandedComps.has(c.name);
       return `
-      <tr>
-        <td class="cell-name">${esc(c.name)}${deps}</td>
+      <tr class="comp-row ${open ? 'comp-open' : ''}" onclick="toggleComponent('${esc(c.name)}')" title="click to expand deployment">
+        <td class="cell-name"><span class="comp-chevron">${open ? '▾' : '▸'}</span> ${esc(c.name)}${deps}</td>
         <td><span class="comp-phase ${esc(c.phase)}">${esc(c.phase)}</span></td>
         <td class="cell-mode">${esc(String(c.revision || ''))}</td>
         <td>${imgs}</td>
         <td class="cell-ns"><div class="msg-wrap">
-          <button class="copy-btn" onclick="copyText(this.previousElementSibling ? this.parentElement.querySelector('.msg-text').textContent : '')">copy</button>
           <div class="msg-text" id="${mid}">${esc(msg) || '-'}</div>
-          ${msg.length > 160 ? `<button class="msg-toggle" onclick="const el=document.getElementById('${mid}');el.classList.toggle('open');this.textContent=el.classList.contains('open')?'less':'more'">more</button>` : ''}
         </div></td>
+      </tr>
+      <tr class="comp-expand" id="comp-expand-${esc(c.name)}" style="${open ? '' : 'display:none'}">
+        <td colspan="5"><div class="comp-detail" id="comp-detail-${esc(c.name)}">${open ? 'loading pods…' : ''}</div></td>
       </tr>`;}).join('')
       || '<tr class="empty-row"><td colspan="5">No component status yet.</td></tr>';
+    for (const name of expandedComps) renderComponentDetail(name);
     renderSpec(d);
     setBadge('badge-components', d.components.length, false);
     setBadge('badge-conditions', (d.conditions || []).length, false);
@@ -1332,6 +1338,74 @@ async function fetchDetail(ns, name) {
       || '<tr class="empty-row"><td colspan="5">No conditions.</td></tr>';
     document.getElementById('stack-yaml').textContent = yamlText;
   } catch (e) { toast(e.message, false); }
+}
+
+// ── Expandable component deployments ───────────────────────────────────
+const expandedComps = new Set();
+
+function toggleComponent(name) {
+  if (expandedComps.has(name)) {
+    expandedComps.delete(name);
+    const row = document.getElementById('comp-expand-' + CSS.escape(name));
+    if (row) row.style.display = 'none';
+    const main = document.querySelector(`#comp-rows .comp-row[onclick*="'${esc(name)}'"]`);
+    if (main) { main.classList.remove('comp-open'); main.querySelector('.comp-chevron').textContent = '▸'; }
+    return;
+  }
+  expandedComps.add(name);
+  const row = document.getElementById('comp-expand-' + CSS.escape(name));
+  if (row) row.style.display = '';
+  const main = document.querySelector(`#comp-rows .comp-row[onclick*="'${esc(name)}'"]`);
+  if (main) { main.classList.add('comp-open'); main.querySelector('.comp-chevron').textContent = '▾'; }
+  renderComponentDetail(name);
+}
+
+async function renderComponentDetail(name) {
+  const box = document.getElementById('comp-detail-' + CSS.escape(name));
+  if (!box || !currentDetail || !currentData) return;
+  const comp = (currentData.components || []).find(c => c.name === name);
+  if (!comp) { box.innerHTML = '<span class="muted">component no longer present</span>'; return; }
+  const { ns } = currentDetail;
+
+  const deps = [].concat(comp.dependsOn || []).map(x => `<span class="dep-badge" title="waits for deploy">⟵ ${esc(x)}</span>`).join('')
+    + [].concat(comp.dependsOnReady || []).map(x => `<span class="dep-badge" title="waits for Ready">⏳ ${esc(x)}</span>`).join('');
+  const msg = comp.message || '';
+  const msgHtml = msg
+    ? `<div class="msg-wrap"><div class="msg-text open">${esc(msg)}</div>
+       <button class="copy-btn" onclick="copyText(this.parentElement.querySelector('.msg-text').textContent)">copy</button></div>`
+    : '<span class="muted">no status message</span>';
+  const imgs = (comp.images || []).map(im =>
+    `<span class="img-chip" title="click to copy" onclick="copyText('${esc(im.repository)}${im.tag ? ':' + esc(im.tag) : ''}')">${esc(im.repository)}${im.tag ? ':' + esc(im.tag) : ''}</span>`
+  ).join('') || '<span class="muted">no images recorded</span>';
+
+  box.innerHTML = `
+    <div class="comp-detail-grid">
+      <div><div class="comp-detail-label">Status message</div>${msgHtml}</div>
+      <div><div class="comp-detail-label">Images</div><div>${imgs}</div></div>
+      <div><div class="comp-detail-label">Dependencies</div><div>${deps || '<span class="muted">none</span>'}</div></div>
+      <div><div class="comp-detail-label">Pods <span class="muted">(release: ${esc(name)})</span></div>
+        <div id="comp-pods-${CSS.escape(name)}" class="muted">loading…</div></div>
+    </div>`;
+
+  try {
+    const pods = await api(`/api/stacks/${ns}/${currentDetail.name}/components/${encodeURIComponent(name)}/pods`);
+    const box2 = document.getElementById('comp-pods-' + CSS.escape(name));
+    if (!box2) return;
+    box2.className = '';
+    box2.innerHTML = pods.length
+      ? `<table class="pods-table"><thead><tr><th>Pod</th><th>Phase</th><th>Ready</th><th>Restarts</th><th>Age</th></tr></thead><tbody>`
+        + pods.map(p => `<tr>
+            <td class="cell-name">${esc(p.name)}</td>
+            <td><span class="comp-phase ${esc(p.phase)}">${esc(p.phase)}</span></td>
+            <td class="cell-mode">${esc(p.ready)}</td>
+            <td class="cell-mode">${p.restarts}</td>
+            <td class="cell-mode">${esc(p.age)}</td>
+          </tr>`).join('') + '</tbody></table>'
+      : '<span class="muted">no pods matched (label app.kubernetes.io/instance=' + esc(name) + ')</span>';
+  } catch (e) {
+    const box2 = document.getElementById('comp-pods-' + CSS.escape(name));
+    if (box2) { box2.className = ''; box2.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
+  }
 }
 
 function renderSpec(d) {

@@ -24,7 +24,9 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:9090", "listen address (loopback by default)")
 	templatesDir := flag.String("templates", portal.DefaultTemplatesDir, "local templates dir")
 	agentfwURL := flag.String("agentfw", os.Getenv("AGENTFW_URL"),
-		"agentfw admin base URL to surface the session archive under /agentfw/ (empty = disabled)")
+		"agentfw admin endpoint for the /agentfw/ session archive (empty = disabled). "+
+			"Accepts a direct URL (http://host:port) or svc:<namespace>/<service>[:<port>] — "+
+			"the service-proxy form needs no port-forward")
 	vaultAddrTpl := flag.String("vault-addr-template", os.Getenv("KUBO_VAULT_ADDR_TEMPLATE"),
 		"Vault address template overriding the in-cluster default (http://vault.<ns>.svc.cluster.local:8200). "+
 			"Use {ns} for the namespace, e.g. http://localhost:8200 for a single port-forwarded Vault")

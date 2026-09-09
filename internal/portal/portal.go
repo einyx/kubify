@@ -126,10 +126,27 @@ func (p *Portal) GetIndexHTML() string { return indexHTML }
 // SetAgentfwURL configures the portal to surface the agentfw view archive
 // (agentsview-style session browser) under /agentfw/, proxied to the
 // agentfw admin endpoint. Empty string disables the integration.
+//
+// Two forms are accepted:
+//   - http(s)://host:port — a directly reachable endpoint (in-cluster or a
+//     manually established port-forward)
+//   - svc:<namespace>/<service>[:<port>] — routed through the Kubernetes API
+//     server's service proxy, so LOCAL runs need no port-forward at all
+//     (port defaults to 8080, the agentfw admin port)
 func (p *Portal) SetAgentfwURL(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		p.agentfwURL, p.agentfwProxy = "", nil
+		return nil
+	}
+	// svc:<ns>/<svc>[:<port>] — service-proxy form (no port-forward needed).
+	if strings.HasPrefix(raw, "svc:") {
+		proxy, err := p.agentfwServiceProxy(strings.TrimPrefix(raw, "svc:"))
+		if err != nil {
+			return err
+		}
+		p.agentfwURL = raw
+		p.agentfwProxy = proxy
 		return nil
 	}
 	u, err := url.Parse(raw)
@@ -177,6 +194,66 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 	p.agentfwURL = raw
 	p.agentfwProxy = proxy
 	return nil
+}
+
+// agentfwServiceProxy builds a reverse proxy that reaches the agentfw admin
+// endpoint through the Kubernetes API server's service proxy:
+// spec is "<namespace>/<service>[:<port>]" (port defaults to 8080).
+// Authentication rides on the ambient kubeconfig, so local runs need no
+// port-forward. SPAs served through the proxy get the /agentfw base path
+// injected, mirroring SetAgentfwURL's direct mode.
+func (p *Portal) agentfwServiceProxy(spec string) (http.Handler, error) {
+	spec = strings.Trim(spec, "/")
+	ns, remainder, ok := strings.Cut(spec, "/")
+	if !ok || ns == "" || remainder == "" {
+		return nil, fmt.Errorf("portal: invalid agentfw service spec %q (want svc:<namespace>/<service>[:<port>])", spec)
+	}
+	svc, port, found := strings.Cut(remainder, ":")
+	if !found || port == "" {
+		port = "8080"
+	}
+	if p.restCfg == nil {
+		return nil, fmt.Errorf("portal: svc: agentfw url requires a kubeconfig (portal not initialised with a rest config)")
+	}
+	hc, err := rest.HTTPClientFor(p.restCfg)
+	if err != nil {
+		return nil, fmt.Errorf("portal: kubeconfig transport: %w", err)
+	}
+	target := strings.TrimSuffix(p.restCfg.Host, "/") +
+		"/api/v1/namespaces/" + ns + "/services/http:" + svc + ":" + port + "/proxy"
+
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			u, _ := url.Parse(target)
+			pr.Out.URL.Scheme = u.Scheme
+			pr.Out.URL.Host = u.Host
+			pr.Out.URL.Path = u.Path
+			pr.Out.Host = u.Host
+			// The service proxy ignores query rewrites via SetURL; carry the
+			// original query over explicitly.
+			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
+		},
+		Transport: hc.Transport,
+		ModifyResponse: func(resp *http.Response) error {
+			if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
+				return nil
+			}
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			injected := bytes.Replace(body, []byte("<script>"),
+				[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
+			resp.Body = io.NopCloser(bytes.NewReader(injected))
+			resp.Header.Del("Content-Length")
+			resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "portal: agentfw unreachable via service proxy ("+ns+"/"+svc+":"+port+")", http.StatusBadGateway)
+		},
+	}, nil
 }
 
 // agentfwNav returns the nav snippet for the agentfw view, or "" when the
@@ -778,6 +855,61 @@ type EventView struct {
 	Message  string `json:"message,omitempty"`
 	Count    int32  `json:"count"`
 	LastSeen string `json:"lastSeen"`
+}
+
+// ComponentPod is one pod belonging to a component's Helm release.
+type ComponentPod struct {
+	Name     string   `json:"name"`
+	Phase    string   `json:"phase"`
+	Ready    string   `json:"ready"`
+	Restarts int32    `json:"restarts"`
+	Age      string   `json:"age"`
+	Node     string   `json:"node,omitempty"`
+	Images   []string `json:"images,omitempty"`
+}
+
+// ListComponentPods returns the pods of a component's Helm release
+// (standard helm label app.kubernetes.io/instance=<component>).
+func (p *Portal) ListComponentPods(ctx context.Context, ns, component string) ([]ComponentPod, error) {
+	if !validTenant(ns) {
+		return nil, fmt.Errorf("invalid namespace %q", ns)
+	}
+	var list corev1.PodList
+	sel := client.MatchingLabels{"app.kubernetes.io/instance": component}
+	if err := p.client.List(ctx, &list, client.InNamespace(ns), sel); err != nil {
+		return nil, fmt.Errorf("portal: list component pods: %w", err)
+	}
+	sort.Slice(list.Items, func(i, j int) bool { return list.Items[i].Name < list.Items[j].Name })
+	out := make([]ComponentPod, 0, len(list.Items))
+	for _, pod := range list.Items {
+		ready, total := 0, 0
+		var restarts int32
+		images := []string{}
+		for _, cs := range pod.Status.ContainerStatuses {
+			total++
+			if cs.Ready {
+				ready++
+			}
+			restarts += cs.RestartCount
+		}
+		for _, c := range pod.Spec.Containers {
+			images = append(images, c.Image)
+		}
+		phase := string(pod.Status.Phase)
+		if phase == "" {
+			phase = "Pending"
+		}
+		out = append(out, ComponentPod{
+			Name:     pod.Name,
+			Phase:    phase,
+			Ready:    fmt.Sprintf("%d/%d", ready, total),
+			Restarts: restarts,
+			Age:      since(pod.CreationTimestamp.Time),
+			Node:     pod.Spec.NodeName,
+			Images:   images,
+		})
+	}
+	return out, nil
 }
 
 // ListStackEvents returns recent events in the stack's namespace, newest
