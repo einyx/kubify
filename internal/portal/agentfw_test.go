@@ -1,10 +1,12 @@
 package portal
 
 import (
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"net/http"
+	"k8s.io/client-go/rest"
 )
 
 func TestAgentfwProxyDisabled(t *testing.T) {
@@ -93,5 +95,26 @@ func TestSetAgentfwURLValidation(t *testing.T) {
 	}
 	if p.AgentfwEnabled() {
 		t.Fatal("agentfw should be disabled after empty SetAgentfwURL")
+	}
+}
+
+func TestSetAgentfwServiceProxy(t *testing.T) {
+	p := &Portal{restCfg: &rest.Config{Host: "https://api.example.com"}}
+	if err := p.SetAgentfwURL("svc:foundation-a/agentfw"); err != nil {
+		t.Fatal(err)
+	}
+	if !p.AgentfwEnabled() || p.agentfwURL != "svc:foundation-a/agentfw" {
+		t.Fatalf("agentfwURL = %q", p.agentfwURL)
+	}
+	// invalid spec rejected
+	if err := p.SetAgentfwURL("svc:noslash"); err == nil {
+		t.Error("expected error for svc spec without namespace/service")
+	}
+	// empty disables
+	if err := p.SetAgentfwURL(""); err != nil {
+		t.Fatal(err)
+	}
+	if p.AgentfwEnabled() {
+		t.Error("empty URL should disable the integration")
 	}
 }

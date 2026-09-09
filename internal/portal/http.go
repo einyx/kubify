@@ -173,6 +173,10 @@ func (p *Portal) Mux() http.Handler {
 		}
 		respond(w, r, map[string]bool{"patched": true}, nil)
 	})
+	handle("GET /api/stacks/{namespace}/{name}/components/{component}/pods", func(w http.ResponseWriter, r *http.Request) {
+		pods, err := p.ListComponentPods(r.Context(), r.PathValue("namespace"), r.PathValue("component"))
+		respond(w, r, pods, err)
+	})
 	handle("GET /api/stacks/{namespace}/events", func(w http.ResponseWriter, r *http.Request) {
 		events, err := p.ListStackEvents(r.Context(), r.PathValue("namespace"), atoiDefault(r.URL.Query().Get("limit"), 50))
 		respond(w, r, events, err)
