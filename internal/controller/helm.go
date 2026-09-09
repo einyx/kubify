@@ -262,7 +262,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	// release (and the chart version must match). Prevents one Helm revision
 	// per reconcile on unchanged stacks. If the dry-run render fails, fall
 	// through to a real upgrade rather than guessing.
-	if existing.Chart != nil && existing.Chart.Metadata != nil &&
+	if existing != nil && existing.Chart != nil && existing.Chart.Metadata != nil &&
 		existing.Chart.Metadata.Version == chartVersion(ch) {
 		if rendered, rerr := renderManifest(cfg, compName, namespace, ch, values); rerr == nil && rendered == existing.Manifest {
 			return existing, nil
