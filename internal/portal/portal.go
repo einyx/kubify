@@ -9,13 +9,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -132,7 +136,7 @@ func (p *Portal) GetIndexHTML() string { return indexHTML }
 //     manually established port-forward)
 //   - svc:<namespace>/<service>[:<port>] — routed through the Kubernetes API
 //     server's service proxy, so LOCAL runs need no port-forward at all
-//     (port defaults to 8080, the agentfw admin port)
+//     (port defaults to 8081, the agentfw admin port)
 func (p *Portal) SetAgentfwURL(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
@@ -170,22 +174,7 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 		// The upstream viewer serves its SPA at root with no base path
 		// configured, so inject the portal mount prefix into the HTML —
 		// mirroring agentsview's --base-path proxy integration.
-		ModifyResponse: func(resp *http.Response) error {
-			if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
-				return nil
-			}
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			resp.Body.Close()
-			if err != nil {
-				return err
-			}
-			injected := bytes.Replace(body, []byte("<script>"),
-				[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
-			resp.Body = io.NopCloser(bytes.NewReader(injected))
-			resp.Header.Del("Content-Length")
-			resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
-			return nil
-		},
+		ModifyResponse: agentfwRewriteResponse(""),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, "portal: agentfw unreachable — is the proxy running with its admin port exposed?",
 				http.StatusBadGateway)
@@ -197,11 +186,11 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 }
 
 // agentfwServiceProxy builds a reverse proxy that reaches the agentfw admin
-// endpoint through the Kubernetes API server's service proxy:
-// spec is "<namespace>/<service>[:<port>]" (port defaults to 8080).
-// Authentication rides on the ambient kubeconfig, so local runs need no
-// port-forward. SPAs served through the proxy get the /agentfw base path
-// injected, mirroring SetAgentfwURL's direct mode.
+// endpoint. The Kubernetes API server's service proxy hangs for non-kubectl
+// clients on some fronted setups (tailscale serve), so the portal manages a
+// `kubectl port-forward` child process itself: started lazily, restarted if
+// it dies, killed with the portal. Spec: "<namespace>/<service>[:<port>]"
+// (port defaults to 8081, the agentfw admin port).
 func (p *Portal) agentfwServiceProxy(spec string) (http.Handler, error) {
 	spec = strings.Trim(spec, "/")
 	ns, remainder, ok := strings.Cut(spec, "/")
@@ -210,50 +199,115 @@ func (p *Portal) agentfwServiceProxy(spec string) (http.Handler, error) {
 	}
 	svc, port, found := strings.Cut(remainder, ":")
 	if !found || port == "" {
-		port = "8080"
+		port = "8081"
 	}
-	if p.restCfg == nil {
-		return nil, fmt.Errorf("portal: svc: agentfw url requires a kubeconfig (portal not initialised with a rest config)")
-	}
-	hc, err := rest.HTTPClientFor(p.restCfg)
-	if err != nil {
-		return nil, fmt.Errorf("portal: kubeconfig transport: %w", err)
-	}
-	target := strings.TrimSuffix(p.restCfg.Host, "/") +
-		"/api/v1/namespaces/" + ns + "/services/http:" + svc + ":" + port + "/proxy"
 
-	return &httputil.ReverseProxy{
+	local, err := freePort()
+	if err != nil {
+		return nil, fmt.Errorf("portal: free local port for agentfw forward: %w", err)
+	}
+	mu := &sync.Mutex{}
+	up := false
+	start := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if up {
+			return
+		}
+		cmd := exec.Command("kubectl", "-n", ns, "port-forward", "svc/"+svc,
+			fmt.Sprintf("%d:%s", local, port))
+		if err := cmd.Start(); err != nil {
+			log.Printf("portal: agentfw port-forward failed to start: %v", err)
+			return
+		}
+		up = true
+		log.Printf("portal: agentfw port-forward started (%d -> %s/%s:%s)", local, ns, svc, port)
+		go func() {
+			_ = cmd.Wait()
+			mu.Lock()
+			up = false
+			mu.Unlock()
+			log.Printf("portal: agentfw port-forward exited")
+		}()
+	}
+	start()
+
+	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			u, _ := url.Parse(target)
-			pr.Out.URL.Scheme = u.Scheme
-			pr.Out.URL.Host = u.Host
-			pr.Out.URL.Path = u.Path
-			pr.Out.Host = u.Host
-			// The service proxy ignores query rewrites via SetURL; carry the
-			// original query over explicitly.
-			pr.Out.URL.RawQuery = pr.In.URL.RawQuery
-		},
-		Transport: hc.Transport,
-		ModifyResponse: func(resp *http.Response) error {
-			if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
-				return nil
+			pr.SetURL(&url.URL{Scheme: "http", Host: "127.0.0.1:" + itoa(local)})
+			pr.Out.Host = "127.0.0.1:" + itoa(local)
+			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/agentfw")
+			if pr.Out.URL.Path == "" {
+				pr.Out.URL.Path = "/"
 			}
-			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-			resp.Body.Close()
-			if err != nil {
-				return err
-			}
-			injected := bytes.Replace(body, []byte("<script>"),
-				[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
-			resp.Body = io.NopCloser(bytes.NewReader(injected))
-			resp.Header.Del("Content-Length")
-			resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
-			return nil
 		},
+		ModifyResponse: agentfwRewriteResponse(""),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, "portal: agentfw unreachable via service proxy ("+ns+"/"+svc+":"+port+")", http.StatusBadGateway)
+			mu.Lock()
+			was := up
+			mu.Unlock()
+			if was {
+				// The forward died mid-request — restart it for the next one.
+				go start()
+			}
+			http.Error(w, "portal: agentfw unreachable ("+ns+"/"+svc+":"+port+")", http.StatusBadGateway)
 		},
-	}, nil
+	}
+
+	// Watchdog: restart the forward whenever it dies, for the portal's life.
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			mu.Lock()
+			alive := up
+			mu.Unlock()
+			if !alive {
+				start()
+			}
+		}
+	}()
+
+	return proxy, nil
+}
+
+func freePort() (int, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, err
+	}
+	defer l.Close()
+	return l.Addr().(*net.TCPAddr).Port, nil
+}
+
+func itoa(n int) string { return strconv.Itoa(n) }
+
+// agentfwRewriteResponse post-processes agentfw responses: inject the SPA
+// base path into HTML, and map absolute redirect locations back onto the
+// /agentfw mount.
+func agentfwRewriteResponse(proxyPrefix string) func(*http.Response) error {
+	return func(resp *http.Response) error {
+		if loc := resp.Header.Get("Location"); loc != "" {
+			if strings.HasPrefix(loc, proxyPrefix) {
+				resp.Header.Set("Location", "/agentfw"+strings.TrimPrefix(loc, proxyPrefix))
+			} else if loc == "/" || loc == proxyPrefix+"/" {
+				resp.Header.Set("Location", "/agentfw/")
+			}
+		}
+		if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
+			return nil
+		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if err != nil {
+			return err
+		}
+		injected := bytes.Replace(body, []byte("<script>"),
+			[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
+		resp.Body = io.NopCloser(bytes.NewReader(injected))
+		resp.Header.Del("Content-Length")
+		resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
+		return nil
+	}
 }
 
 // agentfwNav returns the nav snippet for the agentfw view, or "" when the
