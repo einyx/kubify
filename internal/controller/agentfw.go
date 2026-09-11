@@ -20,6 +20,9 @@ const (
 	agentfwName      = "agentfw"
 	agentfwImage     = "kubifyregistry.azurecr.io/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
 	agentfwPort      = 8080
+	// Admin endpoint: kill switch + session-archive viewer. The portal's
+	// agentfw integration proxies this port (svc:<ns>/agentfw:8081).
+	agentfwAdminPort = 8081
 	agentfwPolicyKey = "policy.yaml"
 )
 
@@ -84,8 +87,11 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, ns string
 						// :main is a mutable tracking tag — always re-pull so
 						// nodes pick up fresh pushes instead of stale cache.
 						ImagePullPolicy: corev1.PullAlways,
-						Args:            []string{"-addr=:8080", "-policy=/etc/agentfw/policy.yaml"},
-						Ports:           []corev1.ContainerPort{{ContainerPort: agentfwPort, Protocol: corev1.ProtocolTCP}},
+						Args:            []string{"-addr=:8080", "-admin=:8081", "-policy=/etc/agentfw/policy.yaml"},
+						Ports: []corev1.ContainerPort{
+							{ContainerPort: agentfwPort, Protocol: corev1.ProtocolTCP},
+							{Name: "admin", ContainerPort: agentfwAdminPort, Protocol: corev1.ProtocolTCP},
+						},
 						VolumeMounts: []corev1.VolumeMount{{
 							Name:      "policy",
 							MountPath: "/etc/agentfw",
@@ -148,17 +154,30 @@ func (r *StackReconciler) ensureAgentFWService(ctx context.Context, ns string) e
 		ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns},
 		Spec: corev1.ServiceSpec{
 			Selector: map[string]string{"app": agentfwName},
-			Ports: []corev1.ServicePort{{
-				Port:       agentfwPort,
-				TargetPort: intstr.FromInt(agentfwPort),
-				Protocol:   corev1.ProtocolTCP,
-			}},
+			Ports: []corev1.ServicePort{
+				{
+					Port:       agentfwPort,
+					TargetPort: intstr.FromInt(agentfwPort),
+					Protocol:   corev1.ProtocolTCP,
+				},
+				{
+					Name:       "admin",
+					Port:       agentfwAdminPort,
+					TargetPort: intstr.FromInt(agentfwAdminPort),
+					Protocol:   corev1.ProtocolTCP,
+				},
+			},
 		},
 	}
 	var existing corev1.Service
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: agentfwName}, &existing)
 	if apierrors.IsNotFound(err) {
 		return r.Create(ctx, desired)
+	}
+	// Self-heal drift (e.g. services created before the admin port existed).
+	if len(existing.Spec.Ports) != len(desired.Spec.Ports) {
+		existing.Spec.Ports = desired.Spec.Ports
+		return r.Update(ctx, &existing)
 	}
 	return err
 }

@@ -267,6 +267,11 @@ if %t; then
   echo "[db] pg_dump %s -> %s"
   PGPASSWORD="$SRC_PGPASSWORD" pg_dump -h %s -p %d -U %s -d %s --no-owner \
     | PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=0
+  echo "[db] hand ownership + grants to the tenant app user"
+  PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
+    -c 'REASSIGN OWNED BY %s TO %s;'
+  PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
+    -c 'GRANT ALL ON ALL TABLES IN SCHEMA public TO %s; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO %s; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO %s; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO %s;'
 fi
 
 if %t; then
@@ -295,6 +300,10 @@ echo "done."
 		srcDBHost, dstDBHost,
 		srcDBHost, port, user, db,
 		dstDBHost, port, restoreUser, db,
+		dstDBHost, port, restoreUser, db,
+		restoreUser, user,
+		dstDBHost, port, restoreUser, db,
+		user, user, user, user,
 		doS3, srcS3Host, dstS3Host,
 		srcS3Host, dstS3Host, buckets,
 	)
