@@ -13,6 +13,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // The control-plane vault is kubo's own secret store: a single-node Vault in
@@ -37,9 +38,15 @@ const (
 // unsealed. It returns a ready client, or cpReady=false when the vault is
 // still initializing (callers proceed without it and retry next reconcile).
 func (r *StackReconciler) ensureControlPlaneVault(ctx context.Context) (*vaultClient, bool) {
+	log := logf.FromContext(ctx)
+	bail := func(format string, args ...interface{}) (*vaultClient, bool) {
+		log.Error(fmt.Errorf(format, args...), "control-plane vault unavailable; proceeding without it")
+		return nil, false
+	}
+
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cpVaultNS}}
 	if err := r.Create(ctx, ns); err != nil && !apierrors.IsAlreadyExists(err) {
-		return nil, false
+		return bail("create namespace %s: %v", cpVaultNS, err)
 	}
 
 	// Same identity + RBAC shape as tenant vaults. The ACR pull secret is
@@ -56,7 +63,7 @@ func (r *StackReconciler) ensureControlPlaneVault(ctx context.Context) (*vaultCl
 	}
 
 	if err := applyVaultCR(ctx, r.Client, cpVaultNS, controlPlaneVaultSpec()); err != nil {
-		return nil, false
+		return bail("apply control-plane Vault CR: %v", err)
 	}
 
 	// bank-vaults initializes (Azure-unseals) and stores the root token in
@@ -64,16 +71,19 @@ func (r *StackReconciler) ensureControlPlaneVault(ctx context.Context) (*vaultCl
 	// kubo-system wipe touches.
 	var unseal corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: cpVaultNS, Name: vaultUnsealKey}, &unseal); err != nil {
-		return nil, false
+		if apierrors.IsNotFound(err) {
+			return bail("control-plane Vault initializing (waiting for %s secret)", vaultUnsealKey)
+		}
+		return bail("get control-plane unseal secret: %v", err)
 	}
 	token := string(unseal.Data["vault-root"])
 	if token == "" {
-		return nil, false
+		return bail("control-plane %s secret has no vault-root", vaultUnsealKey)
 	}
 
 	vc := &vaultClient{addr: cpVaultAddr, token: token}
 	if err := vc.ensureKVNamed(ctx, cpKVPath); err != nil {
-		return nil, false
+		return bail("control-plane KV mount: %v", err)
 	}
 	return vc, true
 }

@@ -17,9 +17,9 @@ import (
 )
 
 const (
-	agentfwName      = "agentfw"
-	agentfwImage     = "meshxregistry.azurecr.io/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
-	agentfwPort      = 8080
+	agentfwName  = "agentfw"
+	agentfwImage = "meshxregistry.azurecr.io/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
+	agentfwPort  = 8080
 	// Admin endpoint: kill switch + session-archive viewer. The portal's
 	// agentfw integration proxies this port (svc:<ns>/agentfw:8081).
 	agentfwAdminPort = 8081
@@ -175,11 +175,25 @@ func (r *StackReconciler) ensureAgentFWService(ctx context.Context, ns string) e
 		return r.Create(ctx, desired)
 	}
 	// Self-heal drift (e.g. services created before the admin port existed).
-	if len(existing.Spec.Ports) != len(desired.Spec.Ports) {
+	// Compare semantically: a same-count port mutation must also heal.
+	if !equalPorts(existing.Spec.Ports, desired.Spec.Ports) {
 		existing.Spec.Ports = desired.Spec.Ports
 		return r.Update(ctx, &existing)
 	}
 	return err
+}
+
+func equalPorts(a, b []corev1.ServicePort) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name || a[i].Port != b[i].Port ||
+			a[i].TargetPort != b[i].TargetPort || a[i].Protocol != b[i].Protocol {
+			return false
+		}
+	}
+	return true
 }
 
 // deleteAgentFW removes the per-tenant agent firewall resources.

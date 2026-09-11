@@ -59,13 +59,18 @@ func (p *Portal) Mux() http.Handler {
 		html = strings.Replace(html, "<!-- agentfw-nav -->", p.agentfwNav(), 1)
 		w.Write([]byte(html))
 	})
-	// agentfw view archive (agentsview-style session browser), proxied to
-	// the agentfw admin port when configured via SetAgentfwURL.
+	// agentfw archive API, proxied to the agentfw admin port when
+	// configured via SetAgentfwURL. The portal SPA renders the UI itself
+	// (Agent traffic view); only the JSON API is proxied. Plain /agentfw
+	// paths redirect into the SPA so old bookmarks keep working.
 	if p.agentfwProxy != nil {
 		handle("GET /agentfw", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/agentfw/", http.StatusPermanentRedirect)
+			http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
 		})
-		handle("GET /agentfw/", p.agentfwProxy.ServeHTTP)
+		handle("GET /agentfw/", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
+		})
+		handle("GET /agentfw/api/", p.agentfwProxy.ServeHTTP)
 	}
 	handle("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
