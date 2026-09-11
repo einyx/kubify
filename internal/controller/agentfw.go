@@ -156,6 +156,8 @@ func (r *StackReconciler) ensureAgentFWService(ctx context.Context, ns string) e
 			Selector: map[string]string{"app": agentfwName},
 			Ports: []corev1.ServicePort{
 				{
+					// Multi-port Services require a name on every port.
+					Name:       "proxy",
 					Port:       agentfwPort,
 					TargetPort: intstr.FromInt(agentfwPort),
 					Protocol:   corev1.ProtocolTCP,
