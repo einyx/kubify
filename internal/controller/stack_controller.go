@@ -13,8 +13,10 @@ import (
 
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"helm.sh/helm/v3/pkg/chart"
@@ -865,7 +867,14 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 // HelmRelease updates are mapped back to the owning Stack.
 func (r *StackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&platformv1alpha1.Stack{}).
+		For(&platformv1alpha1.Stack{}, builder.WithPredicates(predicate.Or(
+			// Spec changes bump the generation; annotation-only updates (the
+			// kubify.io/reconcile-at trigger stamped by the portal/MCP) must
+			// enqueue too — without this, values edited in the Stack spec
+			// after the last deploy never reach the running components.
+			predicate.GenerationChangedPredicate{},
+			predicate.AnnotationChangedPredicate{},
+		))).
 		Named("stack").
 		WithOptions(controller.Options{MaxConcurrentReconciles: 5}).
 		Watches(
