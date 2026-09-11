@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"net/http"
 	"k8s.io/client-go/rest"
+	"net/http"
 )
 
 func TestAgentfwProxyDisabled(t *testing.T) {
@@ -22,8 +22,8 @@ func TestAgentfwProxyDisabled(t *testing.T) {
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GET /agentfw/ without config = %d, want 404", w.Code)
 	}
-	if html := p.GetIndexHTML(); strings.Contains(html, `href="/agentfw/"`) {
-		t.Fatal("nav link must be absent when agentfw is disabled")
+	if html := p.GetIndexHTML(); strings.Contains(html, `onclick="showAgents()"`) {
+		t.Fatal("agent view button must be absent when agentfw is disabled")
 	}
 }
 
@@ -59,29 +59,20 @@ func TestAgentfwProxySurfacesArchive(t *testing.T) {
 		t.Fatalf("proxied body = %s", w.Body.String())
 	}
 
-	// HTML responses get the SPA base injected so the viewer's API calls
-	// resolve under /agentfw/.
-	html := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte("<html><body><script>let x=1;</script></body></html>"))
-	}))
-	defer html.Close()
-	if err := p.SetAgentfwURL(html.URL); err != nil {
-		t.Fatalf("SetAgentfwURL: %v", err)
-	}
-	r3 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/agentfw/", nil)
-	w3 := httptest.NewRecorder()
-	p.Mux().ServeHTTP(w3, r3)
-	if !strings.Contains(w3.Body.String(), `window.__AFW_BASE__="/agentfw"`) {
-		t.Fatalf("base not injected into proxied HTML: %s", w3.Body.String())
-	}
-
-	// Nav link appears in the served UI.
-	r2 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)
+	// The standalone page is gone: /agentfw/ redirects into the SPA view.
+	r2 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/agentfw/", nil)
 	w2 := httptest.NewRecorder()
 	mux.ServeHTTP(w2, r2)
-	if !strings.Contains(w2.Body.String(), `href="/agentfw/"`) {
-		t.Fatal("nav link missing from served index when agentfw is enabled")
+	if w2.Code != http.StatusPermanentRedirect || w2.Header().Get("Location") != "/#/agents" {
+		t.Fatalf("GET /agentfw/ = %d %q, want 308 /#/agents", w2.Code, w2.Header().Get("Location"))
+	}
+
+	// Nav button appears in the served UI and opens the in-SPA view.
+	r3 := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/", nil)
+	w3 := httptest.NewRecorder()
+	mux.ServeHTTP(w3, r3)
+	if !strings.Contains(w3.Body.String(), `onclick="showAgents()"`) {
+		t.Fatal("agent view button missing from served index when agentfw is enabled")
 	}
 }
 

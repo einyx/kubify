@@ -333,16 +333,16 @@ func agentfwRewriteResponse(proxyPrefix, label string) func(*http.Response) erro
 	}
 }
 
-// agentfwNav returns the nav snippet for the agentfw view, or "" when the
-// integration is not configured.
+// agentfwNav returns the nav snippet that opens the in-SPA Agent traffic
+// view, or "" when the integration is not configured.
 func (p *Portal) agentfwNav() string {
 	if p.agentfwProxy == nil {
 		return ""
 	}
 	if p.agentfwLabel != "" {
-		return `<a class="btn" href="/agentfw/" title="agentfw session archive — ` + p.agentfwLabel + `">Agentfw · ` + p.agentfwLabel + ` <span class="btn-icon">◉</span></a>`
+		return `<button id="afw-nav-btn" data-label="` + p.agentfwLabel + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + p.agentfwLabel + `">Agent traffic · ` + p.agentfwLabel + ` <span class="btn-icon">◉</span></button>`
 	}
-	return `<a class="btn" href="/agentfw/" title="agentfw session archive">Agent traffic <span class="btn-icon">◉</span></a>`
+	return `<button id="afw-nav-btn" class="btn secondary" onclick="showAgents()" title="agentfw session archive">Agent traffic <span class="btn-icon">◉</span></button>`
 }
 
 // ListStacks returns every Stack in the cluster, oldest first.

@@ -221,7 +221,7 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 	}
 	// RESTORE_PGPASSWORD comes from the reconciler's cross-namespace copy.
 	restoreSec := "stackbackup-target-restore-pg"
-// (overridden below: target-ns values are copied to the source ns at create-time)
+	// (overridden below: target-ns values are copied to the source ns at create-time)
 
 	s3 := bk.Spec.S3
 	if s3 == nil {
@@ -326,7 +326,7 @@ echo "done."
 				Spec: corev1.PodSpec{
 					ServiceAccountName: stackBackupSA,
 					RestartPolicy:      corev1.RestartPolicyNever,
-					ImagePullSecrets: []corev1.LocalObjectReference{{Name: "acr-pull-secret"}},
+					ImagePullSecrets:   []corev1.LocalObjectReference{{Name: "acr-pull-secret"}},
 					Containers: []corev1.Container{{
 						Name:    "backup",
 						Image:   image,

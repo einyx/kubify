@@ -2,17 +2,18 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/resource"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kptr "k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 )
 
 // Cluster-level Cloudflare Tunnel: platform ingress infrastructure, not a
@@ -78,6 +79,17 @@ func (r *StackReconciler) ensureCloudflareTunnel(ctx context.Context) error {
 		"app.kubernetes.io/name":       "cloudflared",
 		"app.kubernetes.io/instance":   cloudflaredDeployName,
 	}
+
+	// Checksum the mounted inputs into the pod template: config.yaml and
+	// credentials.json are subPath-mounted, and subPath volumes never
+	// refresh in-place — without this, tunnel config edits and credential
+	// rotations never reach the running cloudflared.
+	sum := sha256.Sum256(append([]byte(config), creds.Data["credentials.json"]...))
+	checksum := hex.EncodeToString(sum[:])
+	podAnnotations := map[string]string{
+		"kubo.io/tunnel-checksum": checksum,
+	}
+
 	replicas := int32(1)
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -88,11 +100,15 @@ func (r *StackReconciler) ensureCloudflareTunnel(ctx context.Context) error {
 	}
 	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Labels = labels
+		if dep.Spec.Template.ObjectMeta.Annotations == nil {
+			dep.Spec.Template.ObjectMeta.Annotations = map[string]string{}
+		}
+		dep.Spec.Template.ObjectMeta.Annotations = podAnnotations
 		dep.Spec = appsv1.DeploymentSpec{
 			Replicas: &replicas,
 			Selector: &metav1.LabelSelector{MatchLabels: labels},
 			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: labels},
+				ObjectMeta: metav1.ObjectMeta{Labels: labels, Annotations: podAnnotations},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
 						Name:  "cloudflared",
