@@ -3,19 +3,11 @@
 package portal
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -49,12 +41,15 @@ const DefaultTemplatesDir = defaultTemplatesDir
 
 // Portal is the operator portal server.
 type Portal struct {
-	client       client.Client
-	registry     *Registry
-	metrics      *Metrics
-	agentfwURL   string
-	agentfwLabel string // product/tenant name shown with the agentfw view
-	agentfwProxy http.Handler
+	client          client.Client
+	registry        *Registry
+	metrics         *Metrics
+	agentfwURL      string // raw -agentfw flag value (explicit instance)
+	agentfwMu       sync.RWMutex
+	agentfwItems    map[string]agentfwItem // product label -> instance
+	agentfwOrder    []string
+	agentfwExplicit map[string]bool
+	agentfwDiscAt   time.Time
 	// vaultAddrOverride, when set, replaces the in-cluster Vault address
 	// template (http://vault.<ns>.svc:8200) — used for local development
 	// against a port-forwarded Vault.
@@ -122,227 +117,30 @@ type StackSummary struct {
 	Failing []string `json:"failing,omitempty"`
 }
 
-// AgentfwEnabled reports whether the agentfw archive integration is active.
-func (p *Portal) AgentfwEnabled() bool { return p.agentfwProxy != nil }
-
 // GetIndexHTML returns the embedded single-page UI.
 func (p *Portal) GetIndexHTML() string { return indexHTML }
 
-// SetAgentfwURL configures the portal to surface the agentfw view archive
-// (agentsview-style session browser) under /agentfw/, proxied to the
-// agentfw admin endpoint. Empty string disables the integration.
-//
-// Two forms are accepted:
-//   - http(s)://host:port — a directly reachable endpoint (in-cluster or a
-//     manually established port-forward)
-//   - svc:<namespace>/<service>[:<port>] — routed through the Kubernetes API
-//     server's service proxy, so LOCAL runs need no port-forward at all
-//     (port defaults to 8081, the agentfw admin port)
-func (p *Portal) SetAgentfwURL(raw string) error {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		p.agentfwURL, p.agentfwProxy = "", nil
-		p.agentfwLabel = ""
-		return nil
-	}
-	// svc:<ns>/<svc>[:<port>] — service-proxy form (no port-forward needed).
-	// The namespace doubles as the product label shown in the UI.
-	if strings.HasPrefix(raw, "svc:") {
-		spec := strings.TrimPrefix(raw, "svc:")
-		// Label first: the proxy's response rewriter reads it.
-		p.agentfwLabel, _, _ = strings.Cut(spec, "/")
-		proxy, err := p.agentfwServiceProxy(spec)
-		if err != nil {
-			return err
-		}
-		p.agentfwURL = raw
-		p.agentfwProxy = proxy
-		return nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return fmt.Errorf("portal: invalid agentfw url %q: %w", raw, err)
-	}
-	// Optional #fragment names the product (e.g. http://localhost:18081#foundation-b).
-	p.agentfwLabel = u.Fragment
-	u.Fragment = ""
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("portal: agentfw url must be http(s), got %q", raw)
-	}
-	target := &url.URL{Scheme: u.Scheme, Host: u.Host}
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			pr.Out.Host = target.Host
-			// Strip the portal mount prefix; the viewer serves at root.
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/agentfw")
-			if pr.Out.URL.Path == "" {
-				pr.Out.URL.Path = "/"
-			}
-		},
-		// The upstream viewer serves its SPA at root with no base path
-		// configured, so inject the portal mount prefix into the HTML —
-		// mirroring agentsview's --base-path proxy integration.
-		ModifyResponse: agentfwRewriteResponse("", p.agentfwLabel),
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, "portal: agentfw unreachable via service proxy ("+err.Error()+")",
-				http.StatusBadGateway)
-		},
-	}
-	p.agentfwURL = raw
-	p.agentfwProxy = proxy
-	return nil
-}
-
-// agentfwServiceProxy builds a reverse proxy that reaches the agentfw admin
-// endpoint. The Kubernetes API server's service proxy hangs for non-kubectl
-// clients on some fronted setups (tailscale serve), so the portal manages a
-// `kubectl port-forward` child process itself: started lazily, restarted if
-// it dies, killed with the portal. Spec: "<namespace>/<service>[:<port>]"
-// (port defaults to 8081, the agentfw admin port).
-func (p *Portal) agentfwServiceProxy(spec string) (http.Handler, error) {
-	spec = strings.Trim(spec, "/")
-	ns, remainder, ok := strings.Cut(spec, "/")
-	if !ok || ns == "" || remainder == "" {
-		return nil, fmt.Errorf("portal: invalid agentfw service spec %q (want svc:<namespace>/<service>[:<port>])", spec)
-	}
-	svc, port, found := strings.Cut(remainder, ":")
-	if !found || port == "" {
-		port = "8081"
-	}
-
-	local, err := freePort()
-	if err != nil {
-		return nil, fmt.Errorf("portal: free local port for agentfw forward: %w", err)
-	}
-	mu := &sync.Mutex{}
-	up := false
-	start := func() {
-		mu.Lock()
-		defer mu.Unlock()
-		if up {
-			return
-		}
-		cmd := exec.Command("kubectl", "-n", ns, "port-forward", "svc/"+svc,
-			fmt.Sprintf("%d:%s", local, port))
-		if err := cmd.Start(); err != nil {
-			log.Printf("portal: agentfw port-forward failed to start: %v", err)
-			return
-		}
-		up = true
-		log.Printf("portal: agentfw port-forward started (%d -> %s/%s:%s)", local, ns, svc, port)
-		go func() {
-			_ = cmd.Wait()
-			mu.Lock()
-			up = false
-			mu.Unlock()
-			log.Printf("portal: agentfw port-forward exited")
-		}()
-	}
-	start()
-
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(&url.URL{Scheme: "http", Host: "127.0.0.1:" + itoa(local)})
-			pr.Out.Host = "127.0.0.1:" + itoa(local)
-			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/agentfw")
-			if pr.Out.URL.Path == "" {
-				pr.Out.URL.Path = "/"
-			}
-		},
-		ModifyResponse: agentfwRewriteResponse("", p.agentfwLabel),
-		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			mu.Lock()
-			was := up
-			mu.Unlock()
-			if was {
-				// The forward died mid-request — restart it for the next one.
-				go start()
-			}
-			http.Error(w, "portal: agentfw unreachable ("+ns+"/"+svc+":"+port+")", http.StatusBadGateway)
-		},
-	}
-
-	// Watchdog: restart the forward whenever it dies, for the portal's life.
-	go func() {
-		for {
-			time.Sleep(5 * time.Second)
-			mu.Lock()
-			alive := up
-			mu.Unlock()
-			if !alive {
-				start()
-			}
-		}
-	}()
-
-	return proxy, nil
-}
-
-func freePort() (int, error) {
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port, nil
-}
-
-func itoa(n int) string { return strconv.Itoa(n) }
-
-// agentfwRewriteResponse post-processes agentfw responses: inject the SPA
-// base path into HTML, and map absolute redirect locations back onto the
-// /agentfw mount.
-func agentfwRewriteResponse(proxyPrefix, label string) func(*http.Response) error {
-	return func(resp *http.Response) error {
-		if loc := resp.Header.Get("Location"); loc != "" {
-			if strings.HasPrefix(loc, proxyPrefix) {
-				resp.Header.Set("Location", "/agentfw"+strings.TrimPrefix(loc, proxyPrefix))
-			} else if loc == "/" || loc == proxyPrefix+"/" {
-				resp.Header.Set("Location", "/agentfw/")
-			}
-		}
-		if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
-			return nil
-		}
-		body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
-		if err != nil {
-			return err
-		}
-		pre := `<script>window.__AFW_BASE__="/agentfw";`
-		if label != "" {
-			pre += `window.__AFW_LABEL__="` + template.JSEscapeString(label) + `";`
-		}
-		pre += `</script><script>`
-		if label != "" {
-			// Product badge: fixed pill + document title, so the view always
-			// says which tenant's firewall is being browsed.
-			pre += `document.title=document.title.replace(/ · .*$/,'')+' · ` + template.JSEscapeString(label) + `';` +
-				`addEventListener('DOMContentLoaded',function(){var b=document.createElement('div');` +
-				`b.textContent='⬤ ` + template.JSEscapeString(label) + `';` +
-				`b.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;background:#16181d;color:#fff;` +
-				`font:600 11px/1 system-ui,sans-serif;padding:5px 11px;border-radius:9999px;opacity:.85;pointer-events:none';` +
-				`document.body.appendChild(b);});`
-		}
-		injected := bytes.Replace(body, []byte("<script>"), []byte(pre), 1)
-		resp.Body = io.NopCloser(bytes.NewReader(injected))
-		resp.Header.Del("Content-Length")
-		resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
-		return nil
-	}
-}
-
-// agentfwNav returns the nav snippet that opens the in-SPA Agent traffic
-// view, or "" when the integration is not configured.
+// agentfwNav returns the nav button that opens the in-SPA Agent traffic
+// view. The button is labeled with every discovered product; the view
+// itself aggregates and labels each record with its product.
 func (p *Portal) agentfwNav() string {
-	if p.agentfwProxy == nil {
+	if !p.AgentfwEnabled() {
 		return ""
 	}
-	if p.agentfwLabel != "" {
-		return `<button id="afw-nav-btn" data-label="` + p.agentfwLabel + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + p.agentfwLabel + `">Agent traffic · ` + p.agentfwLabel + ` <span class="btn-icon">◉</span></button>`
+	labels := p.agentfwLabels()
+	dataLabel := strings.Join(labels, ", ")
+	switch len(labels) {
+	case 0:
+		return ""
+	case 1:
+		return `<button id="afw-nav-btn" data-label="` + labels[0] + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + labels[0] + `">Agentfw · ` + labels[0] + ` <span class="btn-icon">◉</span></button>`
+	default:
+		shown := strings.Join(labels[:min(2, len(labels))], ", ")
+		if len(labels) > 2 {
+			shown += " +" + fmt.Sprint(len(labels)-2)
+		}
+		return `<button id="afw-nav-btn" data-label="` + dataLabel + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + dataLabel + `">Agentfw · ` + shown + ` <span class="btn-icon">◉</span></button>`
 	}
-	return `<button id="afw-nav-btn" class="btn secondary" onclick="showAgents()" title="agentfw session archive">Agent traffic <span class="btn-icon">◉</span></button>`
 }
 
 // ListStacks returns every Stack in the cluster, oldest first.
