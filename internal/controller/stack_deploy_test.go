@@ -11,6 +11,7 @@ import (
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -24,6 +25,8 @@ type fakeHelm struct {
 	charts    map[string]*chart.Chart
 	revision  int
 	deploySem chan struct{} // if set, held while deploying (for concurrency tests)
+	// recordValues, when set, observes the values passed to each Deploy.
+	recordValues func(map[string]interface{})
 }
 
 func (f *fakeHelm) EnsureChart(ref platformv1alpha1.ChartRef, _, _ string) (*chart.Chart, error) {
@@ -36,11 +39,14 @@ func (f *fakeHelm) EnsureChart(ref platformv1alpha1.ChartRef, _, _ string) (*cha
 	return &chart.Chart{Metadata: &chart.Metadata{Name: ref.ChartName, Version: "0.1.0"}}, nil
 }
 
-func (f *fakeHelm) Deploy(compName, namespace string, _ *chart.Chart, _ map[string]interface{}) (*release.Release, error) {
+func (f *fakeHelm) Deploy(compName, namespace string, _ *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	if f.deploySem != nil {
 		f.deploySem <- struct{}{}
 		defer func() { <-f.deploySem }()
 		time.Sleep(10 * time.Millisecond) // make overlap observable
+	}
+	if f.recordValues != nil {
+		f.recordValues(values)
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -222,5 +228,50 @@ func TestDeployComponentStatusMapping(t *testing.T) {
 		platformv1alpha1.StackComponentSpec{Name: "worse", ChartRef: platformv1alpha1.ChartRef{ChartName: "chart-fail"}})
 	if err == nil || st.Phase != platformv1alpha1.ComponentPhaseFailed {
 		t.Errorf("chart pull failure not surfaced: %+v %v", st, err)
+	}
+}
+
+func TestDeployDirectDeliversValueChanges(t *testing.T) {
+	// Regression for silent value drift: a values-only change (no chart-version
+	// bump) must reach Helm.Deploy on the next reconcile — the annotation
+	// trigger (kubify.io/reconcile-at) enqueues a reconcile and deployDirect
+	// re-renders values every pass.
+	byName := map[string]platformv1alpha1.StackComponentSpec{
+		"backend": {Name: "backend"},
+	}
+	order, _ := topoOrder(componentList(byName))
+
+	newStack := func(proxy string) *platformv1alpha1.Stack {
+		s := stackFor("ns")
+		s.Spec.ComponentValues = map[string]apiextensionsv1.JSON{
+			"backend": {Raw: []byte(`{"env":{"HTTPS_PROXY":"` + proxy + `"}}`)},
+		}
+		return s
+	}
+
+	fh := &fakeHelm{}
+	var lastVals map[string]interface{}
+	fh.recordValues = func(vals map[string]interface{}) {
+		if env, ok := vals["env"].(map[string]interface{}); ok {
+			lastVals = env
+		}
+	}
+	r := &StackReconciler{Helm: fh}
+
+	// First reconcile: proxy configured in the spec.
+	if _, err := r.deployDirect(context.Background(), newStack("http://agentfw:8080"), order, byName); err != nil {
+		t.Fatal(err)
+	}
+	if lastVals == nil || lastVals["HTTPS_PROXY"] != "http://agentfw:8080" {
+		t.Fatalf("first deploy missing proxy env, got %v", lastVals)
+	}
+
+	// Spec value changes (e.g. via the portal PATCH) — next reconcile must
+	// deliver the new value even though chart+version are unchanged.
+	if _, err := r.deployDirect(context.Background(), newStack("http://agentfw:9090"), order, byName); err != nil {
+		t.Fatal(err)
+	}
+	if lastVals["HTTPS_PROXY"] != "http://agentfw:9090" {
+		t.Fatalf("changed value not delivered, got %v", lastVals)
 	}
 }
