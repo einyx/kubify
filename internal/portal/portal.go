@@ -63,6 +63,16 @@ type Portal struct {
 
 	// mcpCaller bridges portal endpoints to the MCP tool dispatch.
 	mcpCaller MCPCaller
+
+	// watchClient (set for out-of-cluster runs) watches Stacks so connected
+	// browsers get real-time change signals over SSE.
+	watchClient client.WithWatch
+
+	// stackWatchMu guards stackWatchers; stackWatchStarted ensures the
+	// watch goroutine starts once.
+	stackWatchMu      sync.Mutex
+	stackWatchers     map[chan struct{}]struct{}
+	stackWatchStarted bool
 }
 
 // SetVaultAddrFunc overrides how the portal derives the Vault address for a
@@ -86,20 +96,23 @@ func NewInCluster() (*Portal, error) {
 	if err != nil {
 		return nil, err
 	}
-	c, err := client.New(restCfg, client.Options{Scheme: sch})
+	c, err := client.NewWithWatch(restCfg, client.Options{Scheme: sch})
 	if err != nil {
 		return nil, err
 	}
 	// Local runs (kubeconfig, no in-cluster env) reach in-cluster Vaults
 	// through the API server's service proxy.
 	outOfCluster := os.Getenv("KUBERNETES_SERVICE_HOST") == ""
-	return &Portal{
+	p := &Portal{
 		client:       c,
+		watchClient:  c,
 		registry:     NewRegistry(defaultTemplatesDir, c),
 		metrics:      NewMetrics(),
 		restCfg:      restCfg,
 		outOfCluster: outOfCluster,
-	}, nil
+	}
+	p.startStackWatch(context.Background())
+	return p, nil
 }
 
 // StackSummary is one row in the stacks table.

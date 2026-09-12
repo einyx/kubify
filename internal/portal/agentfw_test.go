@@ -16,11 +16,19 @@ func TestAgentfwProxyDisabled(t *testing.T) {
 	if p.AgentfwEnabled() {
 		t.Fatal("agentfw should be disabled by default")
 	}
+	// Bookmarks always land in the SPA view, configured or not.
 	r := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/agentfw/", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, r)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GET /agentfw/ without config = %d, want 404", w.Code)
+	if w.Code != http.StatusPermanentRedirect || w.Header().Get("Location") != "/#/agents" {
+		t.Fatalf("GET /agentfw/ without config = %d %q, want 308 /#/agents", w.Code, w.Header().Get("Location"))
+	}
+	// The API itself stays 404 until an instance is configured or discovered.
+	rAPI := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/agentfw/api/v1/stats", nil)
+	wAPI := httptest.NewRecorder()
+	mux.ServeHTTP(wAPI, rAPI)
+	if wAPI.Code != http.StatusNotFound {
+		t.Fatalf("GET /agentfw/api/v1/stats without config = %d, want 404", wAPI.Code)
 	}
 	if html := p.GetIndexHTML(); strings.Contains(html, `onclick="showAgents()"`) {
 		t.Fatal("agent view button must be absent when agentfw is disabled")
