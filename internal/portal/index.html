@@ -7,6 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script>
+  // Set the theme before first paint to avoid a flash.
+  (function () {
+    var t = localStorage.getItem('kubo-theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+  })();
+</script>
 <style>
   :root {
     --bg:       #f6f6f4;
@@ -765,6 +773,102 @@
   @keyframes fadeUp {
     to { opacity: 1; transform: translateY(0); }
   }
+  /* ── Theme: dark (auto via prefers-color-scheme, manual via data-theme) ── */
+  :root { color-scheme: light; }
+  html[data-theme='dark'] { color-scheme: dark; }
+
+  html[data-theme='dark'] {
+    --bg:       #101216;
+    --surface:  #16191f;
+    --panel:    #16191f;
+    --border:   rgba(255,255,255,0.09);
+    --border-hi:rgba(255,255,255,0.17);
+    --text:     #e8eaef;
+    --muted:    #9aa1ad;
+    --muted2:   #868d9a;
+    --accent:   #8b85ff;
+    --accent2:  #6f66ff;
+    --ok:       #2fbf8f;
+    --warn:     #d9a13c;
+    --err:      #e0645c;
+    --pend:     #8b93a3;
+  }
+
+  html[data-theme='dark'] body::before {
+    background:
+      radial-gradient(ellipse 60% 50% at 10% 0%, rgba(139,133,255,0.07) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 90% 80%, rgba(47,191,143,0.05) 0%, transparent 60%);
+  }
+  html[data-theme='dark'] body::after { opacity: .04; }
+
+  html[data-theme='dark'] nav {
+    background: rgba(22,25,31,0.72);
+    border-color: rgba(255,255,255,0.10);
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 8px 32px rgba(0,0,0,0.45);
+  }
+  html[data-theme='dark'] .btn {
+    background: linear-gradient(135deg, var(--accent2) 0%, #5b54ec 100%);
+    box-shadow: 0 0 0 1px rgba(111,102,255,0.45), 0 4px 16px rgba(0,0,0,0.35);
+  }
+  html[data-theme='dark'] .btn.secondary,
+  html[data-theme='dark'] .btn.secondary:hover {
+    background: rgba(255,255,255,0.07);
+  }
+  html[data-theme='dark'] .btn-icon { background: rgba(255,255,255,0.10); }
+  html[data-theme='dark'] .back-btn:hover { background: rgba(255,255,255,0.07); }
+  html[data-theme='dark'] .copy-btn:hover,
+  html[data-theme='dark'] .img-chip:hover { border-color: rgba(255,255,255,0.22); }
+  html[data-theme='dark'] .card-outer {
+    background: linear-gradient(135deg, rgba(255,255,255,0.07) 0%, rgba(255,255,255,0.02) 100%);
+    box-shadow: 0 24px 64px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  html[data-theme='dark'] .card-inner { box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+  html[data-theme='dark'] tr.stack-row:hover { background: rgba(255,255,255,0.035); }
+  html[data-theme='dark'] .stat,
+  html[data-theme='dark'] .tool-input,
+  html[data-theme='dark'] .tool-select,
+  html[data-theme='dark'] textarea.code,
+  html[data-theme='dark'] pre {
+    background: #1b1f26;
+  }
+  html[data-theme='dark'] input,
+  html[data-theme='dark'] select { background: #1b1f26; color: var(--text); }
+  html[data-theme='dark'] .dep-badge,
+  html[data-theme='dark'] .img-chip,
+  html[data-theme='dark'] .spec-chip { background: rgba(255,255,255,0.05); border-color: var(--border); }
+  html[data-theme='dark'] dialog {
+    background: var(--surface);
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,255,255,0.05);
+  }
+  html[data-theme='dark'] dialog::backdrop { background: rgba(0,0,0,0.6); }
+  html[data-theme='dark'] .skel {
+    background: linear-gradient(90deg, rgba(255,255,255,0.05) 25%, rgba(255,255,255,0.10) 50%, rgba(255,255,255,0.05) 75%);
+  }
+  html[data-theme='dark'] .toast,
+  html[data-theme='dark'] .mcp-tool,
+  html[data-theme='dark'] .afw-list,
+  html[data-theme='dark'] #api-banner { background: var(--surface); }
+  html[data-theme='dark'] .afw-row .name { color: var(--text); }
+  html[data-theme='dark'] .comp-row { border-bottom-color: var(--border); }
+  html[data-theme='dark'] .eyebrow {
+    border-color: rgba(139,133,255,0.35);
+    background: rgba(139,133,255,0.10);
+  }
+
+  /* ── Theme toggle ── */
+  .theme-toggle {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 30px;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted2);
+    cursor: pointer;
+    font-size: 13px;
+    transition: color 200ms, border-color 200ms, background 200ms;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--border-hi); background: rgba(127,127,127,0.08); }
 </style>
 </head>
 <body>
@@ -776,6 +880,7 @@
   </div>
   <div class="nav-right">
     <span id="updated"></span>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme (auto → light → dark)" aria-label="Toggle theme">◐</button>
     <select id="refresh-rate" class="tool-select" style="padding:4px 8px;font-size:11px" onchange="refreshMs=+this.value;lastRefreshAt=Date.now();scheduleRefresh();document.getElementById('updated').textContent=refreshMs?'live':'paused'">
       <option value="5000">5s</option>
       <option value="10000" selected>10s</option>
@@ -2588,6 +2693,29 @@ async function deleteVaultEntry(path) {
   }
   loadVault(ns);
 }
+
+// ── Theme toggle: auto → light → dark ──
+(function () {
+  var btn = document.getElementById('theme-toggle');
+  if (!btn) return;
+  var order = ['auto', 'light', 'dark'];
+  function apply() {
+    var t = localStorage.getItem('kubo-theme');
+    if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = t;
+    btn.textContent = t === 'dark' ? '☾' : t === 'light' ? '☀' : '◐';
+    btn.title = 'Theme: ' + t + ' (click to change)';
+  }
+  btn.addEventListener('click', function () {
+    var cur = localStorage.getItem('kubo-theme') || 'auto';
+    var next = order[(order.indexOf(cur) + 1) % order.length];
+    if (next === 'auto') localStorage.removeItem('kubo-theme');
+    else localStorage.setItem('kubo-theme', next);
+    apply();
+  });
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', apply);
+  apply();
+})();
 </script>
 </body>
 </html>
