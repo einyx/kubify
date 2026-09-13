@@ -10,6 +10,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -60,6 +61,16 @@ func (px *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 			return px.scanner.InspectResponse(resp)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			// Failed upstream fetches must stay traceable in the archive,
+			// same as blocked requests.
+			if px.scanner != nil {
+				if px.scanner.Auditor != nil {
+					px.scanner.Auditor.Log(Event{Method: r.Method, URL: r.URL.String(), Action: "error", Error: err.Error()})
+				}
+				if cap := captureFrom(r); cap != nil && px.scanner.Archive != nil {
+					px.scanner.insert(*cap, "error", http.StatusBadGateway, "agentfw proxy: "+err.Error(), nil)
+				}
+			}
 			http.Error(w, fmt.Sprintf("agentfw proxy: %v", err), http.StatusBadGateway)
 		},
 	}
@@ -70,30 +81,24 @@ func (px *Proxy) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	// 0. Kill switch — deny-all before any other check (CONNECT tunnels
 	// otherwise bypass the scanner entirely in raw mode).
 	if px.scanner.KillSwitch != nil && px.scanner.KillSwitch.Tripped() {
-		px.scanner.Auditor.Log(Event{
-			Method:   r.Method,
-			URL:      r.Host,
-			Action:   "block",
-			Findings: []Finding{{Kind: "killswitch", Pattern: "deny-all"}},
-		})
+		px.traceTunnel(r, "block", http.StatusForbidden,
+			"agentfw: kill switch active — all traffic blocked",
+			[]Finding{{Kind: "killswitch", Pattern: "deny-all"}})
 		http.Error(w, "agentfw: kill switch active — all traffic blocked", http.StatusForbidden)
 		return
 	}
 
 	if px.scanner.Policy.BlockPrivateEgress && IsPrivateHost(r.Host) {
-		px.scanner.Auditor.Log(Event{
-			Method:   r.Method,
-			URL:      r.Host,
-			Action:   "block",
-			Findings: []Finding{{Kind: "ssrf", Pattern: "private-egress", Excerpt: r.Host}},
-		})
+		px.traceTunnel(r, "block", http.StatusForbidden,
+			"agentfw: CONNECT to private address blocked",
+			[]Finding{{Kind: "ssrf", Pattern: "private-egress", Excerpt: r.Host}})
 		http.Error(w, "agentfw: CONNECT to private address blocked", http.StatusForbidden)
 		return
 	}
 
 	if err := px.dnsCache.Check(r.Host); err != nil {
-		px.scanner.Auditor.Log(Event{Method: r.Method, URL: r.Host, Action: "block",
-			Findings: []Finding{{Kind: "ssrf", Pattern: "dns-rebinding", Excerpt: err.Error()}}})
+		px.traceTunnel(r, "block", http.StatusForbidden, err.Error(),
+			[]Finding{{Kind: "ssrf", Pattern: "dns-rebinding", Excerpt: err.Error()}})
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -105,9 +110,46 @@ func (px *Proxy) handleTunnel(w http.ResponseWriter, r *http.Request) {
 	px.tunnelRaw(w, r)
 }
 
+// traceTunnel records a CONNECT-level decision in both the audit stream and
+// the viewer archive, so tunnel verdicts stay as traceable as HTTP calls.
+func (px *Proxy) traceTunnel(r *http.Request, action string, status int, body string, findings []Finding) {
+	if px.scanner == nil {
+		return
+	}
+	if px.scanner.Auditor != nil {
+		ev := Event{Method: r.Method, URL: r.Host, Action: action, Findings: findings}
+		if action == "error" {
+			ev.Error = body
+		}
+		px.scanner.Auditor.Log(ev)
+	}
+	a := px.scanner.Archive
+	if a == nil {
+		return
+	}
+	host := r.Host
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	rec := Record{
+		SessionID: SessionID(r),
+		Time:      time.Now(),
+		Method:    r.Method,
+		URL:       r.Host,
+		Host:      host,
+		Status:    status,
+		Action:    action,
+		RespBody:  body,
+		Findings:  findings,
+	}
+	go func() { _, _ = a.Insert(rec) }() // best-effort, like Scanner.record
+}
+
 func (px *Proxy) tunnelRaw(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	dst, err := net.DialTimeout("tcp", r.Host, 10*time.Second)
 	if err != nil {
+		px.traceTunnel(r, "error", http.StatusBadGateway, err.Error(), nil)
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return
 	}
@@ -125,14 +167,46 @@ func (px *Proxy) tunnelRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Trace the opaque tunnel: policy checks above passed, so the CONNECT
+	// itself is an "allow" in the audit stream even though the payload is
+	// end-to-end encrypted and cannot be scanned.
+	if px.scanner.Auditor != nil {
+		px.scanner.Auditor.Log(Event{Method: r.Method, URL: r.Host, Action: "allow"})
+	}
+
+	var sent, recv atomic.Int64
 	done := make(chan struct{}, 2)
-	cp := func(a, b net.Conn) {
-		io.Copy(a, b) //nolint:errcheck
+	cp := func(a, b net.Conn, counter *atomic.Int64) {
+		n, _ := io.Copy(a, b)
+		counter.Add(n)
 		done <- struct{}{}
 	}
-	go cp(dst, conn)
-	go cp(conn, dst)
+	go cp(dst, conn, &recv) // upstream → client
+	go cp(conn, dst, &sent) // client → upstream
 	<-done
+
+	// Archive the tunnel with byte counts and lifetime so CONNECT traffic
+	// is traceable in the viewer alongside plain HTTP calls.
+	if a := px.scanner.Archive; a != nil {
+		host := r.Host
+		if i := strings.IndexByte(host, ':'); i >= 0 {
+			host = host[:i]
+		}
+		rec := Record{
+			SessionID:  SessionID(r),
+			Time:       start,
+			Method:     r.Method,
+			URL:        r.Host,
+			Host:       host,
+			Status:     http.StatusOK,
+			DurationMS: time.Since(start).Milliseconds(),
+			ReqBytes:   int(sent.Load()),
+			RespBytes:  int(recv.Load()),
+			Action:     "allow",
+			Findings:   []Finding{{Kind: "tunnel", Pattern: "connect", Excerpt: "opaque TLS tunnel — payload not scanned"}},
+		}
+		go func() { _, _ = a.Insert(rec) }() // best-effort, like Scanner.record
+	}
 }
 
 // tunnelMITM terminates the client's TLS, forwards each request to the real
@@ -157,8 +231,8 @@ func (px *Proxy) tunnelMITM(w http.ResponseWriter, r *http.Request) {
 
 	tlsConn := tls.Server(clientRaw, px.mitm.TLSConfig())
 	if err := tlsConn.Handshake(); err != nil {
-		px.scanner.Auditor.Log(Event{Method: r.Method, URL: r.Host, Action: "error",
-			Findings: []Finding{{Kind: "mitm", Pattern: "client-handshake", Excerpt: err.Error()}}})
+		px.traceTunnel(r, "error", 0, err.Error(),
+			[]Finding{{Kind: "mitm", Pattern: "client-handshake", Excerpt: err.Error()}})
 		return
 	}
 	defer tlsConn.Close()
@@ -190,6 +264,14 @@ func (px *Proxy) tunnelMITM(w http.ResponseWriter, r *http.Request) {
 
 		resp, err := upstream.Do(req)
 		if err != nil {
+			// Failed upstream fetches must stay traceable in the archive,
+			// same as blocked requests.
+			if px.scanner.Auditor != nil {
+				px.scanner.Auditor.Log(Event{Method: req.Method, URL: req.URL.String(), Action: "error", Error: err.Error()})
+			}
+			if cap := captureFrom(req); cap != nil && px.scanner.Archive != nil {
+				px.scanner.insert(*cap, "error", http.StatusBadGateway, "agentfw mitm: "+err.Error(), nil)
+			}
 			writeErr(tlsConn, http.StatusBadGateway, "agentfw mitm: "+err.Error())
 			return
 		}

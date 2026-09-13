@@ -119,13 +119,11 @@ func (m *MITM) mint(host string) (*tls.Certificate, error) {
 
 // GenerateCA creates a new self-signed CA valid for 10 years and writes
 // ca.crt + ca.key PEM files into outDir.
-func GenerateCA(outDir string) (certPath, keyPath string, err error) {
-	if err := os.MkdirAll(outDir, 0o755); err != nil {
-		return "", "", err
-	}
+// GenerateCAPEM mints a fresh MITM CA and returns PEM-encoded ca.crt / ca.key.
+func GenerateCAPEM() (certPEM, keyPEM []byte, err error) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return "", "", err
+		return nil, nil, err
 	}
 	serial, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	tmpl := &x509.Certificate{
@@ -139,15 +137,31 @@ func GenerateCA(outDir string) (certPath, keyPath string, err error) {
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	if err != nil {
+		return nil, nil, err
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return nil, nil, err
+	}
+	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	return certPEM, keyPEM, nil
+}
+
+func GenerateCA(outDir string) (certPath, keyPath string, err error) {
+	if err := os.MkdirAll(outDir, 0o755); err != nil {
+		return "", "", err
+	}
+	certPEM, keyPEM, err := GenerateCAPEM()
+	if err != nil {
 		return "", "", err
 	}
 	certPath = outDir + "/ca.crt"
 	keyPath = outDir + "/ca.key"
-	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o644); err != nil {
+	if err := os.WriteFile(certPath, certPEM, 0o644); err != nil {
 		return "", "", err
 	}
-	keyDER, _ := x509.MarshalPKCS8PrivateKey(key)
-	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER}), 0o600); err != nil {
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
 		return "", "", err
 	}
 	return certPath, keyPath, nil

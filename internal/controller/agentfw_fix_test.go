@@ -59,7 +59,7 @@ func TestAgentFWServiceNoChurnWhenInSync(t *testing.T) {
 	sch := agentfwScheme(t)
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: "foundation-x", ResourceVersion: "42"},
 		Spec: corev1.ServiceSpec{Ports: []corev1.ServicePort{
-			{Port: agentfwPort, TargetPort: intstr.FromInt(agentfwPort), Protocol: corev1.ProtocolTCP},
+			{Name: "proxy", Port: agentfwPort, TargetPort: intstr.FromInt(agentfwPort), Protocol: corev1.ProtocolTCP},
 			{Name: "admin", Port: agentfwAdminPort, TargetPort: intstr.FromInt(agentfwAdminPort), Protocol: corev1.ProtocolTCP},
 		}}}
 	r := &StackReconciler{Client: fake.NewClientBuilder().WithScheme(sch).WithObjects(svc).Build(), Scheme: sch}
@@ -98,7 +98,8 @@ func TestAgentFWDeploymentUpdateSyncsVolumes(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(stale).Build()
 	r := &StackReconciler{Client: c, Scheme: sch}
 
-	if err := r.ensureAgentFWDeployment(context.Background(), "foundation-x"); err != nil {
+	if err := r.ensureAgentFWDeployment(context.Background(),
+		&platformv1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Name: "stack", Namespace: "foundation-x"}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -128,5 +129,40 @@ func TestAgentFWDeploymentUpdateSyncsVolumes(t *testing.T) {
 	}
 	if !strings.Contains(after.Spec.Template.Spec.Containers[0].Image, "agentfw") {
 		t.Fatalf("image not synced: %s", after.Spec.Template.Spec.Containers[0].Image)
+	}
+}
+
+// The mitmEnabled flag converges with the kubify.io/agentfw-mitm annotation:
+// appended to pre-MITM policies, flipped in place otherwise, and the pod's
+// policy checksum changes so the Deployment rolls.
+func TestAgentFWMITMAnnotationFlipsPolicy(t *testing.T) {
+	sch := agentfwScheme(t)
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: "foundation-x"},
+		Data: map[string]string{agentfwPolicyKey: "allowedMCPTools: [\"*\"]\nblockPrivateEgress: true\n"}}
+	c := fake.NewClientBuilder().WithScheme(sch).WithObjects(cm).Build()
+	r := &StackReconciler{Client: c, Scheme: sch}
+	stack := &platformv1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Name: "product", Namespace: "foundation-x"}}
+
+	if err := r.ensureAgentFWConfigMap(context.Background(), stack); err != nil {
+		t.Fatal(err)
+	}
+	var after corev1.ConfigMap
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "foundation-x", Name: agentfwName}, &after); err != nil {
+		t.Fatal(err)
+	}
+	pol := after.Data[agentfwPolicyKey]
+	if !strings.Contains(pol, "mitmEnabled: false") || !strings.Contains(pol, "allowedMCPTools") {
+		t.Fatalf("pre-MITM policy not preserved+extended:\n%s", pol)
+	}
+
+	stack.Annotations = map[string]string{agentfwMITMAnnotation: "true"}
+	if err := r.ensureAgentFWConfigMap(context.Background(), stack); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: "foundation-x", Name: agentfwName}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(after.Data[agentfwPolicyKey], "mitmEnabled: true") {
+		t.Fatalf("annotation flip not converged:\n%s", after.Data[agentfwPolicyKey])
 	}
 }

@@ -146,13 +146,13 @@ func (p *Portal) agentfwNav() string {
 	case 0:
 		return ""
 	case 1:
-		return `<button id="afw-nav-btn" data-label="` + labels[0] + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + labels[0] + `">Agentfw · ` + labels[0] + ` <span class="btn-icon">◉</span></button>`
+		return `<button id="afw-nav-btn" data-label="` + labels[0] + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + labels[0] + `">Agent <span class="btn-icon">◉</span></button>`
 	default:
 		shown := strings.Join(labels[:min(2, len(labels))], ", ")
 		if len(labels) > 2 {
 			shown += " +" + fmt.Sprint(len(labels)-2)
 		}
-		return `<button id="afw-nav-btn" data-label="` + dataLabel + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + dataLabel + `">Agentfw · ` + shown + ` <span class="btn-icon">◉</span></button>`
+		return `<button id="afw-nav-btn" data-label="` + dataLabel + `" class="btn secondary" onclick="showAgents()" title="agentfw session archive — ` + dataLabel + `">Agent <span class="btn-icon">◉</span></button>`
 	}
 }
 
