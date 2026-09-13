@@ -122,7 +122,13 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Cluster-level Cloudflare tunnel (platform ingress infra). No-op when
 	// the kubo-cloudflared-config ConfigMap is absent.
 	if err := r.ensureCloudflareTunnel(ctx); err != nil {
-		logf.FromContext(ctx).Error(err, "cloudflare tunnel reconcile failed")
+		// tunnel errors are non-fatal: log and continue with the stack
+		log.Info("cloudflare tunnel reconcile pending", "err", err.Error())
+	}
+	if err := r.ensureTenantDNS(ctx, &stack); err != nil {
+		// DNS errors are non-fatal: the stack still reconciles; the failure
+		// is logged and retried on the next reconcile.
+		log.Info("dns reconcile pending", "err", err.Error())
 	}
 
 	// Bootstrap seeding must run BEFORE propagation so a fresh tenant's
@@ -696,6 +702,12 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 	if mode == "" {
 		mode = platformv1alpha1.DeploymentModeDirect
 	}
+	// DNS cleanup: remove kubo-tagged Cloudflare records for this stack's
+	// hosts (best-effort — a CF API failure must not block finalization).
+	if err := r.deleteTenantDNS(ctx, stack); err != nil {
+		logf.FromContext(ctx).Error(err, "dns cleanup failed (continuing finalization)")
+	}
+
 	switch mode {
 	case platformv1alpha1.DeploymentModeFlux:
 		if r.Flux != nil {
