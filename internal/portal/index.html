@@ -1453,6 +1453,9 @@ async function fetchDetail(ns, name) {
     if (!currentDetail || currentDetail.ns !== ns || currentDetail.name !== name) return;
     currentData = d;
     document.getElementById('list-view').style.display = 'none';
+    document.getElementById('mcp-view').style.display = 'none';
+    document.getElementById('agent-view').style.display = 'none';
+    clearInterval(afw.timer);
     document.getElementById('detail').style.display = 'block';
     document.getElementById('detail-title').textContent = `${ns} / ${name}`;
     document.getElementById('detail-sub').textContent =
@@ -2015,6 +2018,8 @@ let mcpTools = [];
 
 function showMCP() {
   hideDetail();
+  clearInterval(afw.timer);
+  document.getElementById('agent-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'none';
   const v = document.getElementById('mcp-view');
   v.style.display = 'block';
@@ -2022,6 +2027,7 @@ function showMCP() {
 }
 
 function hideMCP() {
+  clearInterval(afw.timer);
   document.getElementById('mcp-view').style.display = 'none';
   document.getElementById('list-view').style.display = 'block';
 }
