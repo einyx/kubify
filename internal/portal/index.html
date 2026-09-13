@@ -2111,7 +2111,7 @@ async function runTool() {
 }
 
 // ── Agent traffic (agentfw) ────────────────────────────────────────────
-const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [] };
+const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [], lastSig: '' };
 const afwInt = n => (n ?? 0).toLocaleString('en-US');
 const afwCost = µ => { const d = (µ ?? 0) / 1e6; if (d === 0) return '$0'; if (d < 0.01) return '$' + d.toFixed(4); return '$' + d.toFixed(2); };
 // The aggregated API returns RFC3339 strings; the raw archive used unix
@@ -2148,7 +2148,14 @@ function showAgents(tab) {
   clearInterval(afw.timer);
   // Mirror the standalone viewer: keep dashboard/usage fresh while visible.
   afw.timer = setInterval(() => {
-    if (afw.tab === 'dashboard' || afw.tab === 'usage') afwRender();
+    if (afw.tab !== 'dashboard' && afw.tab !== 'usage') return;
+    if (document.hidden) return; // no flicker while the tab is in background
+    afwAPI(afw.tab === 'dashboard' ? '/stats' : '/usage').then(fresh => {
+      const sig = JSON.stringify(fresh);
+      if (sig === afw.lastSig) return; // unchanged — skip re-render
+      afw.lastSig = sig;
+      afwRender();
+    }).catch(() => {});
   }, 5000);
 }
 
@@ -2314,7 +2321,7 @@ async function afwRefreshList() {
 function afwTable(recs, compact) {
   return `<table><thead><tr><th>Time</th><th>Product</th><th>Session</th><th>Target</th><th>Model</th><th>Action</th><th>Findings</th><th>Tokens</th><th>Cost</th></tr></thead>
   <tbody>${recs.map(r => `
-    <tr class="stack-row" onclick="openAfwDetail(${r.id})">
+    <tr class="stack-row" onclick="openAfwDetail(${r.id}, '${esc(r.product || '')}')">
       <td class="cell-mode">${afwTime(r.time)}</td>
       <td class="cell-ns">${esc(r.product || '—')}</td>
       <td class="cell-mode" title="${esc(r.session_id)}">${esc(r.session_id.length > 18 ? r.session_id.slice(0, 18) + '…' : r.session_id)}</td>
@@ -2327,17 +2334,24 @@ function afwTable(recs, compact) {
     </tr>`).join('')}</tbody></table>`;
 }
 
-async function openAfwDetail(id) {
-  const r = await afwAPI('/requests/' + id);
+async async function openAfwDetail(id, product) {
+  // Pin to the product's agentfw instance — the merged list spans all
+  // instances, so an unpinned fetch 404s ~2 times in 3.
+  const q = product ? '?product=' + encodeURIComponent(product) : '';
+  const r = await afwAPI('/requests/' + id + q);
+  afw.lastDetail = { id, product };
+  const back = afw.session
+    ? `onclick="afwDrill('${esc(afw.session)}')"` + ' label="session"'
+    : `onclick="afwRender()"`;
   document.getElementById('agent-body').innerHTML = `
     <div class="card-outer"><div class="card-inner">
       <div class="section-title" style="display:flex;gap:10px;align-items:center">
-        <button class="back-btn" onclick="afwRender()">‹ back</button>
+        <button class="back-btn" ${back}>‹ ${afw.session ? 'session' : 'back'}</button>
         <span>request #${r.id} <span class="afw-badge ${r.action}">${r.action}</span></span>
       </div>
       <table><tbody>
         <tr><td class="cell-ns" style="width:120px">Product</td><td class="cell-ns">${esc(r.product || '—')}</td></tr>
-        <tr><td class="cell-ns">Session</td><td class="cell-mode">${esc(r.session_id)}</td></tr>
+        <tr><td class="cell-ns">Session</td><td class="cell-mode"><span class="img-chip" title="open session" onclick="afwDrill('${esc(r.session_id)}')">${esc(r.session_id)}</span></td></tr>
         <tr><td class="cell-ns">Time</td><td class="cell-mode">${afwDate(r.time).toLocaleString()} · ${r.duration_ms}ms</td></tr>
         <tr><td class="cell-ns">Target</td><td class="cell-mode">${esc(r.method)} ${esc(r.url)} → ${r.status || '—'}</td></tr>
         <tr><td class="cell-ns">Model</td><td class="cell-mode">${esc(r.model || '—')}</td></tr>
@@ -2509,6 +2523,10 @@ scheduleRefresh();
 
 // ── Hash routing (#/ns/name[/tab] · #/agents[/tab]) ────────────────────
 function routeFromHash() {
+  const sm = location.hash.match(/^#\/agents\/session\/([\w.-]+)$/);
+  if (sm) { afwSessionDetail(decodeURIComponent(sm[1])); return; }
+  const sm = location.hash.match(/^#\/agents\/session\/([\w.-]+)$/);
+  if (sm) { afwSessionDetail(decodeURIComponent(sm[1])); return; }
   const am = location.hash.match(/^#\/agents(\/(dashboard|sessions|requests|usage))?$/);
   if (am) { showAgents(am[1] ? am[1].slice(1) : 'dashboard'); return; }
   if (document.getElementById('agent-view').style.display === 'block') hideAgents(true);

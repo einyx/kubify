@@ -460,7 +460,7 @@ func (p *Portal) handleAgentfwAPI(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(suffix, "/requests/"):
 		id := strings.Trim(strings.TrimPrefix(suffix, "/requests"), "/")
 		for _, it := range items {
-			raw, err := it.Fetch(r.Context(), "/requests/"+id)
+			raw, err := it.Fetch(r.Context(), "/api/v1/requests/"+id)
 			if err == nil {
 				writeAgentfwJSON(w, http.StatusOK, withProductRaw(raw, it.Label))
 				return
