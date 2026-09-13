@@ -1,0 +1,771 @@
+id: product
+name: Product (full)
+description: 1:1 with the foundation-a reference stack - postgres, storage-engine, kafka, backend, frontend, watcher, opa, scheduler, processor, trino, AI, agentfw. URL convention https://<tenant>.kubify.foundation. Requires kubo-system secrets named <tenant>-* (auth0, ai-secrets, trino, hive, user-credentials, watcher-api-key, ghcr-pull-secret).
+defaults:
+  mode: Direct
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: '{{.Tenant}}'
+---
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: foundation
+  namespace: '{{.Tenant}}'
+spec:
+  componentValues:
+    ai:
+      config:
+        env:
+          HTTPS_PROXY: http://agentfw:8080
+          HTTP_PROXY: http://agentfw:8080
+          MX_AUTH0_AUDIENCE: https://demo.kubify.foundation/
+          MX_AUTH0_CLIENT_ID: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+          MX_AUTH0_DOMAIN: auth0-stg.kubify.app
+          MX_DB_HOST: postgres-postgresql
+          MX_DB_NAME: foundation
+          MX_DB_PORT: '5432'
+          MX_DB_USER: foundation
+          MX_DEFAULT_MODEL: claude-sonnet-4-6
+          MX_FOUNDATION_DATA_MCP_URL: http://backend:8765/mcp
+          MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.kubify.foundation/ai/oauth/mcp-callback
+          NO_PROXY: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+          no_proxy: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+      externalSecret:
+        enabled: false
+      extraEnvFrom:
+      - secretRef:
+          name: foundation-ai-secrets
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/ai
+        tag: v0.0.2
+      imagePullSecrets:
+      - name: acr-pull-secret
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 15
+        timeoutSeconds: 5
+    backend:
+      config:
+        auth0:
+          audience: https://demo.kubify.foundation/
+          client_id: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+          domain: auth0-stg.kubify.app
+          enabled: true
+        kafka:
+          cluster_host: kafka:9092
+        mcp:
+          auth0Audience: https://demo.kubify.foundation/
+          enabled: true
+          publicUrl: https://{{.Tenant}}.kubify.foundation
+        postgres:
+          database: foundation
+          host: postgres-postgresql
+          port: 5432
+        scheduler:
+          host: scheduler
+          port: 65434
+      dependencies:
+        foundationBackendConfigMap: ''
+        hiveMetastoreSecret: ''
+      env:
+      - name: MX_AUTH0_CLIENT_ID
+        value: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+      - name: MX_POSTGRES_PASSWORD
+        value: foundation
+      - name: MX_SECRET_KEY
+        value: dev-local-secret
+      - name: MX_S3_ENDPOINT_LOCATION
+        value: http://storage-engine:8080
+      - name: MX_S3_ACCESS_KEY_ID
+        value: '{{.Tenant}}'
+      - name: MX_S3_SECRET_ACCESS_KEY
+        value: e95df32785232200f1934146dba4039ea6572113eebbe485
+      - name: MX_S3_REGION_NAME
+        value: us-east-1
+      - name: MX_S3_PATH_STYLE_ACCESS
+        value: 'true'
+      - name: MX_S3_SIGNATURE_VERSION
+        value: s3v4
+      - name: MX_FOUNDATION_API_URL
+        value: http://localhost:65432
+      - name: MX_AUTH0_DOMAIN
+        value: auth0-stg.kubify.app
+      - name: MX_AUTH0_MANAGEMENT_DOMAIN
+        value: kubify-stg.eu.auth0.com
+      extraEnvFrom:
+      - secretRef:
+          name: backend-auth0
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/backend
+        tag: v0.5.62
+      secret:
+        auth0:
+          enabled: false
+      sidecar:
+        mcp:
+          enabled: true
+    dai-backend:
+      configMap:
+        data:
+          MX_AUTH0_AUDIENCE: https://demo.kubify.foundation/
+          MX_AUTH0_DOMAIN: auth0-stg.kubify.app
+          MX_AUTH0_ENABLED: 'true'
+          MX_AUTH0_ISSUER: https://auth0-stg.kubify.app/
+          MX_ENV: production
+          MX_LLM_PROVIDER_TYPE: anthropic
+          MX_MONGO_DATABASE: dai
+          MX_NATS_AUTO_CREATE_STREAM: 'true'
+          MX_NATS_URL: nats://nats:4222
+          MX_POSTGRES_DATABASE: foundation
+          MX_POSTGRES_HOST: postgres-postgresql
+          MX_POSTGRES_PORT: '5432'
+          MX_POSTGRES_SSLMODE: disable
+          MX_POSTGRES_USER: foundation
+          MX_RELEASE_TAG: v0.2.79
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/dai/backend
+        tag: v0.2.79
+      imagePullSecrets:
+      - name: acr-pull-secret
+      migrations:
+        enabled: true
+      streamlit:
+        enabled: false
+    dai-frontend:
+      env:
+      - name: NEXT_PUBLIC_BASE_PATH
+        value: /dai
+      - name: AUTH0_ISSUER_BASE_URL
+        value: https://auth0-stg.kubify.app
+      - name: AUTH0_BASE_URL
+        value: https://{{.Tenant}}.kubify.foundation/dai
+      - name: API_URL
+        value: http://dai-backend:8000
+      extraEnvFrom:
+      - secretRef:
+          name: dai-frontend-auth0
+      image:
+        repository: kubifyregistry.azurecr.io/foundation/dai-frontend
+        tag: basepath
+      imagePullSecrets:
+      - name: acr-pull-secret
+      livenessProbe:
+        httpGet:
+          path: /dai/ready
+      readinessProbe:
+        httpGet:
+          path: /dai/ready
+      startupProbe:
+        httpGet:
+          path: /dai/ready
+      virtualService:
+        enabled: false
+    frontend:
+      env:
+        api_proxy_prefix: api
+        api_url: ''
+        auth0:
+          audience: ''
+          baseurl: ''
+          client_id: ''
+          domain: ''
+          enabled: 'false'
+          issuer_baseurl: ''
+          secret: ''
+        foundation_env: ''
+        host: ''
+        internal_api_url: http://backend/
+        jwt_disabled: 'true'
+        sentry:
+          dsn: ''
+          enabled: 'false'
+          environment: ''
+          profiles_sample_rate: '0.1'
+          traces_sample_rate: '0.1'
+      externalSecret:
+        enabled: true
+        target:
+          name: foundation-frontend-auth0
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/frontend
+        tag: v0.7.37
+      ingress:
+        enabled: false
+      virtualService:
+        enabled: false
+        host: '{{.Tenant}}.kubify.foundation'
+    kafka:
+      controller:
+        heapOpts: -Xmx3g -Xms1g
+        resources:
+          limits:
+            cpu: '2'
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 2Gi
+      extraConfig: ''
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/kafka
+      listeners:
+        client:
+          protocol: PLAINTEXT
+    opa:
+      env:
+        API_BASE_URL: http://backend:65432
+      image:
+        registry: kubifyregistry.azurecr.io
+        repository: cached/ecr-kubify/foundation/opa
+        tag: v0.5.62
+    postgres:
+      auth:
+        database: foundation
+        password: foundation
+        username: foundation
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/postgresql
+      primary:
+        extendedConfiguration: '# Sized for a 2Gi-limit dedicated instance
+
+          shared_buffers = 512MB
+
+          effective_cache_size = 1536MB
+
+          work_mem = 16MB
+
+          maintenance_work_mem = 256MB
+
+          max_connections = 200
+
+          # SSD-backed PVC: favour index/random scans
+
+          random_page_cost = 1.1
+
+          effective_io_concurrency = 256
+
+          # Checkpoints: spread I/O, larger WAL = fewer full-page writes
+
+          checkpoint_completion_target = 0.9
+
+          wal_buffers = 16MB
+
+          min_wal_size = 512MB
+
+          max_wal_size = 2GB
+
+          '
+        initdb:
+          scripts:
+            grant_public.sql: 'GRANT CREATE ON SCHEMA public TO foundation;
+
+              '
+        resources:
+          limits:
+            cpu: '2'
+            memory: 2Gi
+          requests:
+            cpu: 500m
+            memory: 1Gi
+    processor:
+      autoscaling:
+        enabled: false
+      config:
+        iceberg:
+          s3_access_key_id: '{{.Tenant}}'
+          s3_endpoint: http://storage-engine:8080
+          s3_secret_access_key: e95df32785232200f1934146dba4039ea6572113eebbe485
+        kafka:
+          cluster_host: kafka:9092
+        postgres:
+          database: foundation
+          host: postgres-postgresql
+          password: foundation
+          port: 5432
+          user: foundation
+      externalSecret:
+        enabled: false
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/processor
+        tag: v0.2.33
+      imagePullSecrets:
+      - name: acr-pull-secret
+      migrations:
+        enabled: false
+      replicaCount: 1
+      resources:
+        limits:
+          cpu: '1'
+          memory: 1Gi
+        requests:
+          cpu: 500m
+          memory: 512Mi
+      serviceAccount:
+        name: foundation-processor
+    scheduler:
+      config:
+        MX_KAFKA_CLUSTER_HOST: kafka:9092
+        MX_POSTGRES_DATABASE: foundation
+        MX_POSTGRES_HOST: postgres-postgresql
+        MX_POSTGRES_PORT: 5432
+        MX_POSTGRES_USER: foundation
+        MX_SCHEDULER_HOST: 0.0.0.0
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/scheduler
+        tag: v1.1.10
+      imagePullSecrets:
+      - name: acr-pull-secret
+      initContainer:
+        enabled: true
+      secret:
+        MX_POSTGRES_PASSWORD: foundation
+    storage-engine:
+      config:
+        auth:
+          credential: e95df32785232200f1934146dba4039ea6572113eebbe485
+          identity: '{{.Tenant}}'
+          type: awsv4
+        storage:
+          filesystem:
+            baseDir: /data
+          provider: filesystem
+        virusTotal:
+          enabled: false
+      configFile:
+        content: "server:\n  listen: \":8080\"\n  read_timeout: 600s\n  write_timeout:\
+          \ 600s\n  idle_timeout: 120s\n  max_body_size: 5368709120\nstorage:\n  provider:\
+          \ filesystem\n  filesystem:\n    root_path: /data\nauth:\n  type: awsv4\n\
+          ui:\n  enabled: false\nlogging:\n  level: info\n  format: json\n"
+        enabled: true
+        filename: storage-engine.yaml
+      externalSecrets:
+        auth:
+          enabled: false
+        aws:
+          enabled: false
+        azure:
+          enabled: false
+        enabled: false
+        sentry:
+          enabled: false
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/storage-engine
+        tag: v0.0.43
+    trino:
+      accessControl:
+        properties: 'access-control.name=opa
+
+          opa.policy.uri=http://opa:8181/v1/data/trino/authz/allow
+
+          opa.policy.batched-uri=http://opa:8181/v1/data/trino/authz/batch
+
+          opa.policy.batch-column-masking-uri=http://opa:8181/v1/data/trino/authz/batchColumnMasks
+
+          opa.log-requests=true
+
+          opa.log-responses=true
+
+          opa.allow-permission-management-operations=false
+
+          opa.http-client.request-timeout=60s
+
+          opa.http-client.max-requests-queued-per-destination=10000
+
+          '
+        type: properties
+      additionalConfigProperties:
+      - catalog.management=dynamic
+      - retry-policy=TASK
+      - task.concurrency=16
+      - task.max-worker-threads=64
+      - query.max-memory=8GB
+      - query.max-memory-per-node=4GB
+      - query.max-total-memory=12GB
+      - memory.heap-headroom-per-node=2GB
+      - query.remote-task.max-error-duration=5m
+      - query.low-memory-killer.policy=total-reservation-on-blocked-nodes
+      - exchange.client-threads=25
+      - exchange.concurrent-request-multiplier=3
+      - exchange.max-buffer-size=32MB
+      - exchange.max-response-size=32MB
+      - sink.max-buffer-size=32MB
+      - http-server.authentication.type=JWT,PASSWORD
+      - http-server.process-forwarded=true
+      - internal-communication.shared-secret=change-this-to-a-random-secret-value
+      - http-server.authentication.jwt.key-file=/etc/trino/jwt/${KID}.pem
+      - http-server.authentication.jwt.principal-field=sub
+      - http-server.authentication.allow-insecure-over-http=true
+      additionalExchangeManagerProperties:
+      - exchange.base-directories=s3://trino/trino-exchange
+      - exchange.s3.endpoint=http://storage-engine:8080
+      - exchange.s3.region=me-central-1
+      - exchange.s3.aws-access-key=${ENV:MINIO_USERNAME}
+      - exchange.s3.aws-secret-key=${ENV:MINIO_PASSWORD}
+      - exchange.s3.path-style-access=true
+      - exchange.sink-buffer-pool-min-size=10
+      - exchange.sink-buffers-per-partition=2
+      - exchange.source-concurrent-readers=4
+      coordinator:
+        additionalConfigFiles:
+          password-authenticator.properties: 'password-authenticator.name=file
+
+            file.password-file=/etc/trino/auth/password/password.db
+
+            '
+        additionalConfigProperties:
+        - web-ui.authentication.type=OAUTH2
+        additionalVolumeMounts:
+        - mountPath: /mnt/trino-cache
+          name: trino-cache
+        - mountPath: /etc/trino/jwt
+          name: jwt-config
+          readOnly: true
+        additionalVolumes:
+        - emptyDir: {}
+          name: trino-cache
+        - name: signing-cert
+          secret:
+            secretName: trino-jwt-signing-key
+        - emptyDir: {}
+          name: jwt-config
+        jvm:
+          gcMethod:
+            g1:
+              heapRegionSize: 32M
+            type: UseG1GC
+          maxHeapSize: 8G
+        resources:
+          limits:
+            cpu: 4
+            memory: 12Gi
+          requests:
+            cpu: 2
+            memory: 8Gi
+      env:
+      - name: MINIO_USERNAME
+        valueFrom:
+          secretKeyRef:
+            key: MINIO_ACCESS_KEY
+            name: trino-s3-credentials
+      - name: MINIO_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            key: MINIO_SECRET_ACCESS_KEY
+            name: trino-s3-credentials
+      - name: TRINO_OAUTH2_CLIENT_ID
+        valueFrom:
+          secretKeyRef:
+            key: client_id
+            name: trino-auth0
+      - name: TRINO_OAUTH2_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            key: client_secret
+            name: trino-auth0
+      image:
+        repository: kubifyregistry.azurecr.io/trinodb/trino
+        tag: 482-kubify
+      imagePullSecrets:
+      - name: acr-pull-secret
+      secretMounts:
+      - name: trino-credentials
+        path: /etc/trino/auth/password
+        secretName: trino-credentials
+      server:
+        exchangeManager:
+          name: filesystem
+        workers: 2
+      serviceAccount:
+        create: false
+      worker:
+        additionalConfigFiles:
+          password-authenticator.properties: 'password-authenticator.name=file
+
+            file.password-file=/etc/trino/auth/password/password.db
+
+            '
+        additionalVolumeMounts:
+        - mountPath: /mnt/trino-cache
+          name: trino-cache
+        additionalVolumes:
+        - emptyDir: {}
+          name: trino-cache
+        jvm:
+          gcMethod:
+            g1:
+              heapRegionSize: 32M
+            type: UseG1GC
+          maxHeapSize: 6G
+        replicas: 2
+        resources:
+          limits:
+            cpu: 2
+            memory: 8Gi
+          requests:
+            cpu: 1
+            memory: 4Gi
+    watcher:
+      autoscaling:
+        enabled: false
+      config:
+        postgres:
+          database: foundation
+          existingSecret: postgres-postgresql
+          existingSecretSuperUserKey: postgres-password
+          host: postgres-postgresql
+          port: 5432
+          user: foundation
+      fullnameOverride: watcher
+      image:
+        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/watcher
+        tag: v2.0.25
+      replicaCount: 1
+  extraBundles:
+  - secretRef:
+      name: ghcr-pull-secret
+    url: oci://ghcr.io/kubifydata/dai-bundle:0.0.8
+  inline:
+    components:
+    - chartPullSecretRef:
+        name: ghcr-pull-secret
+      chartRef:
+        chartName: postgresql
+        chartVersion: 16.7.27
+        repoURL: oci://ghcr.io/kubifydata/charts
+      name: postgres
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: storage-engine
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - postgres
+      name: storage-engine
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: ghcr-pull-secret
+      chartRef:
+        chartName: kafka
+        chartVersion: 29.3.14
+        repoURL: oci://ghcr.io/kubifydata/charts
+      dependsOn:
+      - postgres
+      name: kafka
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: backend
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - postgres
+      - kafka
+      name: backend
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: frontend
+        chartVersion: 0.4.12
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - backend
+      name: frontend
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: watcher
+        chartVersion: 2.7.5
+        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+      dependsOn:
+      - backend
+      name: watcher
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: opa
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - backend
+      name: opa
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: scheduler
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - backend
+      name: scheduler
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: processor
+        chartVersion: 0.6.2
+        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+      dependsOn:
+      - backend
+      name: processor
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: acr-pull-secret
+      chartRef:
+        chartName: trino
+        chartVersion: 1.36.0
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/trinodb-charts
+      dependsOn:
+      - opa
+      - storage-engine
+      name: trino
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: kubifyregistry-helm-secret
+      chartRef:
+        chartName: foundation-ai
+        chartVersion: 0.1.2
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+      dependsOn:
+      - backend
+      - postgres
+      name: ai
+      scope: Namespaced
+    - chartRef:
+        chartName: dai-backend
+      dependsOn:
+      - postgres
+      - nats
+      name: dai-backend
+      scope: Namespaced
+    - chartRef:
+        chartName: dai-frontend
+      dependsOn:
+      - dai-backend
+      name: dai-frontend
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: acr-pull-secret
+      chartRef:
+        chartName: nats
+        chartVersion: 2.10.1
+        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+      name: nats
+      scope: Namespaced
+      values:
+        image:
+          repository: kubifyregistry.azurecr.io/cached/docker.io/library/nats
+          tag: 2.10-alpine
+    description: Foundation data mesh platform (tenant {{.Tenant}})
+    title: Foundation A (demo)
+  mode: Direct
+  operators:
+    agentFW: true
+    vault: true
+  secretsRef:
+  - from: '{{.Tenant}}-backend-auth0'
+    to: backend-auth0
+  - from: '{{.Tenant}}-frontend-auth0'
+    to: foundation-frontend-auth0
+  - from: '{{.Tenant}}-trino-jwt-signing-key'
+    to: trino-jwt-signing-key
+  - from: '{{.Tenant}}-trino-credentials'
+    to: trino-credentials
+  - from: '{{.Tenant}}-trino-auth0'
+    to: trino-auth0
+  - from: '{{.Tenant}}-trino-s3-credentials'
+    to: trino-s3-credentials
+  - from: '{{.Tenant}}-ai-secrets'
+    to: foundation-ai-secrets
+  - from: '{{.Tenant}}-hive-metastore-minio-credentials'
+    to: hive-metastore-minio-credentials
+  - from: '{{.Tenant}}-dai-backend'
+    to: dai-backend
+  - from: '{{.Tenant}}-dai-frontend'
+    to: dai-frontend
+  virtualService:
+    additionalHosts:
+    - '{{.Tenant}}.kubify.foundation'
+    gateway: foundation/foundation-gateway
+    host: '{{.Tenant}}.demo.kubify.foundation'
+    http:
+    - match:
+      - uri:
+          prefix: /dai
+      name: dai
+      route:
+      - destination:
+          host: dai-frontend
+          port:
+            number: 3000
+      timeout: 50s
+    - match:
+      - uri:
+          prefix: /mcp
+      name: mcp
+      route:
+      - destination:
+          host: backend
+          port:
+            number: 8765
+      timeout: 300s
+    - match:
+      - uri:
+          exact: /ai
+      name: ai-root-redirect
+      redirect:
+        uri: /ai/dev
+    - match:
+      - uri:
+          prefix: /ai/
+      name: ai
+      rewrite:
+        uri: /
+      route:
+      - destination:
+          host: ai-foundation-ai
+          port:
+            number: 8000
+      timeout: 300s
+    - corsPolicy:
+        allowHeaders:
+        - X-Account
+        - Content-Type
+        - Authorization
+        allowMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        allowOrigins:
+        - exact: https://{{.Tenant}}.demo.kubify.foundation
+        - exact: https://{{.Tenant}}.kubify.foundation
+      headers:
+        response:
+          set:
+            Strict-Transport-Security: max-age=31536000
+      match:
+      - uri:
+          prefix: /
+      name: frontend
+      route:
+      - destination:
+          host: frontend
+          port:
+            number: 80
+      timeout: 50s
