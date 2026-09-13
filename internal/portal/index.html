@@ -2334,7 +2334,7 @@ function afwTable(recs, compact) {
     </tr>`).join('')}</tbody></table>`;
 }
 
-async async function openAfwDetail(id, product) {
+async function openAfwDetail(id, product) {
   // Pin to the product's agentfw instance — the merged list spans all
   // instances, so an unpinned fetch 404s ~2 times in 3.
   const q = product ? '?product=' + encodeURIComponent(product) : '';
@@ -2523,8 +2523,6 @@ scheduleRefresh();
 
 // ── Hash routing (#/ns/name[/tab] · #/agents[/tab]) ────────────────────
 function routeFromHash() {
-  const sm = location.hash.match(/^#\/agents\/session\/([\w.-]+)$/);
-  if (sm) { afwSessionDetail(decodeURIComponent(sm[1])); return; }
   const sm = location.hash.match(/^#\/agents\/session\/([\w.-]+)$/);
   if (sm) { afwSessionDetail(decodeURIComponent(sm[1])); return; }
   const am = location.hash.match(/^#\/agents(\/(dashboard|sessions|requests|usage))?$/);
