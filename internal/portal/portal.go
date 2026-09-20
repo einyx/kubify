@@ -17,6 +17,7 @@ import (
 
 	"github.com/einyx/kubo/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -892,7 +893,7 @@ func renderTemplate(body, tenant string) ([]client.Object, error) {
 	}
 
 	docs := strings.Split(rendered.String(), "\n---")
-	objs := make([]client.Object, 0, 2)
+	objs := make([]client.Object, 0, 4)
 	for _, doc := range docs {
 		doc = strings.TrimSpace(doc)
 		if doc == "" {
@@ -911,7 +912,9 @@ func renderTemplate(body, tenant string) ([]client.Object, error) {
 			if err := yaml.Unmarshal([]byte(doc), &ns); err != nil {
 				return nil, err
 			}
-			objs = append(objs, &ns)
+			// Namespace first, extras next, Stack last (CreateFromTemplate
+			// applies them in order).
+			objs = append([]client.Object{&ns}, objs...)
 		case "Stack":
 			var stack v1alpha1.Stack
 			if err := yaml.Unmarshal([]byte(doc), &stack); err != nil {
@@ -919,11 +922,17 @@ func renderTemplate(body, tenant string) ([]client.Object, error) {
 			}
 			objs = append(objs, &stack)
 		default:
-			return nil, fmt.Errorf("portal: unexpected kind %q in template", probe.Kind)
+			// Any other kind (ConfigMap, VirtualService, …) is created as an
+			// unstructured object — templates may ship supporting resources.
+			var obj unstructured.Unstructured
+			if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+				return nil, err
+			}
+			if obj.GetKind() == "" {
+				return nil, fmt.Errorf("portal: template document missing kind")
+			}
+			objs = append(objs, &obj)
 		}
-	}
-	if len(objs) != 2 {
-		return nil, fmt.Errorf("portal: template rendered %d objects, want 2", len(objs))
 	}
 	return objs, nil
 }
