@@ -3,12 +3,15 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -110,5 +113,59 @@ func TestPatchStackSpecInvalidComponentValuesJSON(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "not valid JSON") {
 		t.Fatalf("want invalid-JSON error, got %v", err)
+	}
+}
+
+func TestCreateFromTemplateShipsExtraResources(t *testing.T) {
+	// Templates may ship supporting resources (ConfigMap, VirtualService…)
+	// alongside the Namespace + Stack — the portal creates them too.
+	ctx := context.Background()
+	p := newFake(t)
+	dir := t.TempDir()
+	extra := `id: with-extras
+name: With extras
+description: test
+defaults:
+  mode: Direct
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: product-with-extras
+---
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: product
+  namespace: product-with-extras
+spec:
+  mode: Direct
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dai-backend
+  namespace: product-with-extras
+data:
+  MX_ENV: production
+`
+	if err := os.WriteFile(filepath.Join(dir, "with-extras.yaml"), []byte(extra), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p.SetTemplateDir(dir) // re-scan the local dir with the new fixture
+	if _, err := p.registry.List(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := p.CreateFromTemplate(ctx, CreateRequest{Template: "with-extras", Tenant: "we"}, false); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	var cm corev1.ConfigMap
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "product-with-extras", Name: "dai-backend"}, &cm); err != nil {
+		t.Fatalf("supporting ConfigMap not created: %v", err)
+	}
+	if cm.Data["MX_ENV"] != "production" {
+		t.Errorf("CM data = %v", cm.Data)
 	}
 }
