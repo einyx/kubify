@@ -113,3 +113,43 @@ func TestGenerateValueKinds(t *testing.T) {
 		t.Error("unknown kind should error")
 	}
 }
+
+func TestDefaultFrontendBaseURL(t *testing.T) {
+	t.Run("derives from VS host with placeholder", func(t *testing.T) {
+		v := map[string]interface{}{
+			"virtualService": map[string]interface{}{"host": "{{ namespace }}.kubify.foundation"},
+			"env":            map[string]interface{}{"auth0": map[string]interface{}{"enabled": "true"}},
+		}
+		defaultFrontendBaseURL("acme", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://acme.kubify.foundation/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("explicit value wins", func(t *testing.T) {
+		v := map[string]interface{}{
+			"virtualService": map[string]interface{}{"host": "acme.kubify.foundation"},
+			"env":            map[string]interface{}{"auth0": map[string]interface{}{"baseurl": "https://custom.example.com/"}},
+		}
+		defaultFrontendBaseURL("acme", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://custom.example.com/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("no host, no env map yet", func(t *testing.T) {
+		v := map[string]interface{}{"virtualService": map[string]interface{}{"host": "{{ namespace }}.demo.kubify.foundation"}}
+		defaultFrontendBaseURL("product-z", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://product-z.demo.kubify.foundation/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("missing host is a no-op", func(t *testing.T) {
+		v := map[string]interface{}{}
+		defaultFrontendBaseURL("acme", v)
+		if e, ok := v["env"]; ok {
+			t.Fatalf("env should stay absent, got %v", e)
+		}
+	})
+}
