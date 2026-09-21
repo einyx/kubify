@@ -304,6 +304,11 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if ch.Values != nil {
 			values = mergeValues(ch.Values, values)
 		}
+		if name == "frontend" {
+			// Tenant URLs are operator-derived from the VS host so any
+			// tenant name works without per-tenant secret config.
+			defaultFrontendBaseURL(stack.Namespace, values)
+		}
 		pullSecret := ""
 		if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
 			pullSecret = stack.Spec.Bundle.SecretRef.Name
