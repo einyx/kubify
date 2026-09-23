@@ -91,16 +91,23 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if stack.Spec.Paused {
-		return ctrl.Result{}, nil
-	}
-
 	if stack.DeletionTimestamp.IsZero() {
+		if stack.Spec.Paused {
+			return ctrl.Result{}, r.publishStackPhase(ctx, &stack, "Paused", "ReconciliationPaused", "Reconciliation is paused")
+		}
 		if !controllerutil.ContainsFinalizer(&stack, stackFinalizer) {
+			if err := r.publishStackPhase(ctx, &stack, "Pending", "Initializing", "Preparing stack reconciliation"); err != nil {
+				return ctrl.Result{}, err
+			}
 			controllerutil.AddFinalizer(&stack, stackFinalizer)
-			return ctrl.Result{}, r.Update(ctx, &stack)
+			// Finalizer-only updates do not pass the generation/annotation
+			// event filter, so explicitly schedule the first deployment pass.
+			return ctrl.Result{Requeue: true}, r.Update(ctx, &stack)
 		}
 	} else {
+		if err := r.publishStackPhase(ctx, &stack, "Terminating", "Deleting", "Removing stack resources"); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.finalize(ctx, &stack); err != nil {
 			// Deletion is blocked (e.g. a stale helm lock). Surface it and
 			// retry at a fixed pace; the finalizer stays until clean.
@@ -112,6 +119,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if stack.Status.ObservedGeneration != stack.Generation || stack.Status.Phase == "Pending" || stack.Status.Phase == "Paused" || stack.Status.Phase == "" {
+		if err := r.publishStackPhase(ctx, &stack, "Progressing", "Reconciling", "Reconciling stack configuration"); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Control-plane vault: kubo's own secret store (Azure auto-unseal, so it
@@ -145,6 +158,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.fail(ctx, &stack, "SecretSyncFailed", err)
 	}
 	if !secretsReady {
+		if err := r.publishStackPhase(ctx, &stack, "Pending", "WaitingForSecrets", "Waiting for required secrets"); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -260,6 +276,22 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	for _, name := range order {
 		comp := byName[name]
 		if isPlatformOperator(name) || isPlatformOperator(comp.ChartRef.ChartName) {
+			continue
+		}
+		// Bundle and explicitly sourced charts deploy in this loop too, so
+		// enforce the same workload-readiness gate as deployComponent.
+		waiting := false
+		for _, dep := range comp.DependsOnReady {
+			if ok, why := r.componentReady(ctx, stack.Namespace, dep); !ok {
+				statuses = append(statuses, platformv1alpha1.ComponentStatus{
+					Name: name, Phase: platformv1alpha1.ComponentPhasePending,
+					Message: fmt.Sprintf("waiting for dependency %q to be Ready: %s", dep, why),
+				})
+				waiting = true
+				break
+			}
+		}
+		if waiting {
 			continue
 		}
 		// An explicit chartRef.RepoURL means the component pins a specific chart
@@ -423,6 +455,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		})
 	} else {
 		stack.Status.Phase = "Progressing"
+		for _, component := range statuses {
+			if component.Phase == platformv1alpha1.ComponentPhaseFailed || component.Phase == platformv1alpha1.ComponentPhaseDegraded {
+				stack.Status.Phase = "Degraded"
+				break
+			}
+		}
 		msg := "deployment in progress"
 		if firstErr != nil {
 			msg = firstErr.Error()

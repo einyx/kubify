@@ -17,10 +17,10 @@ import (
 
 	"github.com/einyx/kubo/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -199,12 +199,13 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 // StackDetail is the deep view of a single stack.
 type StackDetail struct {
 	StackSummary
-	Operators      map[string]bool `json:"operators,omitempty"`
-	Exclude        []string        `json:"exclude,omitempty"`
-	Bundle         string          `json:"bundle,omitempty"`
-	ValueOverrides []string        `json:"valueOverrides,omitempty"`
-	Conditions     []ConditionView `json:"conditions,omitempty"`
-	Components     []ComponentView `json:"components"`
+	Operators       map[string]bool            `json:"operators,omitempty"`
+	Exclude         []string                   `json:"exclude,omitempty"`
+	Bundle          string                     `json:"bundle,omitempty"`
+	ValueOverrides  []string                   `json:"valueOverrides,omitempty"`
+	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
+	Conditions      []ConditionView            `json:"conditions,omitempty"`
+	Components      []ComponentView            `json:"components"`
 }
 
 // ConditionView is one status condition row.
@@ -251,6 +252,10 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 	}
 	sort.Strings(overridden)
 	d.ValueOverrides = overridden
+	d.ComponentValues = make(map[string]json.RawMessage, len(s.Spec.ComponentValues))
+	for name, values := range s.Spec.ComponentValues {
+		d.ComponentValues[name] = json.RawMessage(values.Raw)
+	}
 	components := stackComponents(ctx, p.client, &s)
 	if s.Spec.Bundle != nil {
 		d.Bundle = s.Spec.Bundle.URL
