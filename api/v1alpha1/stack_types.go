@@ -69,6 +69,15 @@ type StackSpec struct {
 	// +optional
 	ComponentValues map[string]apiextensionsv1.JSON `json:"componentValues,omitempty"`
 
+	// FeatureFlags groups the tenant's frontend feature flags in one place
+	// instead of burying them inside componentValues. Keys are the chart's
+	// feature_flags names (lowercase snake_case, e.g. "connectors_enabled");
+	// the full env form ("MX_FF_CONNECTORS_ENABLED") is also accepted and
+	// normalized. Values are strings ("true"/"false"). Compiled into the
+	// frontend component's env.feature_flags with the highest precedence.
+	// +optional
+	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
+
 	// SecretsRef lists secrets to copy from kubo-system into the tenant
 	// namespace on every reconcile. Use this to seed per-tenant credentials
 	// (e.g. Auth0 client secrets) without storing them in the Stack spec.
@@ -353,7 +362,7 @@ const (
 
 // StackStatus defines the observed state of Stack.
 type StackStatus struct {
-	// Phase: Pending | Progressing | Ready | Failed
+	// Phase: Pending | Progressing | Ready | Degraded | Failed | Paused | Terminating
 	// +optional
 	Phase string `json:"phase,omitempty"`
 

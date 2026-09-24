@@ -42,6 +42,15 @@ import (
 // DNS-rebinding drive-by attacks against a developer's kubeconfig.
 // Mutating requests are additionally rate limited per client IP.
 func (p *Portal) Mux() http.Handler {
+	return p.mux(false)
+}
+
+// RemoteMux serves the portal behind an in-cluster Service or authenticating proxy.
+func (p *Portal) RemoteMux() http.Handler {
+	return p.mux(true)
+}
+
+func (p *Portal) mux(allowRemote bool) http.Handler {
 	m := p.metrics
 	mux := http.NewServeMux()
 	handle := func(pattern string, h http.HandlerFunc) {
@@ -52,6 +61,7 @@ func (p *Portal) Mux() http.Handler {
 		mux.HandleFunc(pattern, h)
 	}
 
+	handle("GET /assets/", serveAsset)
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		p.refreshAgentfws(r.Context()) // nav reflects discovered products immediately
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -310,7 +320,11 @@ func (p *Portal) Mux() http.Handler {
 		}
 		respond(w, r, map[string]bool{"deleted": true}, nil)
 	})
-	return rateLimitMutations(sameOriginMutations(loopbackHostOnly(mux)))
+	var handler http.Handler = mux
+	if !allowRemote {
+		handler = loopbackHostOnly(handler)
+	}
+	return rateLimitMutations(sameOriginMutations(handler))
 }
 
 // sameOriginMutations blocks cross-site browser-initiated mutations (CSRF).
