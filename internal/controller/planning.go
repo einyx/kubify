@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 
@@ -63,6 +64,77 @@ func resolveComponentValues(
 		merged = mergeValues(merged, cv)
 	}
 	return merged
+}
+
+// applyFeatureFlags compiles stack.spec.featureFlags into the frontend
+// component's env.feature_flags, with the highest precedence (above
+// componentValues). Keys may be given in the chart's lowercase snake_case
+// form or as the rendered env name (MX_FF_CONNECTORS_ENABLED); both are
+// normalized to the chart's key. Only components that consume
+// env.feature_flags (the frontend chart) are targeted, so unknown
+// components are left untouched.
+func applyFeatureFlags(featureFlags map[string]string, compName string, values map[string]interface{}) {
+	if len(featureFlags) == 0 || (compName != "frontend" && compName != "foundation-frontend") {
+		return
+	}
+	env, _ := values["env"].(map[string]interface{})
+	if env == nil {
+		env = map[string]interface{}{}
+		values["env"] = env
+	}
+	ff, _ := env["feature_flags"].(map[string]interface{})
+	if ff == nil {
+		ff = map[string]interface{}{}
+		env["feature_flags"] = ff
+	}
+	for k, v := range featureFlags {
+		ff[normalizeFeatureFlagKey(k)] = v
+	}
+}
+
+// normalizeFeatureFlagKey converts MX_FF_UPPER_SNAKE to the chart's
+// lowercase snake_case key. Already-normalized keys pass through.
+func normalizeFeatureFlagKey(k string) string {
+	k = strings.TrimPrefix(k, "MX_FF_")
+	return strings.ToLower(k)
+}
+
+// defaultFrontendBaseURL fills values env.auth0.baseurl from the component's
+// virtualService.host when the operator renders the frontend component and no
+// explicit value is set. Tenant URLs are derived from the tenant name this
+// way — any namespace a user spins gets a correct APP_BASE_URL with zero
+// per-tenant secret configuration. The "{{ namespace }}" placeholder used by
+// the Flux-convention charts is resolved against the stack namespace.
+func defaultFrontendBaseURL(stackNamespace string, values map[string]interface{}) {
+	if values == nil {
+		return
+	}
+	vs, _ := values["virtualService"].(map[string]interface{})
+	if vs == nil {
+		return
+	}
+	host, _ := vs["host"].(string)
+	host = strings.TrimSpace(strings.ReplaceAll(host, "{{ namespace }}", stackNamespace))
+	if host == "" {
+		return
+	}
+	env, _ := values["env"].(map[string]interface{})
+	if env == nil {
+		env = map[string]interface{}{}
+		values["env"] = env
+	}
+	auth0, _ := env["auth0"].(map[string]interface{})
+	if auth0 == nil {
+		auth0 = map[string]interface{}{}
+		env["auth0"] = auth0
+	}
+	if s, _ := auth0["baseurl"].(string); strings.TrimSpace(s) != "" {
+		return // explicit value wins
+	}
+	if !strings.Contains(host, "://") {
+		host = "https://" + host
+	}
+	auth0["baseurl"] = strings.TrimSuffix(host, "/") + "/"
 }
 
 // topoOrder returns component names ordered so dependencies come first.

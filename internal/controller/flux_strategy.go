@@ -88,6 +88,7 @@ func (s *FluxStrategy) Reconcile(
 		}
 
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
+		applyFeatureFlags(stack.Spec.FeatureFlags, name, values)
 		valsJSON, err := toJSONValues(values)
 		if err != nil {
 			return statuses, fmt.Errorf("marshal values for %s: %w", name, err)

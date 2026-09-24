@@ -91,16 +91,23 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if stack.Spec.Paused {
-		return ctrl.Result{}, nil
-	}
-
 	if stack.DeletionTimestamp.IsZero() {
+		if stack.Spec.Paused {
+			return ctrl.Result{}, r.publishStackPhase(ctx, &stack, "Paused", "ReconciliationPaused", "Reconciliation is paused")
+		}
 		if !controllerutil.ContainsFinalizer(&stack, stackFinalizer) {
+			if err := r.publishStackPhase(ctx, &stack, "Pending", "Initializing", "Preparing stack reconciliation"); err != nil {
+				return ctrl.Result{}, err
+			}
 			controllerutil.AddFinalizer(&stack, stackFinalizer)
-			return ctrl.Result{}, r.Update(ctx, &stack)
+			// Finalizer-only updates do not pass the generation/annotation
+			// event filter, so explicitly schedule the first deployment pass.
+			return ctrl.Result{Requeue: true}, r.Update(ctx, &stack)
 		}
 	} else {
+		if err := r.publishStackPhase(ctx, &stack, "Terminating", "Deleting", "Removing stack resources"); err != nil {
+			return ctrl.Result{}, err
+		}
 		if err := r.finalize(ctx, &stack); err != nil {
 			// Deletion is blocked (e.g. a stale helm lock). Surface it and
 			// retry at a fixed pace; the finalizer stays until clean.
@@ -112,6 +119,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 		}
 		return ctrl.Result{}, nil
+	}
+
+	if stack.Status.ObservedGeneration != stack.Generation || stack.Status.Phase == "Pending" || stack.Status.Phase == "Paused" || stack.Status.Phase == "" {
+		if err := r.publishStackPhase(ctx, &stack, "Progressing", "Reconciling", "Reconciling stack configuration"); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Control-plane vault: kubo's own secret store (Azure auto-unseal, so it
@@ -145,6 +158,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.fail(ctx, &stack, "SecretSyncFailed", err)
 	}
 	if !secretsReady {
+		if err := r.publishStackPhase(ctx, &stack, "Pending", "WaitingForSecrets", "Waiting for required secrets"); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
@@ -262,6 +278,22 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if isPlatformOperator(name) || isPlatformOperator(comp.ChartRef.ChartName) {
 			continue
 		}
+		// Bundle and explicitly sourced charts deploy in this loop too, so
+		// enforce the same workload-readiness gate as deployComponent.
+		waiting := false
+		for _, dep := range comp.DependsOnReady {
+			if ok, why := r.componentReady(ctx, stack.Namespace, dep); !ok {
+				statuses = append(statuses, platformv1alpha1.ComponentStatus{
+					Name: name, Phase: platformv1alpha1.ComponentPhasePending,
+					Message: fmt.Sprintf("waiting for dependency %q to be Ready: %s", dep, why),
+				})
+				waiting = true
+				break
+			}
+		}
+		if waiting {
+			continue
+		}
 		// An explicit chartRef.RepoURL means the component pins a specific chart
 		// source — don't let a bundle chart with the same name shadow it.
 		var ch *chart.Chart
@@ -301,8 +333,14 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			st.Scope = platformv1alpha1.ComponentScopeCluster
 		}
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
+		applyFeatureFlags(stack.Spec.FeatureFlags, name, values)
 		if ch.Values != nil {
 			values = mergeValues(ch.Values, values)
+		}
+		if name == "frontend" {
+			// Tenant URLs are operator-derived from the VS host so any
+			// tenant name works without per-tenant secret config.
+			defaultFrontendBaseURL(stack.Namespace, values)
 		}
 		pullSecret := ""
 		if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
@@ -345,6 +383,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Revision = rel.Version
 		st.Message = rel.Info.Description
+		st.Images = extractImages(rel.Manifest)
 		statuses = append(statuses, st)
 		r.upsertStackRelease(ctx, &stack, st)
 	}
@@ -418,6 +457,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		})
 	} else {
 		stack.Status.Phase = "Progressing"
+		for _, component := range statuses {
+			if component.Phase == platformv1alpha1.ComponentPhaseFailed || component.Phase == platformv1alpha1.ComponentPhaseDegraded {
+				stack.Status.Phase = "Degraded"
+				break
+			}
+		}
 		msg := "deployment in progress"
 		if firstErr != nil {
 			msg = firstErr.Error()
@@ -605,6 +650,7 @@ func (r *StackReconciler) deployComponent(
 	}
 
 	values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, comp.Name)
+	applyFeatureFlags(stack.Spec.FeatureFlags, comp.Name, values)
 	targetNS := stack.Namespace
 	if isClusterComponent(comp) {
 		targetNS = clusterOperatorsNamespace
