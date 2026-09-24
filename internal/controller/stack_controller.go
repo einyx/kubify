@@ -333,6 +333,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			st.Scope = platformv1alpha1.ComponentScopeCluster
 		}
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
+		applyFeatureFlags(stack.Spec.FeatureFlags, name, values)
 		if ch.Values != nil {
 			values = mergeValues(ch.Values, values)
 		}
@@ -382,6 +383,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Revision = rel.Version
 		st.Message = rel.Info.Description
+		st.Images = extractImages(rel.Manifest)
 		statuses = append(statuses, st)
 		r.upsertStackRelease(ctx, &stack, st)
 	}
@@ -648,6 +650,7 @@ func (r *StackReconciler) deployComponent(
 	}
 
 	values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, comp.Name)
+	applyFeatureFlags(stack.Spec.FeatureFlags, comp.Name, values)
 	targetNS := stack.Namespace
 	if isClusterComponent(comp) {
 		targetNS = clusterOperatorsNamespace
