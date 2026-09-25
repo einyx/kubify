@@ -174,20 +174,22 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	// TTL: requeue at the deadline and clean up.
+	// TTL: requeue at the deadline and clean up. Defaults to 72h — the
+	// ready email promises automatic removal, so an unset TTL must still
+	// expire, never leak a tenant.
+	ttl := 72 * time.Hour
 	if dr.Spec.TTL != nil && dr.Spec.TTL.Duration > 0 {
-		deadline := dr.CreationTimestamp.Add(dr.Spec.TTL.Duration)
-		dr.Status.ExpiresAt = deadline.UTC().Format(time.RFC3339)
-		if err := r.Status().Update(ctx, &dr); err != nil {
-			return ctrl.Result{}, err
-		}
-		if time.Now().After(deadline) {
-			return ctrl.Result{}, r.expire(ctx, &dr)
-		}
-		return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
+		ttl = dr.Spec.TTL.Duration
 	}
-	// No TTL: keep mirroring the Stack.
-	return ctrl.Result{RequeueAfter: time.Minute}, nil
+	deadline := dr.CreationTimestamp.Add(ttl)
+	dr.Status.ExpiresAt = deadline.UTC().Format(time.RFC3339)
+	if err := r.Status().Update(ctx, &dr); err != nil {
+		return ctrl.Result{}, err
+	}
+	if time.Now().After(deadline) {
+		return ctrl.Result{}, r.expire(ctx, &dr)
+	}
+	return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
 }
 
 // admit enforces capacity caps and records the tenant/URL.
