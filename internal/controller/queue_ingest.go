@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,15 +41,17 @@ type QueueIngester struct {
 	HTTPClient      *http.Client
 }
 
+// queueMessage covers both wire formats: the REST API answers in XML
+// (PascalCase elements), tests may use JSON (camelCase).
 type queueMessage struct {
-	MessageID      string `json:"messageId"`
-	PopReceipt     string `json:"popReceipt"`
-	Text           string `json:"messageText"`
-	DequeueCount   int64  `json:"dequeueCount"`
-	VisibilityTO   int    `json:"visibilityTimeout"`
-	NextVisibleAt  string `json:"nextVisibleTime"`
-	InsertedAt     string `json:"insertionTime"`
-	ExpiresAt      string `json:"expirationTime"`
+	MessageID      string `xml:"MessageId" json:"messageId"`
+	PopReceipt     string `xml:"PopReceipt" json:"popReceipt"`
+	Text           string `xml:"MessageText" json:"messageText"`
+	DequeueCount   int64  `xml:"DequeueCount" json:"dequeueCount"`
+	VisibilityTO   int    `xml:"VisibilityTimeout" json:"visibilityTimeout"`
+	NextVisibleAt  string `xml:"NextVisibleTime" json:"nextVisibleTime"`
+	InsertedAt     string `xml:"InsertionTime" json:"insertionTime"`
+	ExpiresAt      string `xml:"ExpirationTime" json:"expirationTime"`
 }
 
 // Start blocks until ctx is done, draining the queue every PollInterval.
@@ -155,12 +158,12 @@ func (q *QueueIngester) dequeue(ctx context.Context, hc *http.Client) ([]queueMe
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("demo queue dequeue: HTTP %d", resp.StatusCode)
 	}
+	// The queue API returns XML regardless of Accept; parse that.
 	var out struct {
-		Messages []queueMessage `json:"value"`
+		Messages []queueMessage `xml:"QueueMessage"`
 	}
-	// The queue API returns XML by default; request JSON via Accept.
-	if json.Unmarshal(body, &out) != nil || len(out.Messages) == 0 {
-		return nil, nil
+	if err := xml.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("demo queue decode: %w", err)
 	}
 	return out.Messages, nil
 }

@@ -3,7 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -33,11 +33,19 @@ func TestQueueIngestDrain(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet:
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
-				{"messageId": "m1", "popReceipt": "pr1", "messageText": base64.StdEncoding.EncodeToString([]byte(`{"email":"ada@acme.io","company":"Acme"}`)), "dequeueCount": 1},
-				{"messageId": "m2", "popReceipt": "pr2", "messageText": "garbage", "dequeueCount": 1},
-			}})
+			// The queue API answers in XML (camelCase elements), regardless
+			// of the Accept header.
+			fmt.Fprintf(w, `<?xml version="1.0" encoding="utf-8"?>
+<QueueMessagesList>
+  <QueueMessage>
+    <MessageId>m1</MessageId><PopReceipt>pr1</PopReceipt><DequeueCount>1</DequeueCount>
+    <MessageText>%s</MessageText>
+  </QueueMessage>
+  <QueueMessage>
+    <MessageId>m2</MessageId><PopReceipt>pr2</PopReceipt><DequeueCount>1</DequeueCount>
+    <MessageText>garbage</MessageText>
+  </QueueMessage>
+</QueueMessagesList>`, base64.StdEncoding.EncodeToString([]byte(`{"email":"ada@acme.io","company":"Acme"}`)))
 		case r.Method == http.MethodDelete:
 			atomic.AddInt64(&deleted, 1)
 			w.WriteHeader(http.StatusNoContent)
