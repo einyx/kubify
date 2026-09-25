@@ -293,6 +293,25 @@ func (r *DemoRequestReconciler) deleteTenant(ctx context.Context, tenant string)
 	if tenant == "" {
 		return nil
 	}
+	// Seed secrets live in kubo-system, outside the tenant namespace, and
+	// outlive tenant deletion. Left behind, they poison a later request that
+	// derives the same slug: seeding never overwrites existing keys, so the
+	// new tenant gets the old tenant's credentials (observed: stale
+	// generated MX_DB_PASSWORD breaking AI's postgres login). Remove them —
+	// they are per-tenant by name prefix (<tenant>-*) and fully regenerable.
+	var seeds corev1.SecretList
+	if err := r.List(ctx, &seeds, client.InNamespace("kubo-system")); err != nil {
+		return fmt.Errorf("list kubo-system seeds: %w", err)
+	}
+	prefix := tenant + "-"
+	for i := range seeds.Items {
+		s := &seeds.Items[i]
+		if strings.HasPrefix(s.Name, prefix) {
+			if err := r.Delete(ctx, s); err != nil && !apierrors.IsNotFound(err) {
+				return fmt.Errorf("delete seed %s: %w", s.Name, err)
+			}
+		}
+	}
 	var stack platformv1alpha1.Stack
 	err := r.Get(ctx, types.NamespacedName{Namespace: tenant, Name: "product"}, &stack)
 	if err == nil {
