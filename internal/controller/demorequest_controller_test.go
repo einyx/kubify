@@ -44,8 +44,9 @@ func TestDemoRequestReconcileProvisionsAndMirrors(t *testing.T) {
 	_ = clientgoscheme.AddToScheme(sch)
 	_ = platformv1alpha1.AddToScheme(sch)
 
+	now := metav1.Now()
 	dr := platformv1alpha1.DemoRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: "demo-test", Namespace: "kubo-system", Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-test", Namespace: "kubo-system", Generation: 1, CreationTimestamp: now},
 		Spec:       platformv1alpha1.DemoRequestSpec{Email: "ada@acme.io", Company: "Acme", Template: "full"},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&platformv1alpha1.DemoRequest{}).WithObjects(&dr).Build()
