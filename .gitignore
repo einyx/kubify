@@ -29,6 +29,7 @@ go.work
 # local sample stacks (environment-specific, not portable)
 config/samples/
 internal/portal/template.yaml
+internal/portal/templates/full.yaml
 graphify-out/
 bundle
 Makefile

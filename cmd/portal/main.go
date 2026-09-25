@@ -72,7 +72,11 @@ func main() {
 		log.Printf("portal: agentfw archive at /agentfw/ (upstream %s)", *agentfwURL)
 	}
 	log.Printf("kubo portal listening on %s", *addr)
-	if err := http.ListenAndServe(*addr, p.Mux()); err != nil {
+	handler := p.Mux()
+	if *allowRemote {
+		handler = p.RemoteMux()
+	}
+	if err := http.ListenAndServe(*addr, handler); err != nil {
 		log.Fatalf("portal: %v", err)
 	}
 }

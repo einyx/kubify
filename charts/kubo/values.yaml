@@ -24,3 +24,15 @@ resources:
     memory: 512Mi
 
 leaderElect: true
+
+# Enable with an image built with both /manager and /portal binaries.
+portal:
+  enabled: false
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
