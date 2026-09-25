@@ -135,6 +135,11 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	// Provision (idempotent): render the template and create the objects.
 	if err := r.provision(ctx, &dr, tenant); err != nil {
+		if err == errNamespaceTerminating {
+			// A previous demo with this slug is being cleaned up; retry.
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, r.setStatus(ctx, &dr,
+				platformv1alpha1.DemoRequestPending, "previous tenant with this slug is terminating")
+		}
 		log.Error(err, "demo provisioning failed", "tenant", tenant)
 		return ctrl.Result{}, r.setStatus(ctx, &dr, platformv1alpha1.DemoRequestFailed, truncStr(err.Error(), 300))
 	}
@@ -224,8 +229,17 @@ func (r *DemoRequestReconciler) tenantDomain() string {
 	return "meshx.foundation"
 }
 
+// errNamespaceTerminating marks a tenant whose namespace is mid-deletion
+// (e.g. a previous demo with the same deterministic slug just expired):
+// the request must wait, not fail.
+var errNamespaceTerminating = fmt.Errorf("namespace is terminating")
+
 // provision renders the template and creates Namespace + Stack + extras.
 func (r *DemoRequestReconciler) provision(ctx context.Context, dr *platformv1alpha1.DemoRequest, tenant string) error {
+	var ns corev1.Namespace
+	if err := r.Get(ctx, types.NamespacedName{Name: tenant}, &ns); err == nil && !ns.DeletionTimestamp.IsZero() {
+		return errNamespaceTerminating
+	}
 	tmplID := dr.Spec.Template
 	if tmplID == "" {
 		tmplID = r.DefaultTemplate
