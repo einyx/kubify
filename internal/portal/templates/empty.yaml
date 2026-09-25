@@ -7,7 +7,7 @@ defaults:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: acme-{{.Tenant}}
+  name: {{.Tenant}}
   labels:
     app.kubernetes.io/managed-by: kubo-portal
 ---
@@ -15,7 +15,7 @@ apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
   name: acme
-  namespace: acme-{{.Tenant}}
+  namespace: {{.Tenant}}
 spec:
   mode: Direct
   inline:

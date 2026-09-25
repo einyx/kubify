@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
+	"strconv"
 	"path/filepath"
 	"time"
 
@@ -282,6 +283,34 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "StackBackup")
 		os.Exit(1)
 	}
+	// Demo tenants from website requests: reconcile DemoRequests into
+	// template-rendered Stacks. Email credentials come from a Secret; when
+	// absent, notification is disabled and tenants still provision (the URL
+	// is visible on the DemoRequest status).
+	demoEmailer := controller.DemoEmailerFromSecret(ctx, mgr.GetClient())
+	demoReqs := &controller.DemoRequestReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Registry:        portal.NewRegistry("", mgr.GetClient()),
+		Emailer:         demoEmailer,
+		MaxTenants:      atoiEnv("DEMO_MAX_TENANTS", 10),
+		DefaultTemplate: envOr("DEMO_DEFAULT_TEMPLATE", "full"),
+		TenantDomain:    envOr("DEMO_TENANT_DOMAIN", "kubify.foundation"),
+	}
+	if demoEmailer == nil {
+		setupLog.Info("demo request emailer disabled (no kubo-system/demo-request-email secret)")
+	}
+	// Subscribe/pull transport: drain website demo requests from a Storage
+	// Queue when configured (env or kubo-system/demo-request-queue secret).
+	// The push transport (POST /api/demorequests on the portal) is always on.
+	if err := controller.StartQueueIngesterFromEnv(ctx, mgr.GetClient()); err != nil {
+		setupLog.Error(err, "unable to start demo request queue ingester")
+		os.Exit(1)
+	}
+	if err = demoReqs.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "DemoRequest")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if metricsCertWatcher != nil {
@@ -324,4 +353,22 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+// atoiEnv parses an integer env var, falling back to def.
+func atoiEnv(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+// envOr returns the env var or def when unset/empty.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

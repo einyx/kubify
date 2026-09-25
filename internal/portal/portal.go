@@ -887,6 +887,12 @@ func applyOperators(op *v1alpha1.ClusterOperators, m map[string]bool) {
 	}
 }
 
+// RenderTemplate exposes template rendering for the DemoRequest controller:
+// body is a portal template, tenant the slug to substitute.
+func RenderTemplate(body, tenant string) ([]client.Object, error) {
+	return renderTemplate(body, tenant)
+}
+
 func renderTemplate(body, tenant string) ([]client.Object, error) {
 	tmpl, err := template.New("stack").Parse(body)
 	if err != nil {
@@ -982,4 +988,44 @@ func (p *Portal) mcpNav() string {
 		return ""
 	}
 	return `<button class="btn secondary" onclick="showMCP()">MCP <span class="btn-icon">⌘</span></button>`
+}
+
+// DemoRequestInbound is the POST /api/demorequests payload (from the website).
+type DemoRequestInbound struct {
+	Email   string `json:"email"`
+	Company string `json:"company,omitempty"`
+}
+
+// CreateDemoRequest admits a website demo request: token-authed at the HTTP
+// layer, validated here, materialized as a DemoRequest in kubo-system.
+func (p *Portal) CreateDemoRequest(ctx context.Context, in DemoRequestInbound) (*v1alpha1.DemoRequest, error) {
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if email == "" || len(email) > 254 || !strings.Contains(email, "@") {
+		return nil, fmt.Errorf("a valid email is required")
+	}
+	company := strings.TrimSpace(in.Company)
+	if len(company) > 40 {
+		return nil, fmt.Errorf("company name too long (max 40)")
+	}
+	dr := v1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: "demo-",
+			Namespace:    "kubo-system",
+		},
+		Spec: v1alpha1.DemoRequestSpec{Email: email, Company: company, Template: "full"},
+	}
+	if err := p.client.Create(ctx, &dr); err != nil {
+		return nil, err
+	}
+	return &dr, nil
+}
+
+// demoRequestToken returns the shared bearer token for the website, read
+// lazily from kubo-system/demo-requests-token. Empty = endpoint disabled.
+func (p *Portal) demoRequestToken(ctx context.Context) string {
+	var s corev1.Secret
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "kubo-system", Name: "demo-requests-token"}, &s); err != nil {
+		return ""
+	}
+	return string(s.Data["token"])
 }
