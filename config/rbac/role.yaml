@@ -27,6 +27,7 @@ rules:
   - namespaces
   verbs:
   - create
+  - delete
   - get
   - list
   - watch
@@ -103,6 +104,7 @@ rules:
 - apiGroups:
   - platform.kubo.io
   resources:
+  - demorequests
   - stackbackups
   - stackbootstraps
   - stackdefinitions
@@ -119,6 +121,7 @@ rules:
 - apiGroups:
   - platform.kubo.io
   resources:
+  - demorequests/status
   - stackbackups/status
   - stackbootstraps/status
   - stackdefinitions/status
