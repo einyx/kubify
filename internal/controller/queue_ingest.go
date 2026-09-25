@@ -116,8 +116,28 @@ func (q *QueueIngester) drain(ctx context.Context) {
 	}
 }
 
+// queueURL builds a request URL against the queue base, merging extra
+// query params into the SAS token's query string (the base URL already
+// contains ?sig=..., so naive concatenation corrupts it).
+func (q *QueueIngester) queueURL(path string, extra map[string]string) (string, error) {
+	u, err := url.Parse(q.QueueURL)
+	if err != nil {
+		return "", err
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + path
+	qs := u.Query()
+	for k, v := range extra {
+		qs.Set(k, v)
+	}
+	u.RawQuery = qs.Encode()
+	return u.String(), nil
+}
+
 func (q *QueueIngester) dequeue(ctx context.Context, hc *http.Client) ([]queueMessage, error) {
-	u := q.QueueURL + "/messages?numofmessages=32&visibilitytimeout=120"
+	u, err := q.queueURL("/messages", map[string]string{"numofmessages": "32", "visibilitytimeout": "120"})
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
@@ -146,7 +166,10 @@ func (q *QueueIngester) dequeue(ctx context.Context, hc *http.Client) ([]queueMe
 }
 
 func (q *QueueIngester) deleteMessage(ctx context.Context, hc *http.Client, m queueMessage) error {
-	u := fmt.Sprintf("%s/messages/%s?popreceipt=%s", q.QueueURL, url.PathEscape(m.MessageID), url.QueryEscape(m.PopReceipt))
+	u, err := q.queueURL("/messages/"+url.PathEscape(m.MessageID), map[string]string{"popreceipt": m.PopReceipt})
+	if err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u, nil)
 	if err != nil {
 		return err
