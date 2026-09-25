@@ -1643,3 +1643,134 @@ spec:
     storage: true
     subresources:
       status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+    helm.sh/resource-policy: keep
+  name: demorequests.platform.kubo.io
+spec:
+  group: platform.kubo.io
+  names:
+    kind: DemoRequest
+    listKind: DemoRequestList
+    plural: demorequests
+    shortNames:
+    - demoreq
+    singular: demorequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.email
+      name: Email
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.tenant
+      name: Tenant
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: 'DemoRequest is the user-facing API of the demo-tenant lifecycle:
+          the
+
+          website submits one per "request demo" form, and the operator provisions
+
+          the tenant from a portal template, emails the requester their URL when the
+
+          Stack is Ready, and cleans everything up when the TTL expires.'
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object.
+
+              Servers should convert recognized schemas to the latest internal value,
+              and
+
+              may reject unrecognized values.
+
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents.
+
+              Servers may infer this from the endpoint the client submits requests
+              to.
+
+              Cannot be updated.
+
+              In CamelCase.
+
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: 'DemoRequestSpec is a website "request demo" submission reconciled
+              into a
+
+              tenant Stack provisioned from a portal template.'
+            properties:
+              company:
+                description: Company name; preferred source for the tenant slug.
+                maxLength: 40
+                type: string
+              email:
+                description: 'Email of the requester; validated on admission. The
+                  Ready email is
+
+                  sent here.'
+                pattern: ^[^\s@]+@[^\s@]+\.[^\s@]+$
+                type: string
+              template:
+                description: Template id from the portal registry (e.g. "full", "lite").
+                maxLength: 32
+                type: string
+              ttl:
+                description: 'TTL is how long the tenant lives before automatic cleanup.
+
+                  Defaults to 72h. Zero means no auto-cleanup.'
+                type: string
+            required:
+            - email
+            type: object
+          status:
+            description: DemoRequestStatus mirrors the provisioned tenant back to
+              the requester flow.
+            properties:
+              expiresAt:
+                description: ExpiresAt records the TTL deadline (RFC3339).
+                type: string
+              message:
+                description: Message carries the failure reason when Phase=Failed.
+                type: string
+              notifiedAt:
+                description: NotifiedAt records when the requester was emailed (RFC3339).
+                type: string
+              observedGeneration:
+                description: ObservedGeneration tracks spec changes.
+                format: int64
+                type: integer
+              phase:
+                description: Phase of the demo lifecycle.
+                type: string
+              tenant:
+                description: Tenant is the namespace slug the Stack was created in.
+                type: string
+              url:
+                description: URL is the public tenant URL once known.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

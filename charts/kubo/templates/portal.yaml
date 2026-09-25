@@ -1,0 +1,82 @@
+{{- if .Values.portal.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubo-portal
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubo-portal-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubo-manager-role
+subjects:
+- kind: ServiceAccount
+  name: kubo-portal
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubo-portal
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.portal.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kubo
+      app.kubernetes.io/component: portal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kubo
+        app.kubernetes.io/component: portal
+    spec:
+      serviceAccountName: kubo-portal
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      containers:
+      - name: portal
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command: ["/portal"]
+        args: ["-addr=:9090", "-allow-remote"]
+        ports:
+        - name: http
+          containerPort: 9090
+        readinessProbe:
+          tcpSocket:
+            port: http
+        livenessProbe:
+          tcpSocket:
+            port: http
+          initialDelaySeconds: 15
+        resources:
+          {{- toYaml .Values.portal.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubo-portal
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kubo
+    app.kubernetes.io/component: portal
+  ports:
+  - name: http
+    port: 9090
+    targetPort: http
+{{- end }}
