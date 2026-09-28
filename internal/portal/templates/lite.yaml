@@ -8,6 +8,23 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: "{{.Tenant}}"
+  labels:
+    istio.io/dataplane-mode: ambient
+    istio.io/use-waypoint: waypoint
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: waypoint
+  namespace: "{{.Tenant}}"
+  labels:
+    istio.io/waypoint-for: service
+spec:
+  gatewayClassName: istio-waypoint
+  listeners:
+    - name: mesh
+      port: 15008
+      protocol: HBONE
 ---
 # Seed propagation fills the key before deployment; watcher owns this Secret
 # in Helm so its first install can adopt it without an ownership conflict.
@@ -44,6 +61,7 @@ spec:
     data_object_source_creation: "true"
     data_refresh_tabs_enabled: "false"
     encryption_status_display: "false"
+    storage_explorer_enabled: "true"
     landscape_auto_stack: "false"
     landscape_search_focus: "false"
   seedVault:
@@ -132,7 +150,11 @@ spec:
       - name: "{{.Tenant}}-backend-auth0"
         generate:
           MX_SECRET_KEY: {kind: base64, length: 32}
-          MX_TRINO_JWT_SECRET_KEY: {kind: base64, length: 48}
+      - name: "{{.Tenant}}-backend-auth0"
+        copyFrom:
+          name: "{{.Tenant}}-trino-jwt-signing-key"
+          keys:
+            MX_TRINO_JWT_SECRET_KEY: tls.key
       - name: "{{.Tenant}}-ai-secrets"
         copyFrom:
           name: kubo-shared-ai
@@ -207,6 +229,18 @@ spec:
           database: product
           host: postgres-postgresql
           port: 5432
+        trino:
+          jwt:
+            enabled: true
+            issuer: foundation-backend
+            audience: trino
+            private_key_name: tls.key
+        feature_flags:
+          trino_jwt_enabled: true
+          connectors_enabled: true
+          storage_explorer_enabled: true
+          storage_events_enabled: true
+          connector_scheduling_enabled: true
         mcp:
           enabled: true
           publicUrl: https://{{.Tenant}}.kubify.foundation
@@ -393,6 +427,7 @@ spec:
           allowInsecureImages: true
       image:
         repository: bitnamilegacy/postgresql
+        tag: "16"
       primary:
         # Per-tenant dedicated instance sizing: the chart defaults were
         # 100m/128Mi requests with a 150m/192Mi limit — Postgres was CPU-
@@ -488,6 +523,9 @@ spec:
         MX_POSTGRES_PASSWORD: product
 
     storage-engine:
+      persistence:
+        enabled: true
+        size: 20Gi
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/storage-engine
         tag: v0.0.43

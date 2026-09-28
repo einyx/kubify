@@ -145,6 +145,27 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 		}
 		respond(w, r, map[string]bool{"created": true}, nil)
 	})
+	// Demo tenant lifecycle: list/approve/reject/extend DemoRequests.
+	handle("GET /api/demorequests", func(w http.ResponseWriter, r *http.Request) {
+		out, err := p.ListDemoRequests(r.Context())
+		respond(w, r, out, err)
+	})
+	handle("POST /api/demorequests/{name}/approve", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, r, map[string]bool{"ok": true}, p.ApproveDemoRequest(r.Context(), r.PathValue("name")))
+	})
+	handle("POST /api/demorequests/{name}/reject", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, r, map[string]bool{"ok": true}, p.RejectDemoRequest(r.Context(), r.PathValue("name")))
+	})
+	handle("POST /api/demorequests/{name}/extend", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Hours int `json:"hours"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&req); err != nil || req.Hours == 0 {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body: {\"hours\": 24}"))
+			return
+		}
+		respond(w, r, map[string]bool{"ok": true}, p.ExtendDemoRequest(r.Context(), r.PathValue("name"), req.Hours))
+	})
 	handle("GET /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		d, err := p.GetStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
 		respond(w, r, d, err)

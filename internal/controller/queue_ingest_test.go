@@ -58,7 +58,7 @@ func TestQueueIngestDrain(t *testing.T) {
 	q := &QueueIngester{
 		QueueURL:   srv.URL,
 		HTTPClient: srv.Client(),
-		CreateDemoRequest: func(ctx context.Context, email, company string) error {
+		CreateDemoRequest: func(ctx context.Context, email, company, target string) error {
 			atomic.AddInt64(&created, 1)
 			payloads = append(payloads, email+"/"+company)
 			return nil

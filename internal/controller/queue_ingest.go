@@ -31,7 +31,7 @@ import (
 type QueueIngester struct {
 	// CreateDemoRequest inserts one DemoRequest (validation mirrors the
 	// portal's push endpoint so both transports admit identically).
-	CreateDemoRequest func(ctx context.Context, email, company string) error
+	CreateDemoRequest func(ctx context.Context, email, company, target string) error
 	// QueueURL is the queue's base URL including the SAS token.
 	QueueURL string
 	// PollInterval between drains; defaults to 15s.
@@ -109,7 +109,7 @@ func (q *QueueIngester) drain(ctx context.Context) {
 			log.Info("demo queue invalid message dropped", "id", m.MessageID)
 			continue
 		}
-		if err := q.CreateDemoRequest(ctx, payload.email, payload.company); err != nil {
+		if err := q.CreateDemoRequest(ctx, payload.email, payload.company, payload.target); err != nil {
 			log.Error(err, "demo queue create failed; message returns to queue", "id", m.MessageID)
 			continue
 		}
@@ -190,7 +190,7 @@ func (q *QueueIngester) deleteMessage(ctx context.Context, hc *http.Client, m qu
 }
 
 type queuePayload struct {
-	email, company string
+	email, company, target string
 }
 
 // decodeQueuePayload accepts base64-encoded or plain JSON.
@@ -202,11 +202,16 @@ func decodeQueuePayload(text string) (queuePayload, bool) {
 	var p struct {
 		Email   string `json:"email"`
 		Company string `json:"company"`
+		Target  string `json:"target"`
 	}
 	if err := json.Unmarshal([]byte(raw), &p); err != nil || !strings.Contains(p.Email, "@") {
 		return queuePayload{}, false
 	}
-	return queuePayload{email: strings.ToLower(strings.TrimSpace(p.Email)), company: strings.TrimSpace(p.Company)}, true
+	return queuePayload{
+		email:   strings.ToLower(strings.TrimSpace(p.Email)),
+		company: strings.TrimSpace(p.Company),
+		target:  strings.ToLower(strings.TrimSpace(p.Target)),
+	}, true
 }
 
 // StartQueueIngesterFromEnv wires the ingester when DEMO_QUEUE_URL is set
@@ -229,10 +234,10 @@ func StartQueueIngesterFromEnv(ctx context.Context, reader client.Reader, c clie
 	}
 	ing := &QueueIngester{
 		QueueURL: strings.TrimRight(queueURL, "/"),
-		CreateDemoRequest: func(ctx context.Context, email, company string) error {
+		CreateDemoRequest: func(ctx context.Context, email, company, target string) error {
 			dr := platformv1alpha1.DemoRequest{
 				ObjectMeta: metav1.ObjectMeta{GenerateName: "demo-", Namespace: "kubo-system"},
-				Spec:       platformv1alpha1.DemoRequestSpec{Email: email, Company: company, Template: "full"},
+				Spec:       platformv1alpha1.DemoRequestSpec{Email: email, Company: company, Target: target, Template: "full"},
 			}
 			return c.Create(ctx, &dr)
 		},
