@@ -204,6 +204,8 @@ type StackDetail struct {
 	Bundle          string                     `json:"bundle,omitempty"`
 	ValueOverrides  []string                   `json:"valueOverrides,omitempty"`
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
+	FeatureFlags    map[string]string          `json:"featureFlags,omitempty"`
+	URL             string                     `json:"url,omitempty"`
 	Conditions      []ConditionView            `json:"conditions,omitempty"`
 	Components      []ComponentView            `json:"components"`
 }
@@ -257,6 +259,12 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 		d.ComponentValues[name] = json.RawMessage(values.Raw)
 	}
 	components := stackComponents(ctx, p.client, &s)
+	if s.Spec.FeatureFlags != nil {
+		d.FeatureFlags = s.Spec.FeatureFlags
+	}
+	if vs := s.Spec.VirtualService; vs != nil && vs.Host != "" {
+		d.URL = "https://" + vs.Host
+	}
 	if s.Spec.Bundle != nil {
 		d.Bundle = s.Spec.Bundle.URL
 	}
@@ -520,6 +528,8 @@ type PatchRequest struct {
 	// ComponentValues patches per-component Helm value overrides. A nil
 	// value removes the component's override; non-nil replaces it.
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
+	// FeatureFlags patches tenant feature flags. Replaces the entire map.
+	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
 }
 
 // PatchStackSpec applies partial spec updates (mode, bundle, exclude,
@@ -591,6 +601,12 @@ func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchR
 		}
 		if len(s.Spec.ComponentValues) == 0 {
 			s.Spec.ComponentValues = nil
+		}
+	}
+	if req.FeatureFlags != nil {
+		s.Spec.FeatureFlags = req.FeatureFlags
+		if len(s.Spec.FeatureFlags) == 0 {
+			s.Spec.FeatureFlags = nil
 		}
 	}
 	if err := p.client.Patch(ctx, &s, patch); err != nil {
@@ -994,6 +1010,7 @@ func (p *Portal) mcpNav() string {
 type DemoRequestInbound struct {
 	Email   string `json:"email"`
 	Company string `json:"company,omitempty"`
+	Target  string `json:"target,omitempty"`
 }
 
 // CreateDemoRequest admits a website demo request: token-authed at the HTTP
@@ -1007,12 +1024,16 @@ func (p *Portal) CreateDemoRequest(ctx context.Context, in DemoRequestInbound) (
 	if len(company) > 40 {
 		return nil, fmt.Errorf("company name too long (max 40)")
 	}
+	target := strings.ToLower(strings.TrimSpace(in.Target))
+	if len(target) > 63 {
+		return nil, fmt.Errorf("target too long (max 63)")
+	}
 	dr := v1alpha1.DemoRequest{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "demo-",
 			Namespace:    "kubo-system",
 		},
-		Spec: v1alpha1.DemoRequestSpec{Email: email, Company: company, Template: "full"},
+		Spec: v1alpha1.DemoRequestSpec{Email: email, Company: company, Target: target, Template: "full"},
 	}
 	if err := p.client.Create(ctx, &dr); err != nil {
 		return nil, err
@@ -1028,4 +1049,90 @@ func (p *Portal) demoRequestToken(ctx context.Context) string {
 		return ""
 	}
 	return string(s.Data["token"])
+}
+
+// DemoRequestView is one row in the portal's demos table.
+type DemoRequestView struct {
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Company   string `json:"company,omitempty"`
+	Phase     string `json:"phase"`
+	Message   string `json:"message,omitempty"`
+	Tenant    string `json:"tenant,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Approved  bool   `json:"approved"`
+	ExpiresAt string `json:"expiresAt,omitempty"`
+	Age       string `json:"age"`
+}
+
+// ListDemoRequests returns all demo requests, newest first.
+func (p *Portal) ListDemoRequests(ctx context.Context) ([]DemoRequestView, error) {
+	var list v1alpha1.DemoRequestList
+	if err := p.client.List(ctx, &list, client.InNamespace("kubo-system")); err != nil {
+		return nil, err
+	}
+	out := make([]DemoRequestView, 0, len(list.Items))
+	for i := range list.Items {
+		dr := &list.Items[i]
+		out = append(out, DemoRequestView{
+			Name:      dr.Name,
+			Email:     dr.Spec.Email,
+			Company:   dr.Spec.Company,
+			Phase:     string(dr.Status.Phase),
+			Message:   dr.Status.Message,
+			Tenant:    dr.Status.Tenant,
+			URL:       dr.Status.URL,
+			Approved:  dr.Spec.Approved,
+			ExpiresAt: dr.Status.ExpiresAt,
+			Age:       since(dr.CreationTimestamp.Time),
+		})
+	}
+	return out, nil
+}
+
+// ApproveDemoRequest flips spec.approved; provisioning starts on the next
+// reconcile (watch-driven).
+func (p *Portal) ApproveDemoRequest(ctx context.Context, name string) error {
+	var dr v1alpha1.DemoRequest
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "kubo-system", Name: name}, &dr); err != nil {
+		return err
+	}
+	patch := client.RawPatch(types.MergePatchType, []byte(`{"spec":{"approved":true}}`))
+	return p.client.Patch(ctx, &dr, patch)
+}
+
+// RejectDemoRequest deletes an unapproved request (nothing was provisioned,
+// so there is nothing to clean up beyond the CR itself).
+func (p *Portal) RejectDemoRequest(ctx context.Context, name string) error {
+	dr := v1alpha1.DemoRequest{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubo-system"}}
+	return p.client.Delete(ctx, &dr)
+}
+
+// ExtendDemoRequest pushes the TTL deadline `hours` past now. The window
+// counts from approval, so the new spec.ttl covers elapsed time plus the
+// requested extension.
+func (p *Portal) ExtendDemoRequest(ctx context.Context, name string, hours int) error {
+	if hours <= 0 || hours > 24*30 {
+		return fmt.Errorf("hours must be between 1 and 720")
+	}
+	var dr v1alpha1.DemoRequest
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "kubo-system", Name: name}, &dr); err != nil {
+		return err
+	}
+	base := dr.CreationTimestamp.Time
+	if dr.Status.ApprovedAt != "" {
+		if at, err := time.Parse(time.RFC3339, dr.Status.ApprovedAt); err == nil {
+			base = at
+		}
+	}
+	if dr.Status.ExpiresAt != "" {
+		if at, err := time.Parse(time.RFC3339, dr.Status.ExpiresAt); err == nil && at.After(base) {
+			base = at
+		}
+	}
+	newTTL := time.Since(base) + time.Duration(hours)*time.Hour
+	// metav1.Duration wire format is a Go duration string ("36h0m0s").
+	raw := fmt.Sprintf(`{"spec":{"ttl":%q}}`, newTTL.String())
+	patch := client.RawPatch(types.MergePatchType, []byte(raw))
+	return p.client.Patch(ctx, &dr, patch)
 }

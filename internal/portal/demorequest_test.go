@@ -5,7 +5,11 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/types"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -67,4 +71,56 @@ func TestCreateDemoRequestEndpoint(t *testing.T) {
 			t.Fatal("invalid email accepted")
 		}
 	})
+}
+
+func TestDemoRequestLifecycleEndpoints(t *testing.T) {
+	p := newFake(t)
+	// create one pending request directly
+	now := metav1.Now()
+	dr := &v1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-x", Namespace: "kubo-system", CreationTimestamp: now},
+		Spec:       v1alpha1.DemoRequestSpec{Email: "x@y.io", Company: "X"},
+		Status:     v1alpha1.DemoRequestStatus{ApprovedAt: now.UTC().Format(time.RFC3339)},
+	}
+	if err := p.client.Create(context.Background(), dr); err != nil {
+		t.Fatal(err)
+	}
+	h := p.Mux()
+
+	get := func(path string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://localhost"+path, nil))
+		return w
+	}
+	post := func(path string, body string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "http://localhost"+path, strings.NewReader(body)))
+		return w
+	}
+
+	if w := get("/api/demorequests"); w.Code != 200 || !strings.Contains(w.Body.String(), "x@y.io") {
+		t.Fatalf("list: %d %s", w.Code, w.Body.String())
+	}
+	if w := post("/api/demorequests/demo-x/approve", ""); w.Code != 200 {
+		t.Fatalf("approve: %d %s", w.Code, w.Body.String())
+	}
+	var updated v1alpha1.DemoRequest
+	if err := p.client.Get(context.Background(), types.NamespacedName{Namespace: "kubo-system", Name: "demo-x"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if !updated.Spec.Approved {
+		t.Fatal("approve did not flip spec.approved")
+	}
+	if w := post("/api/demorequests/demo-x/extend", `{"hours":24}`); w.Code != 200 {
+		t.Fatalf("extend: %d %s", w.Code, w.Body.String())
+	}
+	if err := p.client.Get(context.Background(), types.NamespacedName{Namespace: "kubo-system", Name: "demo-x"}, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Spec.TTL == nil || updated.Spec.TTL.Duration < 23*time.Hour {
+		t.Fatalf("extend did not set a ≥23h ttl: %+v", updated.Spec.TTL)
+	}
+	if w := post("/api/demorequests/demo-x/reject", ""); w.Code != 200 {
+		t.Fatalf("reject: %d %s", w.Code, w.Body.String())
+	}
 }

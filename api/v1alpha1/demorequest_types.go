@@ -52,15 +52,30 @@ type DemoRequestSpec struct {
 	// +kubebuilder:validation:MaxLength=40
 	Company string `json:"company,omitempty"`
 
+	// Target identifies the cluster or operator instance that should
+	// provision this request. When empty the controller on the local
+	// cluster picks it up; a non-empty value lets multi-cluster setups
+	// filter on it (e.g. "prod-eu", "staging").
+	// +optional
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$`
+	Target string `json:"target,omitempty"`
+
 	// Template id from the portal registry (e.g. "full", "lite").
 	// +optional
 	// +kubebuilder:validation:MaxLength=32
 	Template string `json:"template,omitempty"`
 
-	// TTL is how long the tenant lives before automatic cleanup.
-	// Defaults to 72h. Zero means no auto-cleanup.
+	// TTL is how long the tenant lives after approval before automatic
+	// cleanup. Defaults to 72h. Zero means no auto-cleanup.
 	// +optional
 	TTL *metav1.Duration `json:"ttl,omitempty"`
+
+	// Approved releases provisioning: nothing deploys until an operator
+	// flips this in the portal. The TTL clock starts at approval, so the
+	// 72h window is the tenant's actual lifetime.
+	// +optional
+	Approved bool `json:"approved,omitempty"`
 }
 
 // DemoRequestStatus mirrors the provisioned tenant back to the requester flow.
@@ -80,6 +95,10 @@ type DemoRequestStatus struct {
 	// NotifiedAt records when the requester was emailed (RFC3339).
 	// +optional
 	NotifiedAt string `json:"notifiedAt,omitempty"`
+	// ApprovedAt records when the request was approved (RFC3339); the
+	// TTL deadline counts from here.
+	// +optional
+	ApprovedAt string `json:"approvedAt,omitempty"`
 	// ExpiresAt records the TTL deadline (RFC3339).
 	// +optional
 	ExpiresAt string `json:"expiresAt,omitempty"`

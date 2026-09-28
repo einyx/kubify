@@ -47,7 +47,7 @@ func TestDemoRequestReconcileProvisionsAndMirrors(t *testing.T) {
 	now := metav1.Now()
 	dr := platformv1alpha1.DemoRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-test", Namespace: "kubo-system", Generation: 1, CreationTimestamp: now},
-		Spec:       platformv1alpha1.DemoRequestSpec{Email: "ada@acme.io", Company: "Acme", Template: "full"},
+		Spec:       platformv1alpha1.DemoRequestSpec{Email: "ada@acme.io", Company: "Acme", Template: "full", Approved: true},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&platformv1alpha1.DemoRequest{}).WithObjects(&dr).Build()
 	r := &DemoRequestReconciler{
@@ -95,7 +95,7 @@ func TestDemoRequestCapacityCap(t *testing.T) {
 	}
 	newDr := platformv1alpha1.DemoRequest{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo-new", Namespace: "kubo-system", Generation: 1},
-		Spec:       platformv1alpha1.DemoRequestSpec{Email: "b@y.io"},
+		Spec:       platformv1alpha1.DemoRequestSpec{Email: "b@y.io", Approved: true},
 	}
 	c := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&platformv1alpha1.DemoRequest{}).WithObjects(&existing, &newDr).Build()
 	// The fake client strips status on seeding for status-subresource types;

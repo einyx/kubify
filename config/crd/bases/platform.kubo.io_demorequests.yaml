@@ -60,6 +60,12 @@ spec:
               DemoRequestSpec is a website "request demo" submission reconciled into a
               tenant Stack provisioned from a portal template.
             properties:
+              approved:
+                description: |-
+                  Approved releases provisioning: nothing deploys until an operator
+                  flips this in the portal. The TTL clock starts at approval, so the
+                  72h window is the tenant's actual lifetime.
+                type: boolean
               company:
                 description: Company name; preferred source for the tenant slug.
                 maxLength: 40
@@ -70,14 +76,23 @@ spec:
                   sent here.
                 pattern: ^[^\s@]+@[^\s@]+\.[^\s@]+$
                 type: string
+              target:
+                description: |-
+                  Target identifies the cluster or operator instance that should
+                  provision this request. When empty the controller on the local
+                  cluster picks it up; a non-empty value lets multi-cluster setups
+                  filter on it (e.g. "prod-eu", "staging").
+                maxLength: 63
+                pattern: ^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$
+                type: string
               template:
                 description: Template id from the portal registry (e.g. "full", "lite").
                 maxLength: 32
                 type: string
               ttl:
                 description: |-
-                  TTL is how long the tenant lives before automatic cleanup.
-                  Defaults to 72h. Zero means no auto-cleanup.
+                  TTL is how long the tenant lives after approval before automatic
+                  cleanup. Defaults to 72h. Zero means no auto-cleanup.
                 type: string
             required:
             - email
@@ -86,6 +101,11 @@ spec:
             description: DemoRequestStatus mirrors the provisioned tenant back to
               the requester flow.
             properties:
+              approvedAt:
+                description: |-
+                  ApprovedAt records when the request was approved (RFC3339); the
+                  TTL deadline counts from here.
+                type: string
               expiresAt:
                 description: ExpiresAt records the TTL deadline (RFC3339).
                 type: string

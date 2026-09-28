@@ -50,6 +50,11 @@ type DemoRequestReconciler struct {
 	Emailer DemoEmailer
 	// MaxTenants caps concurrent live demo tenants; 0 = unlimited.
 	MaxTenants int
+	// Target is the cluster/operator identity this controller handles.
+	// Only DemoRequests whose spec.target matches (or both are empty)
+	// are reconciled; everything else is skipped so multiple controllers
+	// on different clusters can share a single kubo-system namespace.
+	Target string
 	// DefaultTemplate is used when spec.template is empty.
 	DefaultTemplate string
 	// TenantDomain forms the public URL: https://<tenant>.<domain>.
@@ -102,6 +107,11 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if err := r.Get(ctx, req.NamespacedName, &dr); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	// Skip requests targeted at a different operator/cluster.
+	if dr.Spec.Target != r.Target {
+		return ctrl.Result{}, nil
+	}
+
 	if !dr.DeletionTimestamp.IsZero() {
 		return r.finalize(ctx, &dr)
 	}
@@ -121,6 +131,19 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	if dr.Status.Phase == platformv1alpha1.DemoRequestExpired {
 		return ctrl.Result{}, nil
+	}
+
+	// Approval gate: nothing provisions until an operator approves the
+	// request in the portal. Phase stays Pending with an explanatory
+	// message; the spec flip re-triggers the watch, no polling needed.
+	if !dr.Spec.Approved {
+		return ctrl.Result{}, r.setStatus(ctx, &dr, platformv1alpha1.DemoRequestPending, "awaiting approval")
+	}
+	if dr.Status.ApprovedAt == "" {
+		dr.Status.ApprovedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := r.Status().Update(ctx, &dr); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	tenant := tenantSlug(dr.Spec.Company, dr.Spec.Email)
@@ -186,7 +209,15 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if dr.Spec.TTL != nil && dr.Spec.TTL.Duration > 0 {
 		ttl = dr.Spec.TTL.Duration
 	}
-	deadline := dr.CreationTimestamp.Add(ttl)
+	// The TTL window is the tenant's lifetime: count from approval, not
+	// creation, so time spent awaiting approval doesn't eat the demo.
+	base := dr.CreationTimestamp.Time
+	if dr.Status.ApprovedAt != "" {
+		if at, err := time.Parse(time.RFC3339, dr.Status.ApprovedAt); err == nil {
+			base = at
+		}
+	}
+	deadline := base.Add(ttl)
 	dr.Status.ExpiresAt = deadline.UTC().Format(time.RFC3339)
 	if err := r.Status().Update(ctx, &dr); err != nil {
 		return ctrl.Result{}, err
