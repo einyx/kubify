@@ -20,6 +20,15 @@ type Policy struct {
 	// When set, agentfw acts as a reverse proxy: agents call agentfw directly and
 	// it forwards to upstream, scanning both directions.
 	Upstream string `json:"upstream,omitempty"`
+	// BaseURLRoutes maps the inbound Host header to an upstream base URL for
+	// base-URL mode: clients point e.g. ANTHROPIC_BASE_URL=http://agentfw:8080
+	// and send origin-form requests; agentfw resolves the destination here.
+	// Keys match host or host:port.
+	BaseURLRoutes map[string]string `json:"baseURLRoutes,omitempty"`
+	// BaseURLDefault is the fallback upstream for base-URL requests whose
+	// Host matches no baseURLRoutes entry. The X-Agentfw-Upstream header
+	// and path-embedded targets (/https://host/...) always take precedence.
+	BaseURLDefault string `json:"baseURLDefault,omitempty"`
 	// RequestsPerMinute caps outbound requests. 0 = unlimited.
 	RequestsPerMinute int `json:"requestsPerMinute,omitempty"`
 	// DataBudgetMB caps total outbound bytes (resets on restart). 0 = unlimited.
@@ -29,6 +38,10 @@ type Policy struct {
 	SigningKeyPath string `json:"signingKeyPath,omitempty"`
 	// RulesPath is a YAML file of additional DLP/injection patterns to load.
 	RulesPath string `json:"rulesPath,omitempty"`
+	// PricesPath overrides where the billing price table is loaded from.
+	// Default /etc/agentfw/prices.yaml; entries merge over the builtin
+	// snapshot so new models bill correctly without a rebuild.
+	PricesPath string `json:"pricesPath,omitempty"`
 	// MITMEnabled turns on TLS termination of CONNECT tunnels so response
 	// scanners can see decrypted bodies. Off by default.
 	MITMEnabled bool `json:"mitmEnabled,omitempty"`

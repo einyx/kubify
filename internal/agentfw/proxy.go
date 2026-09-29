@@ -40,6 +40,15 @@ func (px *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (px *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	// Base-URL mode: origin-form requests (client pointed e.g.
+	// ANTHROPIC_BASE_URL at agentfw) carry no absolute target. Resolve one
+	// before scanning so the SSRF/DLP pipeline sees the real destination,
+	// not the agentfw address.
+	if err := px.resolveTarget(r); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	r, err := px.scanner.InspectRequest(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
@@ -75,6 +84,112 @@ func (px *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	rp.ServeHTTP(w, r)
+}
+
+// upstreamHeader names an explicit base-URL-mode routing hint. It is stripped
+// before forwarding so it never leaks to the destination.
+const upstreamHeader = "X-Agentfw-Upstream"
+
+// resolveTarget rewrites origin-form requests (base-URL mode) into absolute
+// forward-proxy targets. Absolute-form requests pass through untouched.
+// Resolution order:
+//  1. X-Agentfw-Upstream header (host or full base URL)
+//  2. target embedded in the path: /https://api.anthropic.com/v1/messages
+//  3. policy baseURLRoutes keyed by the inbound Host header
+//  4. policy baseURLDefault
+func (px *Proxy) resolveTarget(r *http.Request) error {
+	if r.URL.Host != "" {
+		return nil // forward-proxy (absolute-form) request
+	}
+	u := px.upstreamFromHeader(r)
+	if u == nil {
+		u, r.URL.Path = upstreamFromPath(r.URL.Path)
+	}
+	if u == nil {
+		u = px.upstreamFromPolicy(r.Host)
+	}
+	if u == nil {
+		return fmt.Errorf(
+			"agentfw: base-URL request %s %q has no upstream — set the %s header, embed the target in the path (/https://host/...), or set baseURLRoutes/baseURLDefault in the agentfw policy",
+			r.Method, r.URL.Path, upstreamHeader)
+	}
+	r.URL.Scheme = u.Scheme
+	r.URL.Host = u.Host
+	r.Host = u.Host
+	if p := strings.TrimSuffix(u.Path, "/"); p != "" {
+		r.URL.Path = p + r.URL.Path
+	}
+	r.Header.Del(upstreamHeader) // routing hint must not leak upstream
+	return nil
+}
+
+func (px *Proxy) upstreamFromHeader(r *http.Request) *url.URL {
+	v := strings.TrimSpace(r.Header.Get(upstreamHeader))
+	if v == "" {
+		return nil
+	}
+	u, err := parseBaseURL(v)
+	if err != nil {
+		return nil
+	}
+	return u
+}
+
+// upstreamFromPath extracts a target embedded as the entire path prefix,
+// e.g. /https://api.anthropic.com/v1/messages. Returns the target URL and
+// the remaining request path.
+func upstreamFromPath(path string) (*url.URL, string) {
+	for _, scheme := range []string{"https", "http"} {
+		prefix := "/" + scheme + "://"
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		host, remainder, _ := strings.Cut(strings.TrimPrefix(path, prefix), "/")
+		if host == "" {
+			return nil, path
+		}
+		return &url.URL{Scheme: scheme, Host: host}, "/" + strings.TrimLeft(remainder, "/")
+	}
+	return nil, path
+}
+
+func (px *Proxy) upstreamFromPolicy(host string) *url.URL {
+	if px.scanner == nil {
+		return nil
+	}
+	p := px.scanner.Policy
+	if len(p.BaseURLRoutes) > 0 && host != "" {
+		if base, ok := p.BaseURLRoutes[host]; ok {
+			if u, err := parseBaseURL(base); err == nil {
+				return u
+			}
+		}
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			if base, ok := p.BaseURLRoutes[h]; ok {
+				if u, err := parseBaseURL(base); err == nil {
+					return u
+				}
+			}
+		}
+	}
+	if p.BaseURLDefault != "" {
+		if u, err := parseBaseURL(p.BaseURLDefault); err == nil {
+			return u
+		}
+	}
+	return nil
+}
+
+// parseBaseURL accepts a host or a full base URL, defaulting to https.
+func parseBaseURL(s string) (*url.URL, error) {
+	if !strings.Contains(s, "://") {
+		s = "https://" + s
+	}
+	u, err := url.Parse(s)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("agentfw: invalid base URL %q", s)
+	}
+	return u, nil
 }
 
 func (px *Proxy) handleTunnel(w http.ResponseWriter, r *http.Request) {

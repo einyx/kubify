@@ -39,6 +39,9 @@ const (
 	// agentfw-ca (SSL_CERT_FILE / REQUESTS_CA_BUNDLE / NODE_EXTRA_CA_CERTS),
 	// so tenants flip this when their apps are ready.
 	agentfwMITMAnnotation = "kubify.io/agentfw-mitm"
+	// agentfwViewPVC backs /var/lib/agentfw so the SQLite viewer/billing
+	// archive survives pod restarts and rescheduling.
+	agentfwViewPVC = "agentfw-view"
 )
 
 // agentfwPolicyYAML renders the tenant policy. The MITM block always carries
@@ -53,6 +56,13 @@ blockPrivateEgress: true
 dlpAction: redact
 injectionAction: block
 # upstream: https://api.openai.com   # set to enable reverse-proxy mode
+# Base-URL mode alongside forward-proxy mode: clients point e.g.
+# ANTHROPIC_BASE_URL=http://agentfw:8080 and agentfw resolves the target —
+# per-host overrides first, this default as fallback. The X-Agentfw-Upstream
+# header and path-embedded targets (/https://host/...) bypass both.
+baseURLDefault: https://api.anthropic.com
+baseURLRoutes:
+  api.openai.com: https://api.openai.com
 `
 
 func agentfwMITMBlock(mitm bool) string {
@@ -77,6 +87,9 @@ func (r *StackReconciler) ensureTenantAgentFW(ctx context.Context, stack *platfo
 	}
 	if err := r.ensureAgentFWConfigMap(ctx, stack); err != nil {
 		return fmt.Errorf("agentfw configmap: %w", err)
+	}
+	if err := r.ensureAgentFWViewPVC(ctx, stack.Namespace); err != nil {
+		return fmt.Errorf("agentfw view pvc: %w", err)
 	}
 	if err := r.ensureAgentFWDeployment(ctx, stack); err != nil {
 		return fmt.Errorf("agentfw deployment: %w", err)
@@ -177,6 +190,31 @@ func (r *StackReconciler) ensureAgentFWConfigMap(ctx context.Context, stack *pla
 	return r.Update(ctx, &existing)
 }
 
+// ensureAgentFWViewPVC creates the billing-archive volume once. Existing
+// claims are never modified — storage class/size changes are left to the
+// platform team so we never fight a resized or statically-provisioned PVC.
+func (r *StackReconciler) ensureAgentFWViewPVC(ctx context.Context, ns string) error {
+	var existing corev1.PersistentVolumeClaim
+	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: agentfwViewPVC}, &existing)
+	if err == nil {
+		return nil
+	}
+	if !apierrors.IsNotFound(err) {
+		return err
+	}
+	return r.Create(ctx, &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: agentfwViewPVC, Namespace: ns},
+		Spec: corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse("1Gi"),
+				},
+			},
+		},
+	})
+}
+
 func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *platformv1alpha1.Stack) error {
 	ns := stack.Namespace
 	// Pod annotation carries a checksum of the desired policy so flips of the
@@ -256,7 +294,12 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *pl
 					}, {
 						Name: "viewer-archive",
 						VolumeSource: corev1.VolumeSource{
-							EmptyDir: &corev1.EmptyDirVolumeSource{},
+							// Persistent claim, not emptyDir: the SQLite
+							// archive is the billing/usage history — an
+							// emptyDir would lose it on every pod restart.
+							PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
+								ClaimName: agentfwViewPVC,
+							},
 						},
 					}},
 				},

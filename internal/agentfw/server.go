@@ -28,6 +28,16 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 		log.Printf("agentfw: rules load warning: %v", err)
 	}
 
+	// Price overrides for billing (no-op if file absent — e.g. a
+	// user-added prices.yaml key in the agentfw ConfigMap).
+	pricesPath := policy.PricesPath
+	if pricesPath == "" {
+		pricesPath = "/etc/agentfw/prices.yaml"
+	}
+	if err := LoadPrices(pricesPath); err != nil {
+		log.Printf("agentfw: prices load warning: %v", err)
+	}
+
 	auditor := NewAuditor(os.Stdout)
 
 	// Ed25519 signed receipts (optional).
