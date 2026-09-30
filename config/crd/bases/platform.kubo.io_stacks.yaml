@@ -231,8 +231,7 @@ spec:
                     type: boolean
                   postgres:
                     description: |-
-                      Postgres installs the kubegres operator. Stacks then run Postgres via
-                      Postgres custom resources instead of a per-stack postgres chart.
+                      Postgres installs the kubegres operator. Stacks then run Postgres via                      Postgres custom resources instead of a per-stack postgres chart.
                     type: boolean
                   spark:
                     description: Spark installs kubeflow spark-operator.
@@ -245,6 +244,45 @@ spec:
                 description: Paused stops reconciliation without deleting deployed
                   components.
                 type: boolean
+              seedVault:
+                description: |-
+                  SeedVault mirrors keys from a plain k8s Secret into the per-tenant
+                  Vault KV store on every reconcile. Secret values never appear in the
+                  Stack spec.
+                properties:
+                  entries:
+                    description: Entries map Vault KV paths to the source Secret
+                      keys to copy.
+                    items:
+                      description: VaultSeedEntry copies a set of source Secret
+                        keys into one Vault path.
+                      properties:
+                        keys:
+                          description: Keys are the source Secret keys copied to
+                            this path.
+                          items:
+                            type: string
+                          type: array
+                        path:
+                          description: Path is the KV v2 path (relative to the secret/
+                            mount), e.g. frontend/auth0.
+                          minLength: 1
+                          type: string
+                      required:
+                      - keys
+                      - path
+                      type: object
+                    minItems: 1
+                    type: array
+                  sourceSecret:
+                    description: SourceSecret is a Secret in the Stack namespace
+                      whose keys are copied into Vault.
+                    minLength: 1
+                    type: string
+                required:
+                - entries
+                - sourceSecret
+                type: object
               stackRef:
                 description: |-
                   StackRef names the cluster-scoped StackDefinition to deploy.
