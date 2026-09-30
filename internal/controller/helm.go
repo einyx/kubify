@@ -9,16 +9,18 @@ import (
 
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
-	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/yaml"
-
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
@@ -26,72 +28,87 @@ import (
 // HelmEngine renders and deploys a component chart into a namespace.
 // It is product-agnostic: it only knows ChartRef + merged values.
 type HelmEngine struct {
-	cfg *action.Configuration
+	restCfg *rest.Config
 }
 
 func NewHelmEngine() (*HelmEngine, error) {
-	restCfg := config.GetConfigOrDie()
+	return &HelmEngine{restCfg: config.GetConfigOrDie()}, nil
+}
 
-	// Serialize the rest config to a temp kubeconfig so Helm's
-	// client-go plumbing can consume it uniformly (in-cluster or local).
-	kc := api.NewConfig()
-	cluster := api.NewCluster()
-	cluster.Server = restCfg.Host
-	cluster.CertificateAuthority = restCfg.CAFile
-	cluster.CertificateAuthorityData = restCfg.CAData
-	cluster.InsecureSkipTLSVerify = restCfg.Insecure
-	user := api.NewAuthInfo()
-	user.Token = restCfg.BearerToken
-	user.TokenFile = restCfg.BearerTokenFile
-	user.ClientCertificate = restCfg.CertFile
-	user.ClientCertificateData = restCfg.CertData
-	user.ClientKey = restCfg.KeyFile
-	user.ClientKeyData = restCfg.KeyData
-	user.Username = restCfg.Username
-	user.Password = restCfg.Password
-	ctx := api.NewContext()
-	ctx.Cluster = "stack-operator"
-	ctx.AuthInfo = "stack-operator"
-	kc.Clusters["stack-operator"] = cluster
-	kc.AuthInfos["stack-operator"] = user
-	kc.CurrentContext = "stack-operator"
-	kc.Contexts["stack-operator"] = ctx
-
-	kcBytes, err := clientcmd.Write(*kc)
-	if err != nil {
-		return nil, fmt.Errorf("serialize kubeconfig: %w", err)
+// cfgFor returns a Helm action.Configuration scoped to the given namespace.
+// Release secrets are stored in that namespace, not in "default".
+func (h *HelmEngine) cfgFor(namespace string) (*action.Configuration, error) {
+	getter := &restConfigGetter{cfg: h.restCfg, namespace: namespace}
+	cfg := &action.Configuration{}
+	if err := cfg.Init(getter, namespace, "secret", slogInfo); err != nil {
+		return nil, fmt.Errorf("helm init for namespace %s: %w", namespace, err)
 	}
-	tmp, err := os.CreateTemp("", "stack-kubeconfig-*")
+	return cfg, nil
+}
+
+// restConfigGetter implements genericclioptions.RESTClientGetter from a *rest.Config
+// without writing any credentials to disk.
+type restConfigGetter struct {
+	cfg       *rest.Config
+	namespace string
+}
+
+func (r *restConfigGetter) ToRESTConfig() (*rest.Config, error) { return r.cfg, nil }
+
+func (r *restConfigGetter) ToDiscoveryClient() (discovery.CachedDiscoveryInterface, error) {
+	dc, err := discovery.NewDiscoveryClientForConfig(r.cfg)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tmp.Write(kcBytes); err != nil {
+	return memory.NewMemCacheClient(dc), nil
+}
+
+func (r *restConfigGetter) ToRESTMapper() (meta.RESTMapper, error) {
+	dc, err := r.ToDiscoveryClient()
+	if err != nil {
 		return nil, err
 	}
-	if err := tmp.Close(); err != nil {
-		return nil, err
-	}
+	return restmapper.NewDeferredDiscoveryRESTMapper(dc), nil
+}
 
-	cf := genericclioptions.NewConfigFlags(true)
-	kcPath := tmp.Name()
-	cf.KubeConfig = &kcPath
-
-	h := &HelmEngine{cfg: &action.Configuration{}}
-	if err := h.cfg.Init(cf, metav1.NamespaceDefault, "secret", slogInfo); err != nil {
-		return nil, fmt.Errorf("helm init: %w", err)
-	}
-	return h, nil
+func (r *restConfigGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
+	kc := clientcmdapi.NewConfig()
+	cluster := clientcmdapi.NewCluster()
+	cluster.Server = r.cfg.Host
+	cluster.CertificateAuthorityData = r.cfg.CAData
+	cluster.CertificateAuthority = r.cfg.CAFile
+	cluster.InsecureSkipTLSVerify = r.cfg.Insecure
+	user := clientcmdapi.NewAuthInfo()
+	user.Token = r.cfg.BearerToken
+	user.TokenFile = r.cfg.BearerTokenFile
+	user.ClientCertificateData = r.cfg.CertData
+	user.ClientCertificate = r.cfg.CertFile
+	user.ClientKeyData = r.cfg.KeyData
+	user.ClientKey = r.cfg.KeyFile
+	ctx := clientcmdapi.NewContext()
+	ctx.Cluster = "kubo"
+	ctx.AuthInfo = "kubo"
+	ctx.Namespace = r.namespace
+	kc.Clusters["kubo"] = cluster
+	kc.AuthInfos["kubo"] = user
+	kc.Contexts["kubo"] = ctx
+	kc.CurrentContext = "kubo"
+	return clientcmd.NewDefaultClientConfig(*kc, &clientcmd.ConfigOverrides{})
 }
 
 func slogInfo(format string, v ...interface{}) { slog.Info(fmt.Sprintf(format, v...)) }
 
 // EnsureChart pulls the chart and returns the loaded chart.
 func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, error) {
+	cfg, err := h.cfgFor("default")
+	if err != nil {
+		return nil, err
+	}
 	dir, err := os.MkdirTemp("", "stack-chart-*")
 	if err != nil {
 		return nil, err
 	}
-	pull := action.NewPullWithOpts(action.WithConfig(h.cfg))
+	pull := action.NewPullWithOpts(action.WithConfig(cfg))
 	pull.DestDir = dir
 	pull.Version = ref.ChartVersion
 	pull.Settings = cli.New()
@@ -112,7 +129,12 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, e
 
 // Deploy installs or upgrades the release and returns the resulting release.
 func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
-	existing, err := h.getRelease(compName, namespace)
+	cfg, err := h.cfgFor(namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	existing, err := getRelease(cfg, compName)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +142,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	valsJSON, _ := yaml.Marshal(values)
 
 	if existing == nil {
-		inst := action.NewInstall(h.cfg)
+		inst := action.NewInstall(cfg)
 		inst.ReleaseName = compName
 		inst.Namespace = namespace
 		inst.CreateNamespace = true
@@ -134,7 +156,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		return rel, nil
 	}
 
-	up := action.NewUpgrade(h.cfg)
+	up := action.NewUpgrade(cfg)
 	up.Namespace = namespace
 	up.Wait = true
 	up.Timeout = 10 * time.Minute
@@ -149,7 +171,11 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 
 // ReleaseStatus returns the current deploy status of a release.
 func (h *HelmEngine) ReleaseStatus(name, namespace string) (release.Status, error) {
-	rel, err := h.getRelease(name, namespace)
+	cfg, err := h.cfgFor(namespace)
+	if err != nil {
+		return "", err
+	}
+	rel, err := getRelease(cfg, name)
 	if err != nil {
 		return "", err
 	}
@@ -161,16 +187,20 @@ func (h *HelmEngine) ReleaseStatus(name, namespace string) (release.Status, erro
 
 // Uninstall removes a release (used on Stack deletion).
 func (h *HelmEngine) Uninstall(name, namespace string) error {
-	un := action.NewUninstall(h.cfg)
+	cfg, err := h.cfgFor(namespace)
+	if err != nil {
+		return err
+	}
+	un := action.NewUninstall(cfg)
 	un.IgnoreNotFound = true
 	un.Wait = true
 	un.Timeout = 5 * time.Minute
-	_, err := un.Run(name)
+	_, err = un.Run(name)
 	return err
 }
 
-func (h *HelmEngine) getRelease(name, namespace string) (*release.Release, error) {
-	st := action.NewStatus(h.cfg)
+func getRelease(cfg *action.Configuration, name string) (*release.Release, error) {
+	st := action.NewStatus(cfg)
 	rel, err := st.Run(name)
 	if err != nil {
 		if isReleaseNotFound(err) {

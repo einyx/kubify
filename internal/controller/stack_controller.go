@@ -42,7 +42,6 @@ type StackReconciler struct {
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stackdefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
-// +kubebuilder:rbac:groups="*",resources="*",verbs="*"
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases/status,verbs=get
@@ -68,15 +67,20 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.finalize(ctx, &stack)
 	}
 
+	// Resolve the stack definition from StackRef or Inline.
 	var def platformv1alpha1.StackDefinition
-	if err := r.Get(ctx, client.ObjectKey{Name: stack.Spec.StackRef}, &def); err != nil {
-		meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
-			Type: "Ready", Status: metav1.ConditionFalse,
-			Reason: "StackDefinitionNotFound", Message: err.Error(),
-		})
-		stack.Status.Phase = "Failed"
-		_ = r.Status().Update(ctx, &stack)
-		return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
+	if stack.Spec.Inline != nil {
+		def.Spec = *stack.Spec.Inline
+	} else {
+		if err := r.Get(ctx, client.ObjectKey{Name: stack.Spec.StackRef}, &def); err != nil {
+			meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
+				Type: "Ready", Status: metav1.ConditionFalse,
+				Reason: "StackDefinitionNotFound", Message: err.Error(),
+			})
+			stack.Status.Phase = "Failed"
+			_ = r.Status().Update(ctx, &stack)
+			return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
+		}
 	}
 
 	order, err := topoOrder(def.Spec.Components)
@@ -111,7 +115,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	allReady := true
 	for _, st := range statuses {
-		if st.Phase != "Ready" {
+		if st.Phase != platformv1alpha1.ComponentPhaseReady {
 			allReady = false
 		}
 	}
@@ -136,7 +140,8 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		})
 	}
 	if err := r.Status().Update(ctx, &stack); err != nil {
-		return ctrl.Result{}, err
+		// ponytail: requeue on conflict instead of retrying inline; next reconcile re-reads fresh version
+		return ctrl.Result{Requeue: true}, client.IgnoreNotFound(err)
 	}
 
 	if firstErr != nil {
@@ -163,11 +168,11 @@ func (r *StackReconciler) deployDirect(
 
 	for _, name := range order {
 		comp := byName[name]
-		st := platformv1alpha1.ComponentStatus{Name: name, Phase: "Deploying"}
+		st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseDeploying}
 
 		chart, err := r.Helm.EnsureChart(comp.ChartRef)
 		if err != nil {
-			st.Phase, st.Message = "Failed", err.Error()
+			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
 			return statuses, err // dependency order: stop at first failure
 		}
@@ -175,12 +180,12 @@ func (r *StackReconciler) deployDirect(
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
 		rel, err := r.Helm.Deploy(name, stack.Namespace, chart, values)
 		if err != nil {
-			st.Phase, st.Message = "Failed", err.Error()
+			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
 			return statuses, err
 		}
 
-		st.Phase = "Ready"
+		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Message = rel.Info.Description
 		ts := metav1.Time{Time: rel.Info.FirstDeployed.Time}
 		st.LastDeployed = &ts
@@ -192,7 +197,7 @@ func (r *StackReconciler) deployDirect(
 
 	// Carry over status of components not yet reached this pass.
 	for _, name := range order[len(statuses):] {
-		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: "Pending"})
+		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhasePending})
 	}
 	return statuses, nil
 }
