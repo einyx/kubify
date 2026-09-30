@@ -11,9 +11,10 @@ import (
 
 // Scanner runs the ordered inspection pipeline on a request/response pair.
 type Scanner struct {
-	Policy      Policy
-	Auditor     *Auditor
-	KillSwitch  *KillSwitch // optional
+	Policy     Policy
+	Auditor    *Auditor
+	KillSwitch *KillSwitch   // optional
+	Sessions   *SessionStore // optional; enables taint classification
 }
 
 // InspectRequest checks an outbound request. Returns an error if it should be blocked.
@@ -87,19 +88,36 @@ func (s *Scanner) InspectResponse(resp *http.Response) error {
 	}
 
 	findings := ScanInjection(string(body))
-	if len(findings) > 0 {
+
+	// Session taint escalation
+	sessionAction := ""
+	if s.Sessions != nil && resp.Request != nil {
+		sid := SessionID(resp.Request)
+		sessionAction = s.Sessions.AddFindings(sid, findings)
+	}
+
+	if len(findings) > 0 || sessionAction == "block" {
+		action := s.Policy.InjectionAction
+		if sessionAction == "block" {
+			action = "block"
+		}
 		s.Auditor.Log(Event{
 			Method:   resp.Request.Method,
 			URL:      resp.Request.URL.String(),
-			Action:   s.Policy.InjectionAction,
+			Action:   action,
 			Findings: findings,
 		})
-		if s.Policy.InjectionAction == "block" {
+		if action == "block" {
 			resp.Body = io.NopCloser(strings.NewReader(`{"error":"agentfw: response blocked (prompt injection detected)"}`))
 			resp.StatusCode = http.StatusBadGateway
 			resp.ContentLength = -1
 			return nil
 		}
+	}
+
+	// SVG hardening
+	if err := HardenSVGResponse(resp); err != nil {
+		return err
 	}
 
 	resp.Body = io.NopCloser(bytes.NewReader(body))

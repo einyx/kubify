@@ -12,11 +12,15 @@ import (
 
 // Proxy is the HTTP forward proxy.
 type Proxy struct {
-	scanner *Scanner // exported for kill switch wiring in server.go
+	scanner  *Scanner // exported for kill switch wiring in server.go
+	dnsCache *DNSCache
 }
 
 func NewProxy(p Policy, a *Auditor) *Proxy {
-	return &Proxy{scanner: &Scanner{Policy: p, Auditor: a}}
+	return &Proxy{
+		scanner:  &Scanner{Policy: p, Auditor: a},
+		dnsCache: NewDNSCache(),
+	}
 }
 
 func (px *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -63,6 +67,14 @@ func (px *Proxy) handleTunnel(w http.ResponseWriter, r *http.Request) {
 			Findings: []Finding{{Kind: "ssrf", Pattern: "private-egress", Excerpt: r.Host}},
 		})
 		http.Error(w, "agentfw: CONNECT to private address blocked", http.StatusForbidden)
+		return
+	}
+
+	// DNS rebinding check: resolve hostname and verify it hasn't changed to a private IP.
+	if err := px.dnsCache.Check(r.Host); err != nil {
+		px.scanner.Auditor.Log(Event{Method: r.Method, URL: r.Host, Action: "block",
+			Findings: []Finding{{Kind: "ssrf", Pattern: "dns-rebinding", Excerpt: err.Error()}}})
+		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
 

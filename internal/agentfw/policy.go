@@ -24,6 +24,11 @@ type Policy struct {
 	RequestsPerMinute int `json:"requestsPerMinute,omitempty"`
 	// DataBudgetMB caps total outbound bytes (resets on restart). 0 = unlimited.
 	DataBudgetMB int `json:"dataBudgetMB,omitempty"`
+	// SigningKeyPath is the Ed25519 private key PEM for audit receipt signing.
+	// Generated and saved on first run if absent.
+	SigningKeyPath string `json:"signingKeyPath,omitempty"`
+	// RulesPath is a YAML file of additional DLP/injection patterns to load.
+	RulesPath string `json:"rulesPath,omitempty"`
 }
 
 func DefaultPolicy() Policy {
