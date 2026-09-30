@@ -5,4 +5,4 @@ kind: Kustomization
 images:
 - name: controller
   newName: einyx/kubo
-  newTag: dev5
+  newTag: dev8

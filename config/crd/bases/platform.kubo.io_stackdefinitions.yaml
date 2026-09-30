@@ -109,6 +109,15 @@ spec:
                         name).
                       minLength: 1
                       type: string
+                    registryAuth:
+                      description: |-
+                        RegistryAuth selects how the registry is authenticated when no
+                        static secret is used. Currently supports "azure" (workload identity
+                        via Flux source-controller) — e.g. ACR on AKS without a pull secret.
+                      enum:
+                      - secret
+                      - azure
+                      type: string
                     values:
                       description: |-
                         Values is default Helm values (deep-merged: StackDefinition defaults

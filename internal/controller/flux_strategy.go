@@ -76,6 +76,9 @@ func (s *FluxStrategy) Reconcile(
 				if comp.ChartPullSecretRef != nil {
 					repo.Spec.SecretRef = &meta.LocalObjectReference{Name: comp.ChartPullSecretRef.Name}
 				}
+				if comp.RegistryAuth == "azure" {
+					repo.Spec.Provider = "azure"
+				}
 				return ctrl.SetControllerReference(stack, repo, s.Client.Scheme())
 			})
 			if err != nil {
