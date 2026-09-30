@@ -179,6 +179,8 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			rewriteBundleValues(values, bundleImages, pullSecret)
 			if img, ok := matchBundleImage(name, bundleImages); ok {
 				applyBundleImage(values, img, pullSecret)
+			} else {
+				logf.FromContext(ctx).Info("no bundle image for component; using chart defaults", "component", name)
 			}
 		}
 		rel, err := r.Helm.Deploy(name, stack.Namespace, ch, values)
