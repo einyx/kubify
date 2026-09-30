@@ -36,6 +36,13 @@ type StackComponentSpec struct {
 	// registry client in Direct mode.
 	// +optional
 	ChartPullSecretRef *v1.LocalObjectReference `json:"chartPullSecretRef,omitempty"`
+
+	// RegistryAuth selects how the registry is authenticated when no
+	// static secret is used. Currently supports "azure" (workload identity
+	// via Flux source-controller) — e.g. ACR on AKS without a pull secret.
+	// +kubebuilder:validation:Enum=secret;azure
+	// +optional
+	RegistryAuth string `json:"registryAuth,omitempty"`
 }
 
 // ChartRef locates a Helm chart.
