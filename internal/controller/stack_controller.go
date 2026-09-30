@@ -157,7 +157,11 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		if ch == nil && stack.Spec.Bundle != nil {
 			var err error
-			ch, err = r.Helm.EnsureChart(comp.ChartRef)
+			pullSecret := ""
+			if stack.Spec.Bundle.SecretRef != nil {
+				pullSecret = stack.Spec.Bundle.SecretRef.Name
+			}
+			ch, err = r.Helm.EnsureChart(comp.ChartRef, pullSecret, stack.Namespace)
 			if err != nil {
 				st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseFailed, Message: err.Error()}
 				statuses = append(statuses, st)
@@ -170,6 +174,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			continue
 		}
 		st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseDeploying}
+		if isClusterComponent(comp) {
+			st.Scope = platformv1alpha1.ComponentScopeCluster
+		}
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
 		if ch.Values != nil {
 			values = mergeValues(ch.Values, values)
@@ -251,10 +258,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		if desired[prev.Name] {
 			continue
 		}
-		if isClusterOperator(prev.Name) {
-			continue
-		}
-		if err := r.Helm.Uninstall(prev.Name, stack.Namespace); err != nil {
+		if err := r.uninstallComponent(ctx, &stack, prev); err != nil {
 			log.Info("prune uninstall failed", "component", prev.Name, "err", err.Error())
 		} else {
 			log.Info("pruned component", "component", prev.Name)
@@ -310,8 +314,17 @@ func (r *StackReconciler) deployDirect(
 	for _, name := range order {
 		comp := byName[name]
 		st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseDeploying}
+		if isClusterComponent(comp) {
+			st.Scope = platformv1alpha1.ComponentScopeCluster
+		}
 
-		chart, err := r.Helm.EnsureChart(comp.ChartRef)
+		pullSecret := ""
+		if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
+			pullSecret = comp.ChartPullSecretRef.Name
+		} else if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
+			pullSecret = stack.Spec.Bundle.SecretRef.Name
+		}
+		chart, err := r.Helm.EnsureChart(comp.ChartRef, pullSecret, stack.Namespace)
 		if err != nil {
 			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
@@ -387,9 +400,9 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 	default:
 		for _, comp := range stack.Status.Components {
 			if isClusterOperator(comp.Name) {
-				continue
+				continue // handled below via releaseOperators (refcounted)
 			}
-			if err := r.Helm.Uninstall(comp.Name, stack.Namespace); err != nil {
+			if err := r.uninstallComponent(ctx, stack, comp); err != nil {
 				return err
 			}
 		}
@@ -399,6 +412,22 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 	}
 	controllerutil.RemoveFinalizer(stack, stackFinalizer)
 	return r.Update(ctx, stack)
+}
+
+// uninstallComponent removes one component release from its namespace.
+// Cluster-scoped releases live in the operators namespace and are only
+// uninstalled when no other live Stack still uses them.
+func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platformv1alpha1.Stack, comp platformv1alpha1.ComponentStatus) error {
+	if comp.Scope == platformv1alpha1.ComponentScopeCluster {
+		if isClusterOperator(comp.Name) {
+			return nil
+		}
+		if r.clusterReleaseInUse(ctx, stack, comp.Name) {
+			return nil
+		}
+		return r.Helm.Uninstall(comp.Name, clusterOperatorsNamespace)
+	}
+	return r.Helm.Uninstall(comp.Name, stack.Namespace)
 }
 
 // SetupWithManager sets up the controller with the Manager. In Flux mode,

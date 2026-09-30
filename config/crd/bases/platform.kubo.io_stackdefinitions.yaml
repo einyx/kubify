@@ -104,17 +104,6 @@ spec:
                       items:
                         type: string
                       type: array
-                    scope:
-                      default: Namespaced
-                      description: |-
-                        Scope is Namespaced (default) or Cluster. Cluster components are
-                        installed once for the whole cluster (vault-operator, spark-operator)
-                        and are not repeated per Stack. Each Stack still owns its own
-                        namespaced Vault and Spark jobs, which the shared operator watches.
-                      enum:
-                      - Namespaced
-                      - Cluster
-                      type: string
                     name:
                       description: Name of the component (also used as the Helm release
                         name).
@@ -128,6 +117,17 @@ spec:
                       enum:
                       - secret
                       - azure
+                      type: string
+                    scope:
+                      default: Namespaced
+                      description: |-
+                        Scope is Namespaced (default) or Cluster. Cluster components are
+                        installed once for the whole cluster (vault-operator, spark-operator)
+                        and are not repeated per Stack. Each Stack still owns its own
+                        namespaced Vault and Spark jobs, which the shared operator watches.
+                      enum:
+                      - Namespaced
+                      - Cluster
                       type: string
                     values:
                       description: |-
