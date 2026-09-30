@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -31,16 +32,16 @@ import (
 )
 
 // namespace where the project is deployed in
-const namespace = "fop-init-system"
+const namespace = "kubo-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "fop-init-controller-manager"
+const serviceAccountName = "kubo-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "fop-init-controller-manager-metrics-service"
+const metricsServiceName = "kubo-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
-const metricsRoleBindingName = "fop-init-metrics-binding"
+const metricsRoleBindingName = "kubo-metrics-binding"
 
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
@@ -257,15 +258,53 @@ var _ = Describe("Manager", Ordered, func() {
 		})
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
+	})
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput := getMetricsOutput()
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+	Context("Stack webhook validation", func() {
+		It("should reject a Stack with neither stackRef nor inline", func() {
+			cmd := exec.Command("kubectl", "apply", "-f", "-", "-n", "default")
+			cmd.Stdin = mustYAML(`
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: test-invalid-empty
+spec: {}
+`)
+			out, err := utils.Run(cmd)
+			Expect(err).To(HaveOccurred(), "expected webhook to reject empty spec, got: %s", out)
+			Expect(out).To(ContainSubstring("one of spec.stackRef or spec.inline must be set"))
+		})
+
+		It("should reject a Stack with both stackRef and inline set", func() {
+			cmd := exec.Command("kubectl", "apply", "-f", "-", "-n", "default")
+			cmd.Stdin = mustYAML(`
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: test-invalid-both
+spec:
+  stackRef: some-def
+  inline:
+    components: []
+`)
+			out, err := utils.Run(cmd)
+			Expect(err).To(HaveOccurred(), "expected webhook to reject dual spec, got: %s", out)
+			Expect(out).To(ContainSubstring("mutually exclusive"))
+		})
+
+		It("should accept a Stack with only stackRef", func() {
+			cmd := exec.Command("kubectl", "apply", "--dry-run=server", "-f", "-", "-n", "default")
+			cmd.Stdin = mustYAML(`
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: test-valid-ref
+spec:
+  stackRef: some-def
+`)
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "expected webhook to accept stackRef-only spec")
+		})
 	})
 })
 
@@ -327,3 +366,6 @@ type tokenRequest struct {
 		Token string `json:"token"`
 	} `json:"status"`
 }
+
+// mustYAML returns a strings.Reader for inline YAML passed to kubectl stdin.
+func mustYAML(s string) *strings.Reader { return strings.NewReader(strings.TrimSpace(s)) }

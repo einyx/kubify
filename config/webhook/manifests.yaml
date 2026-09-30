@@ -1,0 +1,25 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-platform-kubo-io-v1alpha1-stack
+  failurePolicy: Fail
+  name: vstack.kb.io
+  rules:
+  - apiGroups:
+    - platform.kubo.io
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - stacks
+  sideEffects: None
