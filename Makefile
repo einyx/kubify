@@ -73,7 +73,7 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 		echo "Kind is not installed. Please install Kind manually."; \
 		exit 1; \
 	}
-	@$(KIND) get clusters | grep -q 'kind' || { \
+	@$(KIND) get clusters | grep -q . || { \
 		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
 		exit 1; \
 	}
@@ -111,6 +111,12 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: docker-build-local
+docker-build-local: ## Build the manager on the host and package it. Used when the builder image cannot be pulled.
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(shell go env GOARCH) go build -o manager cmd/main.go
+	$(CONTAINER_TOOL) build -t ${IMG} -f Dockerfile.local .
+	rm -f manager
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

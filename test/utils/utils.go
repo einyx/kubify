@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2" //nolint:golint,revive
 )
@@ -127,9 +128,29 @@ func InstallCertManager() error {
 		"--namespace", "cert-manager",
 		"--timeout", "5m",
 	)
+	if _, err := Run(cmd); err != nil {
+		return err
+	}
 
-	_, err := Run(cmd)
-	return err
+	issuer := `apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: e2e-webhook-ready
+  namespace: cert-manager
+spec:
+  selfSigned: {}
+`
+	deadline := time.Now().Add(2 * time.Minute)
+	var err error
+	for {
+		cmd = exec.Command("kubectl", "apply", "--dry-run=server", "-f", "-")
+		cmd.Stdin = strings.NewReader(issuer)
+		_, err = Run(cmd)
+		if err == nil || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // IsCertManagerCRDsInstalled checks if any Cert Manager CRDs are installed
@@ -170,6 +191,16 @@ func LoadImageToKindClusterWithName(name string) error {
 	cluster := "kind"
 	if v, ok := os.LookupEnv("KIND_CLUSTER"); ok {
 		cluster = v
+	} else if out, err := exec.Command("kind", "get", "clusters").Output(); err == nil {
+		var clusters []string
+		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+			if line != "" {
+				clusters = append(clusters, line)
+			}
+		}
+		if len(clusters) == 1 {
+			cluster = clusters[0]
+		}
 	}
 	kindOptions := []string{"load", "docker-image", name, "--name", cluster}
 	cmd := exec.Command("kind", kindOptions...)
