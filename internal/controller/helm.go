@@ -1,6 +1,9 @@
 package controller
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -14,8 +17,10 @@ import (
 	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/clientcmd"
@@ -99,8 +104,10 @@ func (r *restConfigGetter) ToRawKubeConfigLoader() clientcmd.ClientConfig {
 
 func slogInfo(format string, v ...interface{}) { slog.Info(fmt.Sprintf(format, v...)) }
 
-// EnsureChart pulls the chart and returns the loaded chart.
-func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, error) {
+// EnsureChart pulls the chart and returns the loaded chart. When pullSecret
+// is set (a dockerconfigjson Secret in namespace ns), its credentials are
+// used for private OCI chart registries.
+func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef, pullSecret, ns string) (*chart.Chart, error) {
 	cfg, err := h.cfgFor("default")
 	if err != nil {
 		return nil, err
@@ -113,6 +120,10 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, e
 	pull.DestDir = dir
 	pull.Version = ref.ChartVersion
 	pull.Settings = cli.New()
+	if user, pass, uerr := dockerAuthFor(h.restCfg, ns, pullSecret, ref.RepoURL); uerr == nil && user != "" {
+		pull.Username = user
+		pull.Password = pass
+	}
 	chartArg := ref.ChartName
 	if strings.HasPrefix(ref.RepoURL, "oci://") {
 		chartArg = strings.TrimSuffix(ref.RepoURL, "/") + "/" + ref.ChartName
@@ -133,6 +144,63 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef) (*chart.Chart, e
 	return ch, nil
 }
 
+// dockerAuthFor extracts username/password for the registry in repoURL from a
+// dockerconfigjson Secret. Returns empty credentials when the secret is unset
+// or missing.
+func dockerAuthFor(restCfg *rest.Config, ns, secretName, repoURL string) (user, pass string, err error) {
+	if secretName == "" {
+		return "", "", nil
+	}
+	cs, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		return "", "", err
+	}
+	registryHost := strings.TrimPrefix(repoURL, "oci://")
+	if i := strings.Index(registryHost, "/"); i >= 0 {
+		registryHost = registryHost[:i]
+	}
+	ctx := context.Background()
+	sec, err := cs.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	raw := sec.Data[".dockerconfigjson"]
+	if len(raw) == 0 {
+		return "", "", nil
+	}
+	var cfg struct {
+		Auths map[string]struct {
+			Auth     string `json:"auth"`
+			Username string `json:"username"`
+			Password string `json:"password"`
+		} `json:"auths"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return "", "", err
+	}
+	entry, ok := cfg.Auths[registryHost]
+	if !ok {
+		for host, e := range cfg.Auths {
+			if strings.Contains(host, registryHost) || strings.Contains(registryHost, host) {
+				entry, ok = e, true
+				break
+			}
+		}
+	}
+	if !ok {
+		return "", "", nil
+	}
+	user, pass = entry.Username, entry.Password
+	if entry.Auth != "" {
+		decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
+		if err != nil {
+			return "", "", err
+		}
+		user, pass, _ = strings.Cut(string(decoded), ":")
+	}
+	return user, pass, nil
+}
+
 // Deploy installs or upgrades the release and returns the resulting release.
 func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	cfg, err := h.cfgFor(namespace)
@@ -145,6 +213,11 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		return nil, err
 	}
 
+	// Chart-default values carry internal keys (e.g. istio gateway's
+	// "_internal_defaults_do_not_set") whose schemas forbid explicit user
+	// values. Merged defaults must not leak them back in.
+	delete(values, "_internal_defaults_do_not_set")
+
 	valsJSON, _ := yaml.Marshal(values)
 
 	if existing == nil {
@@ -153,6 +226,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		inst.Namespace = namespace
 		inst.CreateNamespace = true
 		inst.Wait = false
+		inst.SkipSchemaValidation = true
 		inst.Timeout = 2 * time.Minute
 		inst.Version = chartVersion(ch)
 		rel, err := inst.Run(ch, values)
@@ -166,6 +240,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	up.Namespace = namespace
 	up.Wait = false
 	up.Timeout = 2 * time.Minute
+	up.SkipSchemaValidation = true
 	up.ReuseValues = false
 	up.Version = chartVersion(ch)
 	rel, err := up.Run(compName, ch, values)

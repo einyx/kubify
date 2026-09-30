@@ -158,16 +158,6 @@ spec:
                           items:
                             type: string
                           type: array
-                        scope:
-                          default: Namespaced
-                          description: |-
-                            Scope is Namespaced (default) or Cluster. Cluster components are
-                            installed once for the whole cluster (vault-operator, spark-operator)
-                            and are not repeated per Stack.
-                          enum:
-                          - Namespaced
-                          - Cluster
-                          type: string
                         name:
                           description: Name of the component (also used as the Helm
                             release name).
@@ -181,6 +171,17 @@ spec:
                           enum:
                           - secret
                           - azure
+                          type: string
+                        scope:
+                          default: Namespaced
+                          description: |-
+                            Scope is Namespaced (default) or Cluster. Cluster components are
+                            installed once for the whole cluster (vault-operator, spark-operator)
+                            and are not repeated per Stack. Each Stack still owns its own
+                            namespaced Vault and Spark jobs, which the shared operator watches.
+                          enum:
+                          - Namespaced
+                          - Cluster
                           type: string
                         values:
                           description: |-
@@ -214,19 +215,24 @@ spec:
                 - Direct
                 - Flux
                 type: string
-              paused:
-                description: Paused stops reconciliation without deleting deployed
-                  components.
-                type: boolean
               operators:
-                description: |-
-                  Operators installs cluster-wide operators once, outside any tenant namespace.
-                  Tenant charts named vault-operator or spark-operator are never installed into the Stack namespace.
+                description: Operators installs cluster-wide operators once, outside
+                  any tenant namespace.
                 properties:
                   istio:
                     description: |-
                       Istio installs the istiod control plane (CRDs are installed by the
                       operator at startup). Stacks deploy their own VirtualServices.
+                    type: boolean
+                  kafka:
+                    description: |-
+                      Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
+                      Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
+                    type: boolean
+                  postgres:
+                    description: |-
+                      Postgres installs the kubegres operator. Stacks then run Postgres via
+                      Postgres custom resources instead of a per-stack postgres chart.
                     type: boolean
                   spark:
                     description: Spark installs kubeflow spark-operator.
@@ -235,6 +241,10 @@ spec:
                     description: Vault installs bank-vaults vault-operator.
                     type: boolean
                 type: object
+              paused:
+                description: Paused stops reconciliation without deleting deployed
+                  components.
+                type: boolean
               stackRef:
                 description: |-
                   StackRef names the cluster-scoped StackDefinition to deploy.
@@ -279,6 +289,14 @@ spec:
                     revision:
                       description: Revision of the Helm release.
                       type: integer
+                    scope:
+                      description: |-
+                        Scope: Namespaced (installed in the Stack namespace) or Cluster
+                        (installed once in the operators namespace).
+                      enum:
+                      - Namespaced
+                      - Cluster
+                      type: string
                   required:
                   - name
                   - phase

@@ -87,6 +87,14 @@ type ClusterOperators struct {
 	// operator at startup). Stacks deploy their own VirtualServices.
 	// +optional
 	Istio bool `json:"istio,omitempty"`
+	// Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
+	// Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
+	// +optional
+	Kafka bool `json:"kafka,omitempty"`
+	// Postgres installs the kubegres operator. Stacks then run Postgres via
+	// Postgres custom resources instead of a per-stack postgres chart.
+	// +optional
+	Postgres bool `json:"postgres,omitempty"`
 }
 
 // BundleSource is an OCI artifact that carries the stack's charts.
@@ -108,6 +116,12 @@ type ComponentStatus struct {
 
 	// Phase: Pending | Deploying | Ready | Failed | Degraded
 	Phase ComponentPhase `json:"phase"`
+
+	// Scope: Namespaced (installed in the Stack namespace) or Cluster
+	// (installed once in the operators namespace).
+	// +kubebuilder:validation:Enum=Namespaced;Cluster
+	// +optional
+	Scope ComponentScope `json:"scope,omitempty"`
 
 	// Revision of the Helm release.
 	// +optional
