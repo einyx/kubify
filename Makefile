@@ -1,5 +1,7 @@
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+# Override with IMG=registry/repo:tag for release builds.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
+IMG ?= ghcr.io/einyx/kubo:$(VERSION)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -76,6 +78,10 @@ test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated 
 		exit 1; \
 	}
 	go test ./test/e2e/ -v -ginkgo.v
+
+.PHONY: print-img
+print-img: ## Print the computed IMG value (used by CI to load into kind)
+	@echo $(IMG)
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
