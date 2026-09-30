@@ -29,10 +29,10 @@ type check struct {
 }
 
 const (
-	green = "\033[32m"
-	red   = "\033[31m"
+	green  = "\033[32m"
+	red    = "\033[31m"
 	yellow = "\033[33m"
-	reset = "\033[0m"
+	reset  = "\033[0m"
 )
 
 var externalSecretListGVK = metav1.SchemeGroupVersion.WithKind("ExternalSecretList")
