@@ -8,7 +8,9 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: manager-role
+  name: cluster-admin
+# ponytail: cluster-admin because this controller installs arbitrary Helm charts;
+# narrower is theater. Swap for a scoped role if you ever constrain what stacks can contain.
 subjects:
 - kind: ServiceAccount
   name: controller-manager

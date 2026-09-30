@@ -284,6 +284,11 @@ func (in *StackSpec) DeepCopyInto(out *StackSpec) {
 		*out = new(BundleSource)
 		(*in).DeepCopyInto(*out)
 	}
+	if in.Exclude != nil {
+		in, out := &in.Exclude, &out.Exclude
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	in.Values.DeepCopyInto(&out.Values)
 	if in.ComponentValues != nil {
 		in, out := &in.ComponentValues, &out.ComponentValues
