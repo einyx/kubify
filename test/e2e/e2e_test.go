@@ -51,14 +51,17 @@ var _ = Describe("Manager", Ordered, func() {
 	// and deploying the controller.
 	BeforeAll(func() {
 		By("creating manager namespace")
-		cmd := exec.Command("kubectl", "create", "ns", namespace)
-		_, err := utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		cmd := exec.Command("kubectl", "get", "ns", namespace)
+		if _, err := utils.Run(cmd); err != nil {
+			cmd = exec.Command("kubectl", "create", "ns", namespace)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
+		}
 
 		By("labeling the namespace to enforce the restricted security policy")
 		cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
 			"pod-security.kubernetes.io/enforce=restricted")
-		_, err = utils.Run(cmd)
+		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to label namespace with restricted policy")
 
 		By("installing CRDs")
@@ -85,6 +88,10 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("uninstalling CRDs")
 		cmd = exec.Command("make", "uninstall")
+		_, _ = utils.Run(cmd)
+
+		By("removing the metrics ClusterRoleBinding")
+		cmd = exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
@@ -173,11 +180,14 @@ var _ = Describe("Manager", Ordered, func() {
 
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
-			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=fop-init-metrics-reader",
+			cmd := exec.Command("kubectl", "delete", "clusterrolebinding", metricsRoleBindingName, "--ignore-not-found")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to delete ClusterRoleBinding")
+			cmd = exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
+				"--clusterrole=kubo-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
-			_, err := utils.Run(cmd)
+			_, err = utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred(), "Failed to create ClusterRoleBinding")
 
 			By("validating that the metrics service is available")
@@ -204,7 +214,7 @@ var _ = Describe("Manager", Ordered, func() {
 				cmd := exec.Command("kubectl", "logs", controllerPodName, "-n", namespace)
 				output, err := utils.Run(cmd)
 				g.Expect(err).NotTo(HaveOccurred())
-				g.Expect(output).To(ContainSubstring("controller-runtime.metrics\tServing metrics server"),
+				g.Expect(output).To(ContainSubstring("Serving metrics server"),
 					"Metrics server not yet started")
 			}
 			Eventually(verifyMetricsServerStarted).Should(Succeed())
@@ -261,6 +271,13 @@ var _ = Describe("Manager", Ordered, func() {
 	})
 
 	Context("Stack webhook validation", func() {
+		BeforeEach(func() {
+			cmd := exec.Command("kubectl", "wait", "--for=condition=available",
+				"deployment/kubo-controller-manager", "-n", namespace, "--timeout=2m")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "controller-manager not ready")
+		})
+
 		It("should reject a Stack with neither stackRef nor inline", func() {
 			cmd := exec.Command("kubectl", "apply", "-f", "-", "-n", "default")
 			cmd.Stdin = mustYAML(`
@@ -272,7 +289,7 @@ spec: {}
 `)
 			out, err := utils.Run(cmd)
 			Expect(err).To(HaveOccurred(), "expected webhook to reject empty spec, got: %s", out)
-			Expect(out).To(ContainSubstring("one of spec.stackRef or spec.inline must be set"))
+			Expect(out).To(ContainSubstring("one of spec.stackRef, spec.inline, or spec.bundle must be set"))
 		})
 
 		It("should reject a Stack with both stackRef and inline set", func() {
@@ -285,7 +302,12 @@ metadata:
 spec:
   stackRef: some-def
   inline:
-    components: []
+    title: both
+    components:
+      - name: dummy
+        chartRef:
+          repoURL: https://example.com
+          chartName: dummy
 `)
 			out, err := utils.Run(cmd)
 			Expect(err).To(HaveOccurred(), "expected webhook to reject dual spec, got: %s", out)
