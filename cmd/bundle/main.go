@@ -19,17 +19,18 @@ import (
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	"helm.sh/helm/v3/pkg/chart/loader"
-	"helm.sh/helm/v3/pkg/chartutil"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/memory"
 	"oras.land/oras-go/v2/registry/remote"
 	"oras.land/oras-go/v2/registry/remote/auth"
 	"oras.land/oras-go/v2/registry/remote/credentials"
+	sigsyaml "sigs.k8s.io/yaml"
 )
 
 func main() {
 	push := flag.String("push", "", "OCI reference to push, e.g. ghcr.io/org/foundation-bundle:0.0.9")
 	outDir := flag.String("out", "", "write charts.tgz + bundle.json to this directory instead of pushing")
+	imagesFile := flag.String("images", "", "YAML/JSON file of curated image refs: {images: [{ref: ghcr.io/org/foo:1.0}, ...]}. Overrides chart-default scan.")
 	flag.Parse()
 	if (*push == "" && *outDir == "") || flag.NArg() == 0 {
 		fmt.Fprintln(os.Stderr, "usage: kubo-bundle (--push <ref> | --out <dir>) <chart-dir> [<chart-dir> ...]")
@@ -38,6 +39,12 @@ func main() {
 	chartsTGZ, images, err := build(flag.Args())
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *imagesFile != "" {
+		images, err = loadImages(*imagesFile)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	bundleJSON, _ := json.MarshalIndent(map[string]any{"images": images}, "", "  ")
 	if *outDir != "" {
@@ -60,7 +67,21 @@ func main() {
 }
 
 type imageRef struct {
-	Ref string `json:"ref"`
+	Ref string `json:"ref" yaml:"ref"`
+}
+
+func loadImages(path string) ([]imageRef, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var doc struct {
+		Images []imageRef `json:"images" yaml:"images"`
+	}
+	if err := sigsyaml.Unmarshal(data, &doc); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return doc.Images, nil
 }
 
 func build(dirs []string) ([]byte, []imageRef, error) {
@@ -75,24 +96,10 @@ func build(dirs []string) ([]byte, []imageRef, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("load %s: %w", dir, err)
 		}
-		tmp, err := os.MkdirTemp("", "kubo-bundle-*")
-		if err != nil {
-			return nil, nil, err
-		}
-		defer os.RemoveAll(tmp)
-		path, err := chartutil.Save(ch, tmp)
-		if err != nil {
-			return nil, nil, fmt.Errorf("package %s: %w", ch.Name(), err)
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil, nil, err
-		}
-		if err := tw.WriteHeader(&tar.Header{Name: filepath.Base(path), Size: int64(len(data)), Mode: 0644}); err != nil {
-			return nil, nil, err
-		}
-		if _, err := tw.Write(data); err != nil {
-			return nil, nil, err
+		// Copy the chart directory into the outer tar under its chart name so the
+		// controller's loadCharts walk finds Chart.yaml.
+		if err := addDir(tw, dir, ch.Name()); err != nil {
+			return nil, nil, fmt.Errorf("tar %s: %w", dir, err)
 		}
 		for _, ref := range extractImages(ch.Values) {
 			if seen[ref] {
@@ -109,6 +116,34 @@ func build(dirs []string) ([]byte, []imageRef, error) {
 		return nil, nil, err
 	}
 	return buf.Bytes(), images, nil
+}
+
+func addDir(tw *tar.Writer, src, name string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if rel == "." {
+			return nil
+		}
+		hdrName := filepath.ToSlash(filepath.Join(name, rel))
+		if info.IsDir() {
+			return tw.WriteHeader(&tar.Header{Name: hdrName + "/", Mode: 0755, Typeflag: tar.TypeDir})
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := tw.WriteHeader(&tar.Header{Name: hdrName, Mode: 0644, Size: int64(len(data))}); err != nil {
+			return err
+		}
+		_, err = tw.Write(data)
+		return err
+	})
 }
 
 // extractImages walks the chart's default Values looking for image maps with a
