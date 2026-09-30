@@ -9,11 +9,28 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// DeploymentMode selects how components are deployed.
+// +kubebuilder:validation:Enum=Direct;Flux
+type DeploymentMode string
+
+const (
+	// DeploymentModeDirect deploys charts via the operator's embedded Helm engine.
+	DeploymentModeDirect DeploymentMode = "Direct"
+	// DeploymentModeFlux compiles components into Flux HelmRelease objects
+	// and delegates deployment to Flux helm-controller.
+	DeploymentModeFlux DeploymentMode = "Flux"
+)
+
 // StackSpec defines a namespaced instance of a stack.
 type StackSpec struct {
 	// StackRef names the cluster-scoped StackDefinition to deploy.
 	// +kubebuilder:validation:MinLength=1
 	StackRef string `json:"stackRef"`
+
+	// Mode selects the deployment strategy. Defaults to Direct.
+	// +kubebuilder:default=Direct
+	// +optional
+	Mode DeploymentMode `json:"mode,omitempty"`
 
 	// Version pins the StackDefinition to a content version. Empty = latest.
 	// +optional
