@@ -24,8 +24,14 @@ const (
 // StackSpec defines a namespaced instance of a stack.
 type StackSpec struct {
 	// StackRef names the cluster-scoped StackDefinition to deploy.
-	// +kubebuilder:validation:MinLength=1
-	StackRef string `json:"stackRef"`
+	// Mutually exclusive with Inline.
+	// +optional
+	StackRef string `json:"stackRef,omitempty"`
+
+	// Inline embeds the stack definition directly, so a Stack is a single
+	// self-contained YAML. Mutually exclusive with StackRef.
+	// +optional
+	Inline *StackDefinitionSpec `json:"inline,omitempty"`
 
 	// Mode selects the deployment strategy. Defaults to Direct.
 	// +kubebuilder:default=Direct
@@ -72,6 +78,14 @@ type ComponentStatus struct {
 // +kubebuilder:validation:Enum=Pending;Deploying;Ready;Failed;Degraded
 type ComponentPhase string
 
+const (
+	ComponentPhasePending   ComponentPhase = "Pending"
+	ComponentPhaseDeploying ComponentPhase = "Deploying"
+	ComponentPhaseReady     ComponentPhase = "Ready"
+	ComponentPhaseFailed    ComponentPhase = "Failed"
+	ComponentPhaseDegraded  ComponentPhase = "Degraded"
+)
+
 // StackStatus defines the observed state of Stack.
 type StackStatus struct {
 	// Phase: Pending | Progressing | Ready | Failed
@@ -93,6 +107,7 @@ type StackStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=stack
 // +kubebuilder:printcolumn:name="StackRef",type=string,JSONPath=`.spec.stackRef`
+// +kubebuilder:printcolumn:name="Mode",type=string,JSONPath=`.spec.mode`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

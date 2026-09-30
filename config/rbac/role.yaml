@@ -14,12 +14,6 @@ rules:
   - list
   - watch
 - apiGroups:
-  - '*'
-  resources:
-  - '*'
-  verbs:
-  - '*'
-- apiGroups:
   - helm.toolkit.fluxcd.io
   resources:
   - helmreleases
