@@ -6,6 +6,7 @@ package v1alpha1
 
 import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,6 +29,13 @@ type StackComponentSpec struct {
 	// DependsOn lists component names that must be Ready before this one.
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// ChartPullSecretRef references a Secret with registry credentials
+	// (imagePullSecret/dockerconfigjson format) used to pull the chart.
+	// Applied to the Flux HelmRepository in Flux mode and to the Helm
+	// registry client in Direct mode.
+	// +optional
+	ChartPullSecretRef *v1.LocalObjectReference `json:"chartPullSecretRef,omitempty"`
 }
 
 // ChartRef locates a Helm chart.

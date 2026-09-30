@@ -61,6 +61,24 @@ spec:
                     Components are rendered as Helm releases by default, but the type is
                     generic enough to describe any chart-based workload.
                   properties:
+                    chartPullSecretRef:
+                      description: |-
+                        ChartPullSecretRef references a Secret with registry credentials
+                        (imagePullSecret/dockerconfigjson format) used to pull the chart.
+                        Applied to the Flux HelmRepository in Flux mode and to the Helm
+                        registry client in Direct mode.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
                     chartRef:
                       description: ChartRef points to the chart backing this component.
                       properties:
