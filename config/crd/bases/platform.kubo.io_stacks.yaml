@@ -94,6 +94,13 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                 description: ComponentValues holds per-component Helm value overrides.
                 type: object
+              exclude:
+                description: |-
+                  Exclude names bundle charts to skip. Only applied when installing directly
+                  from a Bundle (no StackRef/Inline).
+                items:
+                  type: string
+                type: array
               inline:
                 description: |-
                   Inline embeds the stack definition directly, so a Stack is a single
