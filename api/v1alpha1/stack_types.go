@@ -67,6 +67,26 @@ type StackSpec struct {
 	// Paused stops reconciliation without deleting deployed components.
 	// +optional
 	Paused bool `json:"paused,omitempty"`
+
+	// Operators installs cluster-wide operators once, outside any tenant namespace.
+	// +optional
+	Operators *ClusterOperators `json:"operators,omitempty"`
+}
+
+// ClusterOperators selects shared operators. They are installed once in the
+// operators namespace and watch every Stack namespace. Tenant charts named
+// vault-operator or spark-operator are never installed into the Stack namespace.
+type ClusterOperators struct {
+	// Vault installs bank-vaults vault-operator.
+	// +optional
+	Vault bool `json:"vault,omitempty"`
+	// Spark installs kubeflow spark-operator.
+	// +optional
+	Spark bool `json:"spark,omitempty"`
+	// Istio installs the istiod control plane (CRDs are installed by the
+	// operator at startup). Stacks deploy their own VirtualServices.
+	// +optional
+	Istio bool `json:"istio,omitempty"`
 }
 
 // BundleSource is an OCI artifact that carries the stack's charts.
