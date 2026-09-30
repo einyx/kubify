@@ -108,6 +108,15 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
+# Charts packed into the OCI bundle. scheduler and processor must stay in this list.
+CHARTS_ROOT ?= ../foundation-charts
+BUNDLE_CHARTS := backend frontend watcher watcher-v2 opa storage-engine vault-operator foundation-bootstrap scheduler processor
+BUNDLE_REF ?= ghcr.io/meshxdata/foundation-bundle:0.0.11
+
+.PHONY: bundle
+bundle: ## Package charts (including scheduler and processor) and push the OCI bundle.
+	go run ./cmd/bundle --push $(BUNDLE_REF) --images config/samples/bundle_images.yaml $(addprefix $(CHARTS_ROOT)/,$(BUNDLE_CHARTS))
+
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
