@@ -9,6 +9,11 @@ import (
 	"fmt"
 	"time"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -29,6 +34,7 @@ type StackReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Helm   *HelmEngine
+	Flux   *FluxStrategy
 }
 
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks,verbs=get;list;watch;create;update;patch;delete
@@ -37,6 +43,9 @@ type StackReconciler struct {
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stackdefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups="*",resources="*",verbs="*"
+// +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases/status,verbs=get
 
 func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -83,45 +92,30 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	stack.Status.ObservedGeneration = stack.Generation
 	stack.Status.Phase = "Progressing"
 
-	allReady := true
-	var firstErr error
+	mode := stack.Spec.Mode
+	if mode == "" {
+		mode = platformv1alpha1.DeploymentModeDirect
+	}
+
 	var statuses []platformv1alpha1.ComponentStatus
+	var firstErr error
+	requeue := 5 * time.Minute
 
-	for _, name := range order {
-		comp := byName[name]
-		st := platformv1alpha1.ComponentStatus{Name: name, Phase: "Deploying"}
-
-		chart, err := r.Helm.EnsureChart(comp.ChartRef)
-		if err != nil {
-			st.Phase, st.Message = "Failed", err.Error()
-			statuses = append(statuses, st)
-			allReady, firstErr = false, err
-			break // dependency order: stop at first failure
-		}
-
-		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
-		rel, err := r.Helm.Deploy(name, stack.Namespace, chart, values)
-		if err != nil {
-			st.Phase, st.Message = "Failed", err.Error()
-			statuses = append(statuses, st)
-			allReady, firstErr = false, err
-			break
-		}
-
-		st.Phase = "Ready"
-		st.Message = rel.Info.Description
-		ts := metav1.Time{Time: rel.Info.FirstDeployed.Time}
-		st.LastDeployed = &ts
-		if rel.Info != nil {
-			st.Revision = rel.Version
-		}
-		statuses = append(statuses, st)
+	switch mode {
+	case platformv1alpha1.DeploymentModeFlux:
+		statuses, firstErr = r.Flux.Reconcile(ctx, &stack, &def, order, byName)
+		requeue = time.Minute
+	default: // Direct
+		statuses, firstErr = r.deployDirect(ctx, &stack, order, byName)
 	}
 
-	// Carry over status of components not yet reached this pass.
-	for _, name := range order[len(statuses):] {
-		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: "Pending"})
+	allReady := true
+	for _, st := range statuses {
+		if st.Phase != "Ready" {
+			allReady = false
+		}
 	}
+
 	stack.Status.Components = statuses
 
 	if allReady {
@@ -154,7 +148,53 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Requeue periodically to catch chart drift / def updates.
-	return ctrl.Result{RequeueAfter: 5 * time.Minute}, nil
+	return ctrl.Result{RequeueAfter: requeue}, nil
+}
+
+// deployDirect deploys all components via the embedded Helm engine,
+// stopping at the first failure (components are dependency-ordered).
+func (r *StackReconciler) deployDirect(
+	ctx context.Context,
+	stack *platformv1alpha1.Stack,
+	order []string,
+	byName map[string]platformv1alpha1.StackComponentSpec,
+) ([]platformv1alpha1.ComponentStatus, error) {
+	var statuses []platformv1alpha1.ComponentStatus
+
+	for _, name := range order {
+		comp := byName[name]
+		st := platformv1alpha1.ComponentStatus{Name: name, Phase: "Deploying"}
+
+		chart, err := r.Helm.EnsureChart(comp.ChartRef)
+		if err != nil {
+			st.Phase, st.Message = "Failed", err.Error()
+			statuses = append(statuses, st)
+			return statuses, err // dependency order: stop at first failure
+		}
+
+		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
+		rel, err := r.Helm.Deploy(name, stack.Namespace, chart, values)
+		if err != nil {
+			st.Phase, st.Message = "Failed", err.Error()
+			statuses = append(statuses, st)
+			return statuses, err
+		}
+
+		st.Phase = "Ready"
+		st.Message = rel.Info.Description
+		ts := metav1.Time{Time: rel.Info.FirstDeployed.Time}
+		st.LastDeployed = &ts
+		if rel.Info != nil {
+			st.Revision = rel.Version
+		}
+		statuses = append(statuses, st)
+	}
+
+	// Carry over status of components not yet reached this pass.
+	for _, name := range order[len(statuses):] {
+		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: "Pending"})
+	}
+	return statuses, nil
 }
 
 func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stack, reason string, err error) error {
@@ -173,19 +213,43 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 	if !controllerutil.ContainsFinalizer(stack, stackFinalizer) {
 		return nil
 	}
-	for _, comp := range stack.Status.Components {
-		if err := r.Helm.Uninstall(comp.Name, stack.Namespace); err != nil {
-			return err
+	mode := stack.Spec.Mode
+	if mode == "" {
+		mode = platformv1alpha1.DeploymentModeDirect
+	}
+	switch mode {
+	case platformv1alpha1.DeploymentModeFlux:
+		if r.Flux != nil {
+			if err := r.Flux.Cleanup(ctx, stack); err != nil {
+				return err
+			}
+		}
+	default:
+		for _, comp := range stack.Status.Components {
+			if err := r.Helm.Uninstall(comp.Name, stack.Namespace); err != nil {
+				return err
+			}
 		}
 	}
 	controllerutil.RemoveFinalizer(stack, stackFinalizer)
 	return r.Update(ctx, stack)
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager sets up the controller with the Manager. In Flux mode,
+// HelmRelease updates are mapped back to the owning Stack.
 func (r *StackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.Stack{}).
 		Named("stack").
+		Watches(
+			&helmv2.HelmRelease{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				owner := metav1.GetControllerOf(obj)
+				if owner == nil || owner.Kind != "Stack" {
+					return nil
+				}
+				return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: owner.Name}}}
+			}),
+		).
 		Complete(r)
 }

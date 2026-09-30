@@ -37,6 +37,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	helmv2 "github.com/fluxcd/helm-controller/api/v2"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/controller"
 	// +kubebuilder:scaffold:imports
@@ -214,10 +216,13 @@ func main() {
 		setupLog.Error(err, "unable to create helm engine")
 		os.Exit(1)
 	}
+	utilruntime.Must(helmv2.AddToScheme(mgr.GetScheme()))
+	utilruntime.Must(sourcev1.AddToScheme(mgr.GetScheme()))
 	if err = (&controller.StackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		Helm:   helmEngine,
+		Flux:   &controller.FluxStrategy{Client: mgr.GetClient()},
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Stack")
 		os.Exit(1)

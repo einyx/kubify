@@ -59,6 +59,13 @@ spec:
                   x-kubernetes-preserve-unknown-fields: true
                 description: ComponentValues holds per-component Helm value overrides.
                 type: object
+              mode:
+                default: Direct
+                description: Mode selects the deployment strategy. Defaults to Direct.
+                enum:
+                - Direct
+                - Flux
+                type: string
               paused:
                 description: Paused stops reconciliation without deleting deployed
                   components.
