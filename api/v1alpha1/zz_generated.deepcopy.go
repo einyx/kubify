@@ -21,6 +21,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
@@ -96,6 +97,11 @@ func (in *StackComponentSpec) DeepCopyInto(out *StackComponentSpec) {
 		in, out := &in.DependsOn, &out.DependsOn
 		*out = make([]string, len(*in))
 		copy(*out, *in)
+	}
+	if in.ChartPullSecretRef != nil {
+		in, out := &in.ChartPullSecretRef, &out.ChartPullSecretRef
+		*out = new(corev1.LocalObjectReference)
+		**out = **in
 	}
 }
 
