@@ -71,6 +71,35 @@ type StackSpec struct {
 	// Operators installs cluster-wide operators once, outside any tenant namespace.
 	// +optional
 	Operators *ClusterOperators `json:"operators,omitempty"`
+
+	// SeedVault mirrors keys from a plain k8s Secret into the per-tenant
+	// Vault KV store on every reconcile. Secret values never appear in the
+	// Stack spec — the source Secret holds them (create it out-of-band, e.g.
+	// `kubectl create secret generic foundation-seeds --from-env-file=.env`).
+	// +optional
+	SeedVault *VaultSeed `json:"seedVault,omitempty"`
+}
+
+// VaultSeed configures automatic seeding of the per-tenant Vault.
+type VaultSeed struct {
+	// SourceSecret is a Secret in the Stack namespace whose keys are copied
+	// into Vault. +kubebuilder:validation:MinLength=1
+	SourceSecret string `json:"sourceSecret"`
+
+	// Entries map Vault KV paths to the source Secret keys to copy.
+	// +kubebuilder:validation:MinItems=1
+	Entries []VaultSeedEntry `json:"entries"`
+}
+
+// VaultSeedEntry copies a set of source Secret keys into one Vault path.
+type VaultSeedEntry struct {
+	// Path is the KV v2 path (relative to the secret/ mount), e.g. frontend/auth0.
+	// +kubebuilder:validation:MinLength=1
+	Path string `json:"path"`
+
+	// Keys are the source Secret keys copied to this path.
+	// +kubebuilder:validation:MinItems=1
+	Keys []string `json:"keys"`
 }
 
 // ClusterOperators selects shared operators. They are installed once in the
@@ -95,6 +124,10 @@ type ClusterOperators struct {
 	// Postgres custom resources instead of a per-stack postgres chart.
 	// +optional
 	Postgres bool `json:"postgres,omitempty"`
+	// AgentFW deploys the kubo-native agent firewall proxy into each tenant
+	// namespace. Agents route egress through it for DLP and injection scanning.
+	// +optional
+	AgentFW bool `json:"agentFW,omitempty"`
 }
 
 // BundleSource is an OCI artifact that carries the stack's charts.
