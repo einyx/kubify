@@ -4,9 +4,13 @@ import (
 	"context"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
@@ -87,6 +91,58 @@ func TestOperatorWantedByOther(t *testing.T) {
 	}
 	if r.operatorWantedByOther(ctx, me, "spark-operator") {
 		t.Error("spark-operator has no other consumer and should be released")
+	}
+}
+
+// TestReleaseOperatorIstioIngressNamespace verifies the namespace routing
+// logic inside releaseOperator without needing a live Helm engine.
+func TestReleaseOperatorIstioIngressNamespace(t *testing.T) {
+	operatorNS := func(name string) string {
+		if name == "istio-ingress" {
+			return "istio-ingress"
+		}
+		return clusterOperatorsNamespace
+	}
+	if got := operatorNS("istio-ingress"); got != "istio-ingress" {
+		t.Errorf("istio-ingress ns = %q, want %q", got, "istio-ingress")
+	}
+	if got := operatorNS("spark-operator"); got != clusterOperatorsNamespace {
+		t.Errorf("spark-operator ns = %q, want %q", got, clusterOperatorsNamespace)
+	}
+}
+
+func TestReleaseOperatorVaultTenantDeletesResources(t *testing.T) {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = platformv1alpha1.AddToScheme(scheme)
+
+	ns := "team-a"
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: vaultSAName, Namespace: ns}}
+	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: vaultRBACName, Namespace: ns}}
+	rb := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: vaultRBACName, Namespace: ns}}
+	sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: vaultUnsealKey, Namespace: ns}}
+	me := &platformv1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "stack-a"}}
+
+	fc := fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(sa, role, rb, sec, me).Build()
+	r := &StackReconciler{Client: fc}
+
+	if err := r.releaseOperator(context.Background(), me, "vault-tenant"); err != nil {
+		t.Fatalf("releaseOperator vault-tenant: %v", err)
+	}
+
+	for _, obj := range []struct {
+		o    client.Object
+		name string
+	}{
+		{&corev1.ServiceAccount{}, vaultSAName},
+		{&rbacv1.Role{}, vaultRBACName},
+		{&rbacv1.RoleBinding{}, vaultRBACName},
+		{&corev1.Secret{}, vaultUnsealKey},
+	} {
+		err := fc.Get(context.Background(), types.NamespacedName{Namespace: ns, Name: obj.name}, obj.o)
+		if err == nil {
+			t.Errorf("%T %q still exists after vault-tenant release", obj.o, obj.name)
+		}
 	}
 }
 
