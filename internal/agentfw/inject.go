@@ -42,8 +42,9 @@ var injectionPatterns = []dlpPattern{
 }
 
 // ScanInjection checks text (typically an HTTP response body or MCP tool result)
-// for prompt injection patterns.
+// for prompt injection patterns. Text is normalized before scanning.
 func ScanInjection(text string) []Finding {
+	text = Normalize(text)
 	var out []Finding
 	for _, p := range injectionPatterns {
 		if p.re.MatchString(text) {
