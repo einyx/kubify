@@ -77,8 +77,9 @@ var privateIPRe = regexp.MustCompile(
 	`^(127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|169\.254\.|::1|fc00:|fd)`)
 
 // ScanDLP scans text for secrets and returns findings. Each finding names the
-// pattern and the (redacted) matched span.
+// pattern and the (redacted) matched span. Text is normalized before scanning.
 func ScanDLP(text string) []Finding {
+	text = NormalizeDLP(text)
 	var out []Finding
 	for _, p := range dlpPatterns {
 		locs := p.re.FindAllStringIndex(text, -1)
