@@ -20,6 +20,9 @@ spec:
     - jsonPath: .spec.stackRef
       name: StackRef
       type: string
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -54,10 +57,138 @@ spec:
           spec:
             description: StackSpec defines a namespaced instance of a stack.
             properties:
+              bundle:
+                description: |-
+                  Bundle pulls one OCI artifact (for example oci://ghcr.io/org/foundation-bundle:tag)
+                  and installs Helm charts from its charts.tgz layer. Usable alone, or with
+                  StackRef/Inline to select which charts to install. Charts missing from the
+                  bundle keep their ChartRef.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef is a kubernetes.io/dockerconfigjson Secret used to pull the bundle.
+                      Required for private registries such as GHCR.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  url:
+                    description: |-
+                      URL is an OCI reference, including the tag or digest.
+                      Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+                    minLength: 1
+                    type: string
+                required:
+                - url
+                type: object
               componentValues:
                 additionalProperties:
                   x-kubernetes-preserve-unknown-fields: true
                 description: ComponentValues holds per-component Helm value overrides.
+                type: object
+              inline:
+                description: |-
+                  Inline embeds the stack definition directly, so a Stack is a single
+                  self-contained YAML. Mutually exclusive with StackRef.
+                properties:
+                  components:
+                    description: Components is the ordered set of components to deploy.
+                    items:
+                      description: |-
+                        StackComponentSpec defines a single deployable component of a stack.
+                        Components are rendered as Helm releases by default, but the type is
+                        generic enough to describe any chart-based workload.
+                      properties:
+                        chartPullSecretRef:
+                          description: |-
+                            ChartPullSecretRef references a Secret with registry credentials
+                            (imagePullSecret/dockerconfigjson format) used to pull the chart.
+                            Applied to the Flux HelmRepository in Flux mode and to the Helm
+                            registry client in Direct mode.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        chartRef:
+                          description: ChartRef points to the chart backing this component.
+                          properties:
+                            chartName:
+                              description: ChartName is the chart name within the
+                                repository.
+                              minLength: 1
+                              type: string
+                            chartVersion:
+                              description: ChartVersion pins the chart version. Empty
+                                = latest available.
+                              type: string
+                            repoURL:
+                              description: RepoURL is the Helm repository URL.
+                              minLength: 1
+                              type: string
+                          required:
+                          - chartName
+                          - repoURL
+                          type: object
+                        dependsOn:
+                          description: DependsOn lists component names that must be
+                            Ready before this one.
+                          items:
+                            type: string
+                          type: array
+                        name:
+                          description: Name of the component (also used as the Helm
+                            release name).
+                          minLength: 1
+                          type: string
+                        registryAuth:
+                          description: |-
+                            RegistryAuth selects how the registry is authenticated when no
+                            static secret is used. Currently supports "azure" (workload identity
+                            via Flux source-controller) — e.g. ACR on AKS without a pull secret.
+                          enum:
+                          - secret
+                          - azure
+                          type: string
+                        values:
+                          description: |-
+                            Values is default Helm values (deep-merged: StackDefinition defaults
+                            < Stack instance overrides).
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - chartRef
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                  description:
+                    description: Description of what this stack deploys.
+                    type: string
+                  title:
+                    description: Title is a human readable name.
+                    type: string
+                  valuesSchema:
+                    description: ValuesSchema optionally documents/validates overridable
+                      values.
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - components
+                - title
                 type: object
               mode:
                 default: Direct
@@ -71,9 +202,9 @@ spec:
                   components.
                 type: boolean
               stackRef:
-                description: StackRef names the cluster-scoped StackDefinition to
-                  deploy.
-                minLength: 1
+                description: |-
+                  StackRef names the cluster-scoped StackDefinition to deploy.
+                  Mutually exclusive with Inline.
                 type: string
               values:
                 description: |-
@@ -84,8 +215,6 @@ spec:
                 description: Version pins the StackDefinition to a content version.
                   Empty = latest.
                 type: string
-            required:
-            - stackRef
             type: object
           status:
             description: StackStatus defines the observed state of Stack.

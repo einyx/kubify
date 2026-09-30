@@ -5,6 +5,7 @@ Copyright 2025 The Kubo Authors.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -33,6 +34,13 @@ type StackSpec struct {
 	// +optional
 	Inline *StackDefinitionSpec `json:"inline,omitempty"`
 
+	// Bundle pulls one OCI artifact (for example oci://ghcr.io/org/foundation-bundle:tag)
+	// and installs Helm charts from its charts.tgz layer. Usable alone, or with
+	// StackRef/Inline to select which charts to install. Charts missing from the
+	// bundle keep their ChartRef.
+	// +optional
+	Bundle *BundleSource `json:"bundle,omitempty"`
+
 	// Mode selects the deployment strategy. Defaults to Direct.
 	// +kubebuilder:default=Direct
 	// +optional
@@ -54,6 +62,19 @@ type StackSpec struct {
 	// Paused stops reconciliation without deleting deployed components.
 	// +optional
 	Paused bool `json:"paused,omitempty"`
+}
+
+// BundleSource is an OCI artifact that carries the stack's charts.
+type BundleSource struct {
+	// URL is an OCI reference, including the tag or digest.
+	// Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+
+	// SecretRef is a kubernetes.io/dockerconfigjson Secret used to pull the bundle.
+	// Required for private registries such as GHCR.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
 }
 
 // ComponentStatus is the observed state of one component of the stack.
