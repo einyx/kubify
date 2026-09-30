@@ -30,6 +30,15 @@ type StackComponentSpec struct {
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
 
+	// Scope is Namespaced (default) or Cluster. Cluster components are
+	// installed once for the whole cluster (vault-operator, spark-operator)
+	// and are not repeated per Stack. Each Stack still owns its own
+	// namespaced Vault and Spark jobs, which the shared operator watches.
+	// +kubebuilder:validation:Enum=Namespaced;Cluster
+	// +kubebuilder:default=Namespaced
+	// +optional
+	Scope ComponentScope `json:"scope,omitempty"`
+
 	// ChartPullSecretRef references a Secret with registry credentials
 	// (imagePullSecret/dockerconfigjson format) used to pull the chart.
 	// Applied to the Flux HelmRepository in Flux mode and to the Helm
@@ -44,6 +53,16 @@ type StackComponentSpec struct {
 	// +optional
 	RegistryAuth string `json:"registryAuth,omitempty"`
 }
+
+// ComponentScope selects where a component is installed.
+type ComponentScope string
+
+const (
+	// ComponentScopeNamespaced installs the release in the Stack namespace.
+	ComponentScopeNamespaced ComponentScope = "Namespaced"
+	// ComponentScopeCluster installs the release once in the operator namespace.
+	ComponentScopeCluster ComponentScope = "Cluster"
+)
 
 // ChartRef locates a Helm chart.
 type ChartRef struct {

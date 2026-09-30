@@ -107,7 +107,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		seen := map[*chart.Chart]string{}
 		for name, ch := range bundleCharts {
-			if excluded[name] {
+			if excluded[name] || isClusterOperator(name) {
 				continue
 			}
 			if _, ok := seen[ch]; ok {
@@ -146,6 +146,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var rest []string
 	for _, name := range order {
 		comp := byName[name]
+		if isClusterOperator(name) || isClusterOperator(comp.ChartRef.ChartName) {
+			continue
+		}
 		ch := bundleCharts[comp.ChartRef.ChartName]
 		fromBundle := ch != nil
 		if ch == nil {
@@ -183,7 +186,23 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				logf.FromContext(ctx).Info("no bundle image for component; using chart defaults", "component", name)
 			}
 		}
-		rel, err := r.Helm.Deploy(name, stack.Namespace, ch, values)
+		targetNS := stack.Namespace
+		if isClusterComponent(comp) {
+			targetNS = clusterOperatorsNamespace
+			delete(values, "imagePullSecrets")
+			values["watchNamespace"] = ""
+			if st, done, err := r.adoptClusterRelease(name, targetNS); done || err != nil {
+				if err != nil {
+					st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
+					if firstErr == nil {
+						firstErr = err
+					}
+				}
+				statuses = append(statuses, st)
+				continue
+			}
+		}
+		rel, err := r.Helm.Deploy(name, targetNS, ch, values)
 		if err != nil {
 			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
@@ -209,6 +228,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		statuses = append(statuses, more...)
 	}
 
+	opStatus, opErr := r.reconcileOperators(ctx, &stack, bundleCharts)
+	statuses = append(statuses, opStatus...)
+	if opErr != nil && firstErr == nil {
+		firstErr = opErr
+	}
+
 	allReady := true
 	for _, st := range statuses {
 		if st.Phase != platformv1alpha1.ComponentPhaseReady {
@@ -224,6 +249,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	for _, prev := range stack.Status.Components {
 		if desired[prev.Name] {
+			continue
+		}
+		if isClusterOperator(prev.Name) {
 			continue
 		}
 		if err := r.Helm.Uninstall(prev.Name, stack.Namespace); err != nil {
@@ -291,7 +319,21 @@ func (r *StackReconciler) deployDirect(
 		}
 
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
-		rel, err := r.Helm.Deploy(name, stack.Namespace, chart, values)
+		targetNS := stack.Namespace
+		if isClusterComponent(comp) {
+			targetNS = clusterOperatorsNamespace
+			if adopted, done, aerr := r.adoptClusterRelease(name, targetNS); done || aerr != nil {
+				if aerr != nil {
+					adopted.Phase, adopted.Message = platformv1alpha1.ComponentPhaseFailed, aerr.Error()
+				}
+				statuses = append(statuses, adopted)
+				if aerr != nil {
+					return statuses, aerr
+				}
+				continue
+			}
+		}
+		rel, err := r.Helm.Deploy(name, targetNS, chart, values)
 		if err != nil {
 			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
@@ -344,9 +386,15 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 		}
 	default:
 		for _, comp := range stack.Status.Components {
+			if isClusterOperator(comp.Name) {
+				continue
+			}
 			if err := r.Helm.Uninstall(comp.Name, stack.Namespace); err != nil {
 				return err
 			}
+		}
+		if err := r.releaseOperators(ctx, stack); err != nil {
+			return err
 		}
 	}
 	controllerutil.RemoveFinalizer(stack, stackFinalizer)
