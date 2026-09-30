@@ -14,6 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
+	"helm.sh/helm/v3/pkg/chart"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -42,6 +43,14 @@ type StackReconciler struct {
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks/finalizers,verbs=update
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stackdefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=serviceaccounts;services;configmaps;persistentvolumeclaims;pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets;daemonsets;replicasets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies;ingresses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=source.toolkit.fluxcd.io,resources=helmrepositories,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=helm.toolkit.fluxcd.io,resources=helmreleases/status,verbs=get
@@ -67,11 +76,21 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.finalize(ctx, &stack)
 	}
 
+	var bundleCharts map[string]*chart.Chart
+	var bundleImages map[string]bundleImage
+	if stack.Spec.Bundle != nil && stack.Spec.Bundle.URL != "" {
+		var err error
+		bundleCharts, bundleImages, err = r.chartsFromBundle(ctx, &stack)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
+		}
+	}
+
 	// Resolve the stack definition from StackRef or Inline.
 	var def platformv1alpha1.StackDefinition
 	if stack.Spec.Inline != nil {
 		def.Spec = *stack.Spec.Inline
-	} else {
+	} else if stack.Spec.StackRef != "" {
 		if err := r.Get(ctx, client.ObjectKey{Name: stack.Spec.StackRef}, &def); err != nil {
 			meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
 				Type: "Ready", Status: metav1.ConditionFalse,
@@ -80,6 +99,18 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			stack.Status.Phase = "Failed"
 			_ = r.Status().Update(ctx, &stack)
 			return ctrl.Result{RequeueAfter: time.Minute}, client.IgnoreNotFound(err)
+		}
+	} else {
+		seen := map[*chart.Chart]string{}
+		for name, ch := range bundleCharts {
+			if _, ok := seen[ch]; ok {
+				continue
+			}
+			seen[ch] = name
+			def.Spec.Components = append(def.Spec.Components, platformv1alpha1.StackComponentSpec{
+				Name:     name,
+				ChartRef: platformv1alpha1.ChartRef{ChartName: name},
+			})
 		}
 	}
 
@@ -105,12 +136,68 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var firstErr error
 	requeue := 5 * time.Minute
 
-	switch mode {
-	case platformv1alpha1.DeploymentModeFlux:
-		statuses, firstErr = r.Flux.Reconcile(ctx, &stack, &def, order, byName)
-		requeue = time.Minute
-	default: // Direct
-		statuses, firstErr = r.deployDirect(ctx, &stack, order, byName)
+	var rest []string
+	for _, name := range order {
+		comp := byName[name]
+		ch := bundleCharts[comp.ChartRef.ChartName]
+		fromBundle := ch != nil
+		if ch == nil {
+			ch = bundleCharts[name]
+			fromBundle = ch != nil
+		}
+		if ch == nil && stack.Spec.Bundle != nil {
+			var err error
+			ch, err = r.Helm.EnsureChart(comp.ChartRef)
+			if err != nil {
+				st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseFailed, Message: err.Error()}
+				statuses = append(statuses, st)
+				firstErr = err
+				break
+			}
+		}
+		if ch == nil {
+			rest = append(rest, name)
+			continue
+		}
+		st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseDeploying}
+		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
+		if ch.Values != nil {
+			values = mergeValues(ch.Values, values)
+		}
+		pullSecret := ""
+		if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
+			pullSecret = stack.Spec.Bundle.SecretRef.Name
+		}
+		if fromBundle {
+			rewriteBundleValues(values, bundleImages, pullSecret)
+			if img, ok := matchBundleImage(name, bundleImages); ok {
+				applyBundleImage(values, img, pullSecret)
+			}
+		}
+		rel, err := r.Helm.Deploy(name, stack.Namespace, ch, values)
+		if err != nil {
+			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
+			statuses = append(statuses, st)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		st.Phase = platformv1alpha1.ComponentPhaseReady
+		st.Revision = rel.Version
+		st.Message = rel.Info.Description
+		statuses = append(statuses, st)
+	}
+	if firstErr == nil && len(rest) > 0 {
+		var more []platformv1alpha1.ComponentStatus
+		switch mode {
+		case platformv1alpha1.DeploymentModeFlux:
+			more, firstErr = r.Flux.Reconcile(ctx, &stack, &def, rest, byName)
+			requeue = time.Minute
+		default:
+			more, firstErr = r.deployDirect(ctx, &stack, rest, byName)
+		}
+		statuses = append(statuses, more...)
 	}
 
 	allReady := true
