@@ -1,0 +1,58 @@
+package agentfw
+
+import (
+	"os"
+
+	"sigs.k8s.io/yaml"
+)
+
+// Policy is loaded from the agentfw-policy ConfigMap (mounted as a file).
+type Policy struct {
+	// AllowedMCPTools lists permitted MCP tool names. ["*"] means allow all.
+	AllowedMCPTools []string `json:"allowedMCPTools"`
+	// BlockPrivateEgress blocks CONNECT/requests to RFC-1918 and loopback addresses.
+	BlockPrivateEgress bool `json:"blockPrivateEgress"`
+	// DLPAction is "redact" (default) or "block".
+	DLPAction string `json:"dlpAction"`
+	// InjectionAction is "block" (default) or "log".
+	InjectionAction string `json:"injectionAction"`
+	// Upstream is the LLM base URL for reverse proxy mode (e.g. https://api.openai.com).
+	// When set, agentfw acts as a reverse proxy: agents call agentfw directly and
+	// it forwards to upstream, scanning both directions.
+	Upstream string `json:"upstream,omitempty"`
+	// RequestsPerMinute caps outbound requests. 0 = unlimited.
+	RequestsPerMinute int `json:"requestsPerMinute,omitempty"`
+	// DataBudgetMB caps total outbound bytes (resets on restart). 0 = unlimited.
+	DataBudgetMB int `json:"dataBudgetMB,omitempty"`
+}
+
+func DefaultPolicy() Policy {
+	return Policy{
+		AllowedMCPTools:    []string{"*"},
+		BlockPrivateEgress: true,
+		DLPAction:          "redact",
+		InjectionAction:    "block",
+	}
+}
+
+// LoadPolicy reads the policy YAML file at path. Falls back to DefaultPolicy on error.
+func LoadPolicy(path string) (Policy, error) {
+	p := DefaultPolicy()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return p, err
+	}
+	if err := yaml.Unmarshal(b, &p); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+
+func (p Policy) MCPToolAllowed(tool string) bool {
+	for _, t := range p.AllowedMCPTools {
+		if t == "*" || t == tool {
+			return true
+		}
+	}
+	return false
+}
