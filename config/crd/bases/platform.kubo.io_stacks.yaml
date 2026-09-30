@@ -219,6 +219,11 @@ spec:
                 description: Operators installs cluster-wide operators once, outside
                   any tenant namespace.
                 properties:
+                  agentFW:
+                    description: |-
+                      AgentFW deploys the kubo-native agent firewall proxy into each tenant
+                      namespace (DLP, injection blocking, killswitch, rate limiting).
+                    type: boolean
                   istio:
                     description: |-
                       Istio installs the istiod control plane (CRDs are installed by the
