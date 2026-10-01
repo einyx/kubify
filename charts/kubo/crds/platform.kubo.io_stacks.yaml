@@ -222,7 +222,13 @@ spec:
                   agentFW:
                     description: |-
                       AgentFW deploys the kubo-native agent firewall proxy into each tenant
-                      namespace (DLP, injection blocking, killswitch, rate limiting).
+                      namespace. Agents route egress through it for DLP and injection scanning.
+                    type: boolean
+                  certManager:
+                    description: |-
+                      CertManager installs jetstack cert-manager into the operators namespace.
+                      Tenant charts that need certificates (or ExternalSecret stores) can then
+                      rely on it being present.
                     type: boolean
                   istio:
                     description: |-
@@ -234,14 +240,10 @@ spec:
                       Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
                       Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
                     type: boolean
-                  certManager:
-                    description: |-
-                      CertManager installs jetstack cert-manager into the operators namespace.
-                      Tenant charts that need certificates can then rely on it being present.
-                    type: boolean
                   postgres:
                     description: |-
-                      Postgres installs the kubegres operator. Stacks then run Postgres via                      Postgres custom resources instead of a per-stack postgres chart.
+                      Postgres installs the kubegres operator. Stacks then run Postgres via
+                      Postgres custom resources instead of a per-stack postgres chart.
                     type: boolean
                   spark:
                     description: Spark installs kubeflow spark-operator.
@@ -254,24 +256,47 @@ spec:
                 description: Paused stops reconciliation without deleting deployed
                   components.
                 type: boolean
+              secretsRef:
+                description: |-
+                  SecretsRef lists secrets to copy from kubo-system into the tenant
+                  namespace on every reconcile. Use this to seed per-tenant credentials
+                  (e.g. Auth0 client secrets) without storing them in the Stack spec.
+                items:
+                  description: SecretMapping copies a Secret from kubo-system into
+                    the tenant namespace.
+                  properties:
+                    from:
+                      description: From is the name of the Secret in kubo-system.
+                      type: string
+                    to:
+                      description: |-
+                        To is the name to give the Secret in the tenant namespace.
+                        Defaults to From when omitted.
+                      type: string
+                  required:
+                  - from
+                  type: object
+                type: array
               seedVault:
                 description: |-
                   SeedVault mirrors keys from a plain k8s Secret into the per-tenant
                   Vault KV store on every reconcile. Secret values never appear in the
-                  Stack spec.
+                  Stack spec — the source Secret holds them (create it out-of-band, e.g.
+                  `kubectl create secret generic foundation-seeds --from-env-file=.env`).
                 properties:
                   entries:
-                    description: Entries map Vault KV paths to the source Secret
-                      keys to copy.
+                    description: Entries map Vault KV paths to the source Secret keys
+                      to copy.
                     items:
-                      description: VaultSeedEntry copies a set of source Secret
-                        keys into one Vault path.
+                      description: VaultSeedEntry copies a set of source Secret keys
+                        into one Vault path.
                       properties:
                         keys:
-                          description: Keys are the source Secret keys copied to
-                            this path.
+                          description: Keys are the source Secret keys copied to this
+                            path.
                           items:
                             type: string
+                          minItems: 1
                           type: array
                         path:
                           description: Path is the KV v2 path (relative to the secret/
@@ -285,9 +310,9 @@ spec:
                     minItems: 1
                     type: array
                   sourceSecret:
-                    description: SourceSecret is a Secret in the Stack namespace
-                      whose keys are copied into Vault.
-                    minLength: 1
+                    description: |-
+                      SourceSecret is a Secret in the Stack namespace whose keys are copied
+                      into Vault. +kubebuilder:validation:MinLength=1
                     type: string
                 required:
                 - entries
