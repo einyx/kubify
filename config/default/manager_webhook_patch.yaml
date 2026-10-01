@@ -8,6 +8,12 @@ spec:
     spec:
       containers:
       - name: manager
+        env:
+        - name: WEBHOOK_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: kubo-webhook-secret
+              key: secret
         ports:
         - containerPort: 9443
           name: webhook-server
