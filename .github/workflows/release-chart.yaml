@@ -1,0 +1,52 @@
+name: Release Chart
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build operator image
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o manager cmd/main.go
+          docker build -t ghcr.io/einyx/kubo:${TAG} -f Dockerfile.local .
+
+      - name: Push operator image
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+          docker push ghcr.io/einyx/kubo:${GITHUB_REF_NAME}
+
+      - name: Update chart versions
+        run: |
+          TAG=${GITHUB_REF_NAME}
+          sed -i "s/^appVersion:.*/appVersion: ${TAG}/" charts/kubo/Chart.yaml
+          sed -i "s/^version:.*/version: ${TAG#v}/" charts/kubo/Chart.yaml
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.6.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

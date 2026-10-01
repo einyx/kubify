@@ -1,0 +1,421 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: stacks.platform.kubo.io
+spec:
+  group: platform.kubo.io
+  names:
+    kind: Stack
+    listKind: StackList
+    plural: stacks
+    shortNames:
+    - stack
+    singular: stack
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.stackRef
+      name: StackRef
+      type: string
+    - jsonPath: .spec.mode
+      name: Mode
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Stack deploys a named StackDefinition into its own namespace. The
+          abstraction is product-agnostic: product, dai, product-ai or any
+          future product is just a StackDefinition.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: StackSpec defines a namespaced instance of a stack.
+            properties:
+              bundle:
+                description: |-
+                  Bundle pulls one OCI artifact (for example oci://ghcr.io/org/product-bundle:tag)
+                  and installs Helm charts from its charts.tgz layer. Usable alone, or with
+                  StackRef/Inline to select which charts to install. Charts missing from the
+                  bundle keep their ChartRef.
+                properties:
+                  secretRef:
+                    description: |-
+                      SecretRef is a kubernetes.io/dockerconfigjson Secret used to pull the bundle.
+                      Required for private registries such as GHCR.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  url:
+                    description: |-
+                      URL is an OCI reference, including the tag or digest.
+                      Example: oci://ghcr.io/einyx/product-bundle:0.0.8
+                    minLength: 1
+                    type: string
+                required:
+                - url
+                type: object
+              componentValues:
+                additionalProperties:
+                  x-kubernetes-preserve-unknown-fields: true
+                description: ComponentValues holds per-component Helm value overrides.
+                type: object
+              exclude:
+                description: |-
+                  Exclude names bundle charts to skip. Only applied when installing directly
+                  from a Bundle (no StackRef/Inline).
+                items:
+                  type: string
+                type: array
+              inline:
+                description: |-
+                  Inline embeds the stack definition directly, so a Stack is a single
+                  self-contained YAML. Mutually exclusive with StackRef.
+                properties:
+                  components:
+                    description: Components is the ordered set of components to deploy.
+                    items:
+                      description: |-
+                        StackComponentSpec defines a single deployable component of a stack.
+                        Components are rendered as Helm releases by default, but the type is
+                        generic enough to describe any chart-based workload.
+                      properties:
+                        chartPullSecretRef:
+                          description: |-
+                            ChartPullSecretRef references a Secret with registry credentials
+                            (imagePullSecret/dockerconfigjson format) used to pull the chart.
+                            Applied to the Flux HelmRepository in Flux mode and to the Helm
+                            registry client in Direct mode.
+                          properties:
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        chartRef:
+                          description: ChartRef points to the chart backing this component.
+                          properties:
+                            chartName:
+                              description: ChartName is the chart name within the
+                                repository.
+                              minLength: 1
+                              type: string
+                            chartVersion:
+                              description: ChartVersion pins the chart version. Empty
+                                = latest available.
+                              type: string
+                            repoURL:
+                              description: RepoURL is the Helm repository URL.
+                              minLength: 1
+                              type: string
+                          required:
+                          - chartName
+                          - repoURL
+                          type: object
+                        dependsOn:
+                          description: DependsOn lists component names that must be
+                            Ready before this one.
+                          items:
+                            type: string
+                          type: array
+                        name:
+                          description: Name of the component (also used as the Helm
+                            release name).
+                          minLength: 1
+                          type: string
+                        registryAuth:
+                          description: |-
+                            RegistryAuth selects how the registry is authenticated when no
+                            static secret is used. Currently supports "azure" (workload identity
+                            via Flux source-controller) — e.g. ACR on AKS without a pull secret.
+                          enum:
+                          - secret
+                          - azure
+                          type: string
+                        scope:
+                          default: Namespaced
+                          description: |-
+                            Scope is Namespaced (default) or Cluster. Cluster components are
+                            installed once for the whole cluster (vault-operator, spark-operator)
+                            and are not repeated per Stack. Each Stack still owns its own
+                            namespaced Vault and Spark jobs, which the shared operator watches.
+                          enum:
+                          - Namespaced
+                          - Cluster
+                          type: string
+                        values:
+                          description: |-
+                            Values is default Helm values (deep-merged: StackDefinition defaults
+                            < Stack instance overrides).
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - chartRef
+                      - name
+                      type: object
+                    minItems: 1
+                    type: array
+                  description:
+                    description: Description of what this stack deploys.
+                    type: string
+                  title:
+                    description: Title is a human readable name.
+                    type: string
+                  valuesSchema:
+                    description: ValuesSchema optionally documents/validates overridable
+                      values.
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - components
+                - title
+                type: object
+              mode:
+                default: Direct
+                description: Mode selects the deployment strategy. Defaults to Direct.
+                enum:
+                - Direct
+                - Flux
+                type: string
+              operators:
+                description: Operators installs cluster-wide operators once, outside
+                  any tenant namespace.
+                properties:
+                  agentFW:
+                    description: |-
+                      AgentFW deploys the kubo-native agent firewall proxy into each tenant
+                      namespace (DLP, injection blocking, killswitch, rate limiting).
+                    type: boolean
+                  istio:
+                    description: |-
+                      Istio installs the istiod control plane (CRDs are installed by the
+                      operator at startup). Stacks deploy their own VirtualServices.
+                    type: boolean
+                  kafka:
+                    description: |-
+                      Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
+                      Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
+                    type: boolean
+                  certManager:
+                    description: |-
+                      CertManager installs jetstack cert-manager into the operators namespace.
+                      Tenant charts that need certificates can then rely on it being present.
+                    type: boolean
+                  postgres:
+                    description: |-
+                      Postgres installs the kubegres operator. Stacks then run Postgres via                      Postgres custom resources instead of a per-stack postgres chart.
+                    type: boolean
+                  spark:
+                    description: Spark installs kubeflow spark-operator.
+                    type: boolean
+                  vault:
+                    description: Vault installs bank-vaults vault-operator.
+                    type: boolean
+                type: object
+              paused:
+                description: Paused stops reconciliation without deleting deployed
+                  components.
+                type: boolean
+              seedVault:
+                description: |-
+                  SeedVault mirrors keys from a plain k8s Secret into the per-tenant
+                  Vault KV store on every reconcile. Secret values never appear in the
+                  Stack spec.
+                properties:
+                  entries:
+                    description: Entries map Vault KV paths to the source Secret
+                      keys to copy.
+                    items:
+                      description: VaultSeedEntry copies a set of source Secret
+                        keys into one Vault path.
+                      properties:
+                        keys:
+                          description: Keys are the source Secret keys copied to
+                            this path.
+                          items:
+                            type: string
+                          type: array
+                        path:
+                          description: Path is the KV v2 path (relative to the secret/
+                            mount), e.g. frontend/auth0.
+                          minLength: 1
+                          type: string
+                      required:
+                      - keys
+                      - path
+                      type: object
+                    minItems: 1
+                    type: array
+                  sourceSecret:
+                    description: SourceSecret is a Secret in the Stack namespace
+                      whose keys are copied into Vault.
+                    minLength: 1
+                    type: string
+                required:
+                - entries
+                - sourceSecret
+                type: object
+              stackRef:
+                description: |-
+                  StackRef names the cluster-scoped StackDefinition to deploy.
+                  Mutually exclusive with Inline.
+                type: string
+              values:
+                description: |-
+                  Values overrides applied on top of the StackDefinition defaults for
+                  every component (deep merge, component path: components.<name>.<key>).
+                x-kubernetes-preserve-unknown-fields: true
+              version:
+                description: Version pins the StackDefinition to a content version.
+                  Empty = latest.
+                type: string
+            type: object
+          status:
+            description: StackStatus defines the observed state of Stack.
+            properties:
+              components:
+                items:
+                  description: ComponentStatus is the observed state of one component
+                    of the stack.
+                  properties:
+                    lastDeployed:
+                      format: date-time
+                      type: string
+                    message:
+                      description: Message carries the last error or readiness detail.
+                      type: string
+                    name:
+                      type: string
+                    phase:
+                      description: 'Phase: Pending | Deploying | Ready | Failed |
+                        Degraded'
+                      enum:
+                      - Pending
+                      - Deploying
+                      - Ready
+                      - Failed
+                      - Degraded
+                      type: string
+                    revision:
+                      description: Revision of the Helm release.
+                      type: integer
+                    scope:
+                      description: |-
+                        Scope: Namespaced (installed in the Stack namespace) or Cluster
+                        (installed once in the operators namespace).
+                      enum:
+                      - Namespaced
+                      - Cluster
+                      type: string
+                  required:
+                  - name
+                  - phase
+                  type: object
+                type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: 'Phase: Pending | Progressing | Ready | Failed'
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

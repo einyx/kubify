@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: ghcr.io/einyx/kubo
+  tag: v0.1.1
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: ghcr
+
+webhookSecret:
+  secretName: kubo-webhook-secret
+  key: secret
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 4Gi
+  requests:
+    cpu: 100m
+    memory: 512Mi
+
+leaderElect: true

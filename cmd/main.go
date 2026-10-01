@@ -30,6 +30,7 @@ import (
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/controller"
 	"github.com/einyx/kubo/internal/prereqs"
+	kubowh "github.com/einyx/kubo/internal/webhook"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -264,6 +265,10 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "Stack")
 		os.Exit(1)
 	}
+	webhookServer.Register("/provision", &kubowh.ProvisioningHandler{
+		Client:    mgr.GetClient(),
+		SecretKey: os.Getenv("WEBHOOK_SECRET"),
+	})
 	if err = platformv1alpha1.SetupStackWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Stack")
 		os.Exit(1)
