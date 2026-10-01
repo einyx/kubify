@@ -42,12 +42,24 @@ func (v *StackValidator) ValidateDelete(_ context.Context, _ runtime.Object) (ad
 	return nil, nil
 }
 
+// reservedNamespaces lists namespaces that must never host a tenant Stack.
+var reservedNamespaces = map[string]bool{
+	"kube-system": true, "kube-public": true, "kube-node-lease": true,
+	"kubo-system": true, "operators": true, "istio-system": true,
+	"istio-ingress": true, "cert-manager": true, "flux-system": true,
+	"vault-system": true, "spark-operator": true, "vault-operator": true,
+}
+
 func validate(obj runtime.Object) (admission.Warnings, error) {
 	stack, ok := obj.(*Stack)
 	if !ok {
 		return nil, fmt.Errorf("expected a Stack, got %T", obj)
 	}
 	stacklog.Info("validating Stack", "name", stack.Name)
+
+	if reservedNamespaces[stack.Namespace] {
+		return nil, fmt.Errorf("namespace %q is reserved and cannot host a Stack", stack.Namespace)
+	}
 
 	hasRef := stack.Spec.StackRef != ""
 	hasInline := stack.Spec.Inline != nil
