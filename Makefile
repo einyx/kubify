@@ -95,6 +95,21 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 lint-config: golangci-lint ## Verify golangci-lint linter configuration
 	$(GOLANGCI_LINT) config verify
 
+##@ Local Dev
+
+ENV_LOCAL ?= config/samples/.env.local
+DEV_NAMESPACES ?= foundation-a foundation-b
+
+.PHONY: dev-secrets
+dev-secrets: ## Seed local k8s secrets from config/samples/.env.local (copy .env.local.example to get started)
+	@test -f $(ENV_LOCAL) || { echo "Missing $(ENV_LOCAL) — copy config/samples/.env.local.example and fill in values"; exit 1; }
+	@for ns in $(DEV_NAMESPACES); do \
+		kubectl create secret generic backend-auth0 -n $$ns \
+			--from-env-file=$(ENV_LOCAL) \
+			--dry-run=client -o yaml | kubectl apply -f -; \
+	done
+	@echo "Secrets applied to: $(DEV_NAMESPACES)"
+
 ##@ Build
 
 .PHONY: build
