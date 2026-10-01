@@ -120,6 +120,11 @@ type ClusterOperators struct {
 	// Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
 	// +optional
 	Kafka bool `json:"kafka,omitempty"`
+	// CertManager installs jetstack cert-manager into the operators namespace.
+	// Tenant charts that need certificates (or ExternalSecret stores) can then
+	// rely on it being present.
+	// +optional
+	CertManager bool `json:"certManager,omitempty"`
 	// Postgres installs the kubegres operator. Stacks then run Postgres via
 	// Postgres custom resources instead of a per-stack postgres chart.
 	// +optional

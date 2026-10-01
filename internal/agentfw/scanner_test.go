@@ -1,10 +1,12 @@
 package agentfw
 
 import (
+	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -201,6 +203,58 @@ func TestRulesLoadCustomPattern(t *testing.T) {
 	}
 	if !found {
 		t.Error("custom rule pattern did not fire")
+	}
+}
+
+func TestMITMMintsValidLeaf(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath, err := GenerateCA(filepath.Join(dir, "ca"))
+	if err != nil {
+		t.Fatalf("GenerateCA: %v", err)
+	}
+	m, err := LoadMITM(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("LoadMITM: %v", err)
+	}
+	leaf, err := m.leafFor("api.openai.com")
+	if err != nil {
+		t.Fatalf("leafFor: %v", err)
+	}
+	if leaf.Leaf.DNSNames[0] != "api.openai.com" {
+		t.Errorf("leaf DNSName = %v, want api.openai.com", leaf.Leaf.DNSNames)
+	}
+	// Verify chain: leaf must chain to CA.
+	roots := x509.NewCertPool()
+	roots.AddCert(m.ca)
+	parsed, err := x509.ParseCertificate(leaf.Certificate[0])
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+	if _, err := parsed.Verify(x509.VerifyOptions{Roots: roots, DNSName: "api.openai.com"}); err != nil {
+		t.Errorf("leaf does not chain to CA: %v", err)
+	}
+	// Second call for same host returns cached cert (same pointer).
+	leaf2, _ := m.leafFor("api.openai.com")
+	if leaf2 != leaf {
+		t.Error("leaf cache miss on second call")
+	}
+}
+
+func TestMatchesBypass(t *testing.T) {
+	cases := []struct {
+		host, suf string
+		want      bool
+	}{
+		{"api.chase.com:443", "chase.com", true},
+		{"chase.com", "chase.com", true},
+		{"api.openai.com", "chase.com", false},
+		{"evilchase.com", "chase.com", false}, // suffix must be on a dot boundary
+	}
+	for _, c := range cases {
+		got := MatchesBypass(c.host, []string{c.suf})
+		if got != c.want {
+			t.Errorf("MatchesBypass(%q, %q) = %v, want %v", c.host, c.suf, got, c.want)
+		}
 	}
 }
 

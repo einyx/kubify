@@ -234,6 +234,11 @@ spec:
                       Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
                       Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
                     type: boolean
+                  certManager:
+                    description: |-
+                      CertManager installs jetstack cert-manager into the operators namespace.
+                      Tenant charts that need certificates can then rely on it being present.
+                    type: boolean
                   postgres:
                     description: |-
                       Postgres installs the kubegres operator. Stacks then run Postgres via                      Postgres custom resources instead of a per-stack postgres chart.
