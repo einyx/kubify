@@ -64,6 +64,12 @@ type StackSpec struct {
 	// +optional
 	ComponentValues map[string]apiextensionsv1.JSON `json:"componentValues,omitempty"`
 
+	// SecretsRef lists secrets to copy from kubo-system into the tenant
+	// namespace on every reconcile. Use this to seed per-tenant credentials
+	// (e.g. Auth0 client secrets) without storing them in the Stack spec.
+	// +optional
+	SecretsRef []SecretMapping `json:"secretsRef,omitempty"`
+
 	// Paused stops reconciliation without deleting deployed components.
 	// +optional
 	Paused bool `json:"paused,omitempty"`
@@ -227,6 +233,16 @@ type StackList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Stack `json:"items"`
+}
+
+// SecretMapping copies a Secret from kubo-system into the tenant namespace.
+type SecretMapping struct {
+	// From is the name of the Secret in kubo-system.
+	From string `json:"from"`
+	// To is the name to give the Secret in the tenant namespace.
+	// Defaults to From when omitted.
+	// +optional
+	To string `json:"to,omitempty"`
 }
 
 func init() {
