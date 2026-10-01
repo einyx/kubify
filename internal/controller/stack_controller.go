@@ -86,8 +86,8 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.finalize(ctx, &stack)
 	}
 
-	if err := r.ensurePullSecrets(ctx, &stack); err != nil {
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "PullSecretSyncFailed", err)
+	if err := r.ensureSecrets(ctx, &stack); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", err)
 	}
 
 	var bundleCharts map[string]*chart.Chart
@@ -444,46 +444,69 @@ func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platfor
 	return r.Helm.Uninstall(comp.Name, stack.Namespace)
 }
 
-// ensurePullSecrets copies any pull secrets referenced by the Stack from
-// kubo-system into the Stack's namespace so the operator can pull charts and
-// bundle images without manual secret seeding per tenant.
-func (r *StackReconciler) ensurePullSecrets(ctx context.Context, stack *platformv1alpha1.Stack) error {
+// ensureSecrets copies secrets from kubo-system into the Stack's namespace:
+//   - chart/bundle pull secrets referenced in the spec
+//   - explicit tenant secrets listed in spec.secretsRef
+func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack) error {
 	log := logf.FromContext(ctx)
-	names := map[string]struct{}{}
+	const srcNS = "kubo-system"
+
+	// pull secrets: from → to (same name)
+	pullNames := map[string]struct{}{}
 	if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
-		names[stack.Spec.Bundle.SecretRef.Name] = struct{}{}
+		pullNames[stack.Spec.Bundle.SecretRef.Name] = struct{}{}
 	}
 	if stack.Spec.Inline != nil {
 		for _, comp := range stack.Spec.Inline.Components {
 			if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
-				names[comp.ChartPullSecretRef.Name] = struct{}{}
+				pullNames[comp.ChartPullSecretRef.Name] = struct{}{}
 			}
 		}
 	}
-	const srcNS = "kubo-system"
-	for name := range names {
-		var existing corev1.Secret
-		err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: name}, &existing)
-		if err == nil {
-			continue // already present
+	type mapping struct{ from, to string }
+	var mappings []mapping
+	for name := range pullNames {
+		mappings = append(mappings, mapping{name, name})
+	}
+	for _, m := range stack.Spec.SecretsRef {
+		to := m.To
+		if to == "" {
+			to = m.From
 		}
-		if !errors.IsNotFound(err) {
+		mappings = append(mappings, mapping{m.From, to})
+	}
+
+	for _, m := range mappings {
+		var src corev1.Secret
+		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: m.from}, &src); err != nil {
+			if errors.IsNotFound(err) {
+				log.Info("secret not found in kubo-system, skipping", "secret", m.from)
+				continue
+			}
 			return err
 		}
-		var src corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: name}, &src); err != nil {
-			log.Info("pull secret not found in kubo-system, skipping", "secret", name)
-			continue
-		}
 		dst := corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: stack.Namespace},
+			ObjectMeta: metav1.ObjectMeta{Name: m.to, Namespace: stack.Namespace},
 			Type:       src.Type,
 			Data:       src.Data,
 		}
-		if err := r.Create(ctx, &dst); err != nil && !errors.IsAlreadyExists(err) {
-			return fmt.Errorf("copy pull secret %s to %s: %w", name, stack.Namespace, err)
+		// Use Update if already exists so rotation propagates.
+		var existing corev1.Secret
+		err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: m.to}, &existing)
+		if errors.IsNotFound(err) {
+			if cerr := r.Create(ctx, &dst); cerr != nil && !errors.IsAlreadyExists(cerr) {
+				return fmt.Errorf("copy secret %s→%s: %w", m.from, m.to, cerr)
+			}
+			log.Info("copied secret", "from", m.from, "to", m.to, "namespace", stack.Namespace)
+		} else if err == nil {
+			existing.Data = src.Data
+			existing.Type = src.Type
+			if uerr := r.Update(ctx, &existing); uerr != nil {
+				return fmt.Errorf("sync secret %s→%s: %w", m.from, m.to, uerr)
+			}
+		} else {
+			return err
 		}
-		log.Info("copied pull secret", "secret", name, "to", stack.Namespace)
 	}
 	return nil
 }
