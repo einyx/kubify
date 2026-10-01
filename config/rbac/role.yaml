@@ -156,3 +156,15 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - vault.banzaicloud.com
+  resources:
+  - vaults
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
