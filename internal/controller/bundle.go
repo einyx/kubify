@@ -51,6 +51,12 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 	if err != nil {
 		return nil, nil, fmt.Errorf("resolve bundle %s: %w", stack.Spec.Bundle.URL, err)
 	}
+	// ponytail: cache by digest — avoids re-fetching the same bundle for every tenant stack
+	cacheKey := desc.Digest.String()
+	if cached, ok := r.bundleCache.Load(cacheKey); ok {
+		e := cached.(bundleCacheEntry)
+		return e.charts, e.images, nil
+	}
 	rc, err := repo.Fetch(ctx, desc)
 	if err != nil {
 		return nil, nil, fmt.Errorf("fetch bundle manifest: %w", err)
@@ -92,8 +98,12 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 		return nil, nil, err
 	}
 	charts, err := loadCharts(dir)
+	if err != nil {
+		return nil, nil, err
+	}
+	r.bundleCache.Store(cacheKey, bundleCacheEntry{charts: charts, images: images})
 	log.FromContext(ctx).Info("bundle parsed", "url", stack.Spec.Bundle.URL, "charts", len(charts), "images", len(images))
-	return charts, images, err
+	return charts, images, nil
 }
 
 func readBundleImages(ctx context.Context, repo *remote.Repository, layer ocispec.Descriptor) (map[string]bundleImage, error) {
