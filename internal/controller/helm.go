@@ -15,6 +15,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/registry"
 	"helm.sh/helm/v3/pkg/release"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -121,8 +122,27 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef, pullSecret, ns s
 	pull.Version = ref.ChartVersion
 	pull.Settings = cli.New()
 	if user, pass, uerr := dockerAuthFor(h.restCfg, ns, pullSecret, ref.RepoURL); uerr == nil && user != "" {
-		pull.Username = user
-		pull.Password = pass
+		// OCI pulls ignore pull.Username/Password — the registry client on
+		// the action config is the only channel helm uses. Log in with the
+		// extracted credentials and wire that client in.
+		if strings.HasPrefix(ref.RepoURL, "oci://") {
+			// ClientOptBasicAuth only feeds Login(); pulls read the
+			// credential store, so perform a real login into this client.
+			host := strings.TrimPrefix(ref.RepoURL, "oci://")
+			if i := strings.Index(host, "/"); i >= 0 {
+				host = host[:i]
+			}
+			rc, rerr := registry.NewClient()
+			if rerr == nil {
+				if lerr := rc.Login(host, registry.LoginOptBasicAuth(user, pass)); lerr != nil {
+					slog.Warn("registry login failed", "host", host, "err", lerr.Error())
+				}
+				cfg.RegistryClient = rc
+			}
+		} else {
+			pull.Username = user
+			pull.Password = pass
+		}
 	}
 	chartArg := ref.ChartName
 	if strings.HasPrefix(ref.RepoURL, "oci://") {

@@ -68,29 +68,22 @@ func clusterCompStatus(name string) platformv1alpha1.ComponentStatus {
 	return platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseReady, Scope: platformv1alpha1.ComponentScopeCluster}
 }
 
-func TestOperatorWantedByOther(t *testing.T) {
+func TestSharedOperatorsNeverReleased(t *testing.T) {
+	// Policy: shared cluster operators are never uninstalled by stack
+	// lifecycle — releaseOperator must be a no-op for them regardless of
+	// what other stacks want.
 	liveOther := &platformv1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "team-a", Name: "stack-a"},
 		Spec:       platformv1alpha1.StackSpec{Operators: &platformv1alpha1.ClusterOperators{Vault: true}},
 	}
-	deletedOther := &platformv1alpha1.Stack{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:         "team-b",
-			Name:              "stack-b",
-			Finalizers:        []string{stackFinalizer},
-			DeletionTimestamp: &metav1.Time{},
-		},
-		Spec: platformv1alpha1.StackSpec{Operators: &platformv1alpha1.ClusterOperators{Vault: true}},
-	}
 	me := &platformv1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Namespace: "team-c", Name: "stack-c"}}
-	r := newStackReconcilerWithStacks(t, liveOther, deletedOther, me)
+	r := newStackReconcilerWithStacks(t, liveOther, me)
 	ctx := context.Background()
 
-	if !r.operatorWantedByOther(ctx, me, "vault-operator") {
-		t.Error("vault-operator should be kept while stack-a wants it")
-	}
-	if r.operatorWantedByOther(ctx, me, "spark-operator") {
-		t.Error("spark-operator has no other consumer and should be released")
+	for _, name := range []string{"vault-operator", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres", "cert-manager"} {
+		if err := r.releaseOperator(ctx, me, name); err != nil {
+			t.Errorf("releaseOperator(%s) must be a no-op, got err: %v", name, err)
+		}
 	}
 }
 
