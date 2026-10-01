@@ -60,6 +60,14 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 	} else {
 		px := NewProxy(policy, auditor)
 		px.scanner = newScanner(policy)
+		if policy.MITMEnabled {
+			m, err := LoadMITM(policy.MITMCACert, policy.MITMCAKey)
+			if err != nil {
+				return err
+			}
+			px.WithMITM(m)
+			log.Printf("agentfw: MITM enabled (ca=%s)", policy.MITMCACert)
+		}
 		core = px
 	}
 

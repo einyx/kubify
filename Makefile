@@ -110,7 +110,7 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # Charts packed into the OCI bundle. scheduler and processor must stay in this list.
 CHARTS_ROOT ?= ../foundation-charts
-BUNDLE_CHARTS := backend frontend watcher watcher-v2 opa storage-engine vault-operator foundation-bootstrap scheduler processor
+BUNDLE_CHARTS := backend frontend watcher opa storage-engine vault-operator foundation-bootstrap scheduler processor
 BUNDLE_REF ?= ghcr.io/meshxdata/foundation-bundle:0.0.14
 
 .PHONY: bundle

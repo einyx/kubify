@@ -16,8 +16,8 @@ import (
 	"strings"
 
 	godigest "github.com/opencontainers/go-digest"
-	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	specs "github.com/opencontainers/image-spec/specs-go"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"oras.land/oras-go/v2"
 	"oras.land/oras-go/v2/content/memory"
