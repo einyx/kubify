@@ -1,0 +1,25 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kubo-webhook-cert-init
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-5"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  ttlSecondsAfterFinished: 60
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: kubo-controller-manager
+      containers:
+      - name: init-cert
+        image: bitnami/kubectl:latest
+        command:
+        - sh
+        - -c
+        - |
+          kubectl create secret generic webhook-server-cert \
+            -n {{ .Release.Namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
