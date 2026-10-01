@@ -86,8 +86,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, r.finalize(ctx, &stack)
 	}
 
-	if err := r.ensureSecrets(ctx, &stack); err != nil {
+	secretsReady, err := r.ensureSecrets(ctx, &stack)
+	if err != nil {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", err)
+	}
+	if !secretsReady {
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	var bundleCharts map[string]*chart.Chart
@@ -447,7 +451,9 @@ func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platfor
 // ensureSecrets copies secrets from kubo-system into the Stack's namespace:
 //   - chart/bundle pull secrets referenced in the spec
 //   - explicit tenant secrets listed in spec.secretsRef
-func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack) error {
+// ensureSecrets returns (allReady, error). allReady is false when any source
+// secret was missing — the caller should requeue rather than proceed.
+func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack) (bool, error) {
 	log := logf.FromContext(ctx)
 	const srcNS = "kubo-system"
 
@@ -476,14 +482,16 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 		mappings = append(mappings, mapping{m.From, to})
 	}
 
+	allReady := true
 	for _, m := range mappings {
 		var src corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: m.from}, &src); err != nil {
 			if errors.IsNotFound(err) {
-				log.Info("secret not found in kubo-system, skipping", "secret", m.from)
+				log.Info("secret not found in kubo-system, will retry", "secret", m.from)
+				allReady = false
 				continue
 			}
-			return err
+			return false, err
 		}
 		dst := corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{Name: m.to, Namespace: stack.Namespace},
@@ -495,20 +503,20 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 		err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: m.to}, &existing)
 		if errors.IsNotFound(err) {
 			if cerr := r.Create(ctx, &dst); cerr != nil && !errors.IsAlreadyExists(cerr) {
-				return fmt.Errorf("copy secret %s→%s: %w", m.from, m.to, cerr)
+				return false, fmt.Errorf("copy secret %s→%s: %w", m.from, m.to, cerr)
 			}
 			log.Info("copied secret", "from", m.from, "to", m.to, "namespace", stack.Namespace)
 		} else if err == nil {
 			existing.Data = src.Data
 			existing.Type = src.Type
 			if uerr := r.Update(ctx, &existing); uerr != nil {
-				return fmt.Errorf("sync secret %s→%s: %w", m.from, m.to, uerr)
+				return false, fmt.Errorf("sync secret %s→%s: %w", m.from, m.to, uerr)
 			}
 		} else {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	return allReady, nil
 }
 
 // SetupWithManager sets up the controller with the Manager. In Flux mode,
@@ -525,6 +533,29 @@ func (r *StackReconciler) SetupWithManager(mgr ctrl.Manager) error {
 					return nil
 				}
 				return []reconcile.Request{{NamespacedName: types.NamespacedName{Namespace: obj.GetNamespace(), Name: owner.Name}}}
+			}),
+		).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+				if obj.GetNamespace() != "kubo-system" {
+					return nil
+				}
+				secretName := obj.GetName()
+				var stacks platformv1alpha1.StackList
+				if err := r.List(ctx, &stacks); err != nil {
+					return nil
+				}
+				var reqs []reconcile.Request
+				for _, s := range stacks.Items {
+					for _, ref := range s.Spec.SecretsRef {
+						if ref.From == secretName {
+							reqs = append(reqs, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: s.Namespace, Name: s.Name}})
+							break
+						}
+					}
+				}
+				return reqs
 			}),
 		).
 		Complete(r)
