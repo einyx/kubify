@@ -16,6 +16,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"helm.sh/helm/v3/pkg/chart"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -82,6 +84,10 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	} else {
 		return ctrl.Result{}, r.finalize(ctx, &stack)
+	}
+
+	if err := r.ensurePullSecrets(ctx, &stack); err != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "PullSecretSyncFailed", err)
 	}
 
 	var bundleCharts map[string]*chart.Chart
@@ -436,6 +442,50 @@ func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platfor
 		return r.Helm.Uninstall(comp.Name, clusterOperatorsNamespace)
 	}
 	return r.Helm.Uninstall(comp.Name, stack.Namespace)
+}
+
+// ensurePullSecrets copies any pull secrets referenced by the Stack from
+// kubo-system into the Stack's namespace so the operator can pull charts and
+// bundle images without manual secret seeding per tenant.
+func (r *StackReconciler) ensurePullSecrets(ctx context.Context, stack *platformv1alpha1.Stack) error {
+	log := logf.FromContext(ctx)
+	names := map[string]struct{}{}
+	if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
+		names[stack.Spec.Bundle.SecretRef.Name] = struct{}{}
+	}
+	if stack.Spec.Inline != nil {
+		for _, comp := range stack.Spec.Inline.Components {
+			if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
+				names[comp.ChartPullSecretRef.Name] = struct{}{}
+			}
+		}
+	}
+	const srcNS = "kubo-system"
+	for name := range names {
+		var existing corev1.Secret
+		err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: name}, &existing)
+		if err == nil {
+			continue // already present
+		}
+		if !errors.IsNotFound(err) {
+			return err
+		}
+		var src corev1.Secret
+		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: name}, &src); err != nil {
+			log.Info("pull secret not found in kubo-system, skipping", "secret", name)
+			continue
+		}
+		dst := corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: stack.Namespace},
+			Type:       src.Type,
+			Data:       src.Data,
+		}
+		if err := r.Create(ctx, &dst); err != nil && !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("copy pull secret %s to %s: %w", name, stack.Namespace, err)
+		}
+		log.Info("copied pull secret", "secret", name, "to", stack.Namespace)
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager. In Flux mode,
