@@ -6,6 +6,8 @@ import (
 
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/release"
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
@@ -15,9 +17,16 @@ import (
 // Not a tenant namespace and not kubo-system. One copy watches every stack.
 const clusterOperatorsNamespace = "operators"
 
+// Fixed NodePorts for the shared istio-ingress gateway; the kind cluster maps
+// host 80/443 to these node ports via extraPortMappings.
+const (
+	ingressHTTPNodePort  = 30080
+	ingressHTTPSNodePort = 30443
+)
+
 func isClusterOperator(name string) bool {
 	switch name {
-	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres":
+	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres", "cert-manager":
 		return true
 	default:
 		return false
@@ -71,6 +80,14 @@ func kafkaOperatorChart() platformv1alpha1.ChartRef {
 	}
 }
 
+func certManagerChart() platformv1alpha1.ChartRef {
+	return platformv1alpha1.ChartRef{
+		RepoURL:      "oci://quay.io/jetstack/charts",
+		ChartName:    "cert-manager",
+		ChartVersion: "v1.18.2",
+	}
+}
+
 func kubegresChart() platformv1alpha1.ChartRef {
 	return platformv1alpha1.ChartRef{
 		RepoURL:      "https://www.kubegres.io/charts",
@@ -100,13 +117,16 @@ func (r *StackReconciler) reconcileOperators(ctx context.Context, stack *platfor
 		{"istiod", stack.Spec.Operators != nil && stack.Spec.Operators.Istio},
 		{"istio-ingress", stack.Spec.Operators != nil && stack.Spec.Operators.Istio},
 		{"kafka-operator", stack.Spec.Operators != nil && stack.Spec.Operators.Kafka},
+		{"cert-manager", stack.Spec.Operators != nil && stack.Spec.Operators.CertManager},
 		{"kubegres", stack.Spec.Operators != nil && stack.Spec.Operators.Postgres},
 		{"agentfw", stack.Spec.Operators != nil && stack.Spec.Operators.AgentFW},
 	} {
 		if !op.on {
-			if err := r.releaseOperator(ctx, stack, op.name); err != nil && firstErr == nil {
-				firstErr = err
-			}
+			// Shared cluster operators are never auto-removed: they hold
+			// state (Vault storage, gateway config, CRDs) that outlives any
+			// one Stack. Removal is explicit: helm uninstall in the
+			// operators/istio-ingress namespaces. Only per-tenant pieces
+			// (vault-tenant, agentfw) are cleaned up, in finalize.
 			continue
 		}
 		if op.name == "vault-tenant" || op.name == "agentfw" {
@@ -163,6 +183,9 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 	if ch == nil && name == "kafka-operator" {
 		ch, err = r.Helm.EnsureChart(kafkaOperatorChart(), "", clusterOperatorsNamespace)
 	}
+	if ch == nil && name == "cert-manager" {
+		ch, err = r.Helm.EnsureChart(certManagerChart(), "", clusterOperatorsNamespace)
+	}
 	if ch == nil && name == "kubegres" {
 		ch, err = r.Helm.EnsureChart(kubegresChart(), "", clusterOperatorsNamespace)
 	}
@@ -215,11 +238,25 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 			"labels": map[string]interface{}{"istio": "ingressgateway"},
 		}
 	}
+	if name == "cert-manager" {
+		values = map[string]interface{}{
+			"crds": map[string]interface{}{"enabled": true},
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{"cpu": "50m", "memory": "64Mi"},
+			},
+		}
+	}
 	rel, err := r.Helm.Deploy(name, ns, ch, values)
 	if err != nil {
 		st.Phase = platformv1alpha1.ComponentPhaseFailed
 		st.Message = err.Error()
 		return st, err
+	}
+	if name == "istio-ingress" {
+		if perr := r.pinIngressNodePorts(ctx, ns); perr != nil {
+			st.Message = "deployed; nodeport pinning pending: " + perr.Error()
+			return st, nil
+		}
 	}
 	st.Phase = platformv1alpha1.ComponentPhaseReady
 	st.Revision = rel.Version
@@ -227,13 +264,43 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 	return st, nil
 }
 
-func (r *StackReconciler) releaseOperators(ctx context.Context, stack *platformv1alpha1.Stack) error {
-	for _, name := range []string{"agentfw", "vault-tenant", "vault-operator", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres"} {
-		if err := r.releaseOperator(ctx, stack, name); err != nil {
-			return err
+// ingressNodePorts pins the gateway Service to fixed NodePorts so the kind
+// cluster's extraPortMappings (host 80 -> node 30080, host 443 -> 30443)
+// reach it without a port-forward.
+func (r *StackReconciler) pinIngressNodePorts(ctx context.Context, ns string) error {
+	var svc corev1.Service
+	if err := r.Get(ctx, client.ObjectKey{Namespace: ns, Name: "istio-ingress"}, &svc); err != nil {
+		return err
+	}
+	changed := false
+	for i := range svc.Spec.Ports {
+		switch svc.Spec.Ports[i].Port {
+		case 80:
+			if svc.Spec.Ports[i].NodePort != ingressHTTPNodePort {
+				svc.Spec.Ports[i].NodePort = ingressHTTPNodePort
+				changed = true
+			}
+		case 443:
+			if svc.Spec.Ports[i].NodePort != ingressHTTPSNodePort {
+				svc.Spec.Ports[i].NodePort = ingressHTTPSNodePort
+				changed = true
+			}
 		}
 	}
-	return nil
+	if !changed {
+		return nil
+	}
+	return r.Update(ctx, &svc)
+}
+
+// releaseTenantResources removes only the per-tenant pieces a Stack owns
+// (its Vault instance and agent firewall). Shared cluster operators are
+// intentionally never uninstalled here — removal is explicit.
+func (r *StackReconciler) releaseOperators(ctx context.Context, stack *platformv1alpha1.Stack) error {
+	if err := r.releaseOperator(ctx, stack, "vault-tenant"); err != nil {
+		return err
+	}
+	return r.releaseOperator(ctx, stack, "agentfw")
 }
 
 func (r *StackReconciler) releaseOperator(ctx context.Context, stack *platformv1alpha1.Stack, name string) error {
@@ -243,14 +310,8 @@ func (r *StackReconciler) releaseOperator(ctx context.Context, stack *platformv1
 	case "agentfw":
 		return r.deleteAgentFW(ctx, stack)
 	}
-	if r.operatorWantedByOther(ctx, stack, name) {
-		return nil
-	}
-	ns := clusterOperatorsNamespace
-	if name == "istio-ingress" {
-		ns = "istio-ingress"
-	}
-	return r.Helm.Uninstall(name, ns)
+	// Shared operators are never uninstalled by stack lifecycle.
+	return nil
 }
 
 // clusterReleaseInUse reports whether another live Stack has a cluster-scoped
@@ -273,41 +334,6 @@ func (r *StackReconciler) clusterReleaseInUse(ctx context.Context, stack *platfo
 			if comp.Name == name && comp.Scope == platformv1alpha1.ComponentScopeCluster {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func (r *StackReconciler) operatorWantedByOther(ctx context.Context, stack *platformv1alpha1.Stack, name string) bool {
-	var list platformv1alpha1.StackList
-	if err := r.List(ctx, &list); err != nil {
-		return true
-	}
-	for i := range list.Items {
-		other := &list.Items[i]
-		if other.Namespace == stack.Namespace && other.Name == stack.Name {
-			continue
-		}
-		if other.DeletionTimestamp != nil || other.Spec.Operators == nil {
-			continue
-		}
-		if name == "vault-operator" && other.Spec.Operators.Vault {
-			return true
-		}
-		if name == "spark-operator" && other.Spec.Operators.Spark {
-			return true
-		}
-		if name == "istiod" && other.Spec.Operators.Istio {
-			return true
-		}
-		if name == "kafka-operator" && other.Spec.Operators.Kafka {
-			return true
-		}
-		if name == "kubegres" && other.Spec.Operators.Postgres {
-			return true
-		}
-		if name == "istio-ingress" && other.Spec.Operators.Istio {
-			return true
 		}
 	}
 	return false
