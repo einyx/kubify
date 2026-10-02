@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kubo · stacks</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #21262d; --text: #e6edf3;
+    --muted: #8b949e; --accent: #4493f8; --ok: #3fb950; --warn: #d29922;
+    --err: #f85149; --pend: #8b949e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .row { display: flex; gap: 12px; align-items: center; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel);
+          border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  tr:last-child td { border-bottom: 0; }
+  tr.stack-row { cursor: pointer; }
+  tr.stack-row:hover { background: #1c2128; }
+  .phase { display: inline-block; padding: 2px 10px; border-radius: 99px;
+           font-size: 12px; font-weight: 600; }
+  .phase.Ready       { color: var(--ok);   background: rgba(63,185,80,.12); }
+  .phase.Progressing { color: var(--warn); background: rgba(210,153,34,.12); }
+  .phase.Failed      { color: var(--err);  background: rgba(248,81,73,.12); }
+  .phase.Pending     { color: var(--pend); background: rgba(139,148,158,.12); }
+  .muted { color: var(--muted); }
+  .failmsg { color: var(--err); font-size: 12px; }
+  button {
+    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
+    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: var(--border); }
+  button:disabled { opacity: .5; cursor: default; }
+  dialog {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 24px; width: 460px;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  dialog h2 { margin: 0 0 4px; font-size: 15px; }
+  dialog p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+  input, select {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 14px;
+  }
+  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .error { color: var(--err); font-size: 13px; margin-top: 8px; min-height: 18px; }
+  pre {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; overflow: auto; max-height: 340px; font-size: 12px;
+  }
+  #detail { display: none; margin-top: 20px; }
+  #detail h2 { font-size: 14px; margin: 0 0 8px; }
+  .back { background: none; border: 0; color: var(--accent); cursor: pointer;
+          font-size: 13px; padding: 0; margin-bottom: 8px; }
+  .comp-phase.Ready { color: var(--ok); } .comp-phase.Deploying, .comp-phase.Pending { color: var(--pend); }
+  .comp-phase.Failed { color: var(--err); }
+  #toast {
+    position: fixed; bottom: 20px; right: 20px; background: var(--ok); color: #041008;
+    padding: 10px 18px; border-radius: 8px; font-weight: 600; display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>kubo <span>/ operator portal</span></h1>
+  <div class="row">
+    <span class="muted" id="updated"></span>
+    <button onclick="document.getElementById('create').showModal()">+ New stack</button>
+  </div>
+</header>
+<main>
+  <table id="stacks">
+    <thead><tr>
+      <th>Namespace</th><th>Stack</th><th>Mode</th><th>Phase</th>
+      <th>Components</th><th>Age</th>
+    </tr></thead>
+    <tbody id="rows"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+  </table>
+
+  <div id="detail">
+    <button class="back" onclick="hideDetail()">← all stacks</button>
+    <h2 id="detail-title"></h2>
+    <p class="muted" id="detail-sub"></p>
+    <table>
+      <thead><tr><th>Component</th><th>Phase</th><th>Rev</th><th>Message</th></tr></thead>
+      <tbody id="comp-rows"></tbody>
+    </table>
+  </div>
+  <div class="error" id="list-error"></div>
+</main>
+
+<dialog id="create">
+  <h2>Create stack from template</h2>
+  <p>Renders the <b>foundation</b> demo template (foundation-a reference)
+     into a new namespace with its Stack manifest.</p>
+  <label for="tenant">Tenant slug (namespace: foundation-&lt;slug&gt;)</label>
+  <input id="tenant" placeholder="e.g. demo-b" autocomplete="off">
+  <label for="mode">Deployment mode</label>
+  <select id="mode">
+    <option value="Direct" selected>Direct (embedded helm engine)</option>
+    <option value="Flux">Flux (helm-controller)</option>
+  </select>
+  <div class="error" id="create-error"></div>
+  <div class="actions">
+    <button class="secondary" onclick="preview()">Preview YAML</button>
+    <button class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button id="create-btn" onclick="create()">Create</button>
+  </div>
+  <pre id="preview" style="display:none"></pre>
+</dialog>
+
+<div id="toast"></div>
+
+<script>
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+  return r.json();
+};
+
+async function refresh() {
+  try {
+    const stacks = await api('/api/stacks');
+    const tb = document.getElementById('rows');
+    document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    document.getElementById('list-error').textContent = '';
+    if (!stacks.length) {
+      tb.innerHTML = '<tr><td colspan="6" class="muted">no stacks yet — create one from the template</td></tr>';
+      return;
+    }
+    tb.innerHTML = stacks.map(s => `
+      <tr class="stack-row" onclick="showDetail('${s.namespace}','${s.name}')">
+        <td>${s.namespace}</td>
+        <td><b>${s.name}</b></td>
+        <td class="muted">${s.mode}</td>
+        <td><span class="phase ${s.phase}">${s.phase}</span>
+            ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}</td>
+        <td>${s.ready}/${s.total}</td>
+        <td class="muted">${s.age}</td>
+      </tr>`).join('');
+  } catch (e) {
+    document.getElementById('list-error').textContent = e.message;
+  }
+}
+
+async function showDetail(ns, name) {
+  try {
+    const d = await api(`/api/stacks/${ns}/${name}`);
+    document.getElementById('stacks').style.display = 'none';
+    const det = document.getElementById('detail');
+    det.style.display = 'block';
+    document.getElementById('detail-title').textContent = `${ns}/${name}`;
+    document.getElementById('detail-sub').textContent =
+      `${d.phase} · ${d.mode} · ${d.ready}/${d.total} components ready · age ${d.age}`;
+    document.getElementById('comp-rows').innerHTML = d.components.map(c => `
+      <tr>
+        <td><b>${c.name}</b></td>
+        <td><span class="comp-phase ${c.phase}">${c.phase}</span></td>
+        <td class="muted">${c.revision || ''}</td>
+        <td class="muted">${esc((c.message || '').slice(0, 200))}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">no component status yet</td></tr>';
+  } catch (e) { toast(e.message); }
+}
+
+function hideDetail() {
+  document.getElementById('detail').style.display = 'none';
+  document.getElementById('stacks').style.display = '';
+}
+
+async function preview() {
+  const err = document.getElementById('create-error');
+  err.textContent = '';
+  try {
+    const yaml = await api('/api/template?tenant=' + encodeURIComponent(tenantVal()));
+    const pre = document.getElementById('preview');
+    pre.style.display = 'block';
+    pre.textContent = yaml;
+  } catch (e) { err.textContent = e.message; }
+}
+
+async function create() {
+  const err = document.getElementById('create-error');
+  err.textContent = '';
+  const btn = document.getElementById('create-btn');
+  btn.disabled = true;
+  try {
+    await api('/api/stacks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenant: tenantVal(), mode: document.getElementById('mode').value }),
+    });
+    toast('stack created — operator will reconcile it shortly');
+    document.getElementById('create').close();
+    document.getElementById('preview').style.display = 'none';
+    refresh();
+  } catch (e) { err.textContent = e.message; }
+  btn.disabled = false;
+}
+
+const tenantVal = () => document.getElementById('tenant').value.trim();
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3500);
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

@@ -43,6 +43,10 @@ help: ## Display this help.
 
 ##@ Development
 
+.PHONY: portal
+portal: ## Run the operator portal locally against the current kubeconfig (port 9090)
+	go run ./cmd/portal -addr 127.0.0.1:9090
+
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
