@@ -32,6 +32,8 @@ spec:
       to: dai-backend
     - from: foundation-b-dai-frontend
       to: dai-frontend
+    - from: foundation-b-foundation-scheduler-user-credentials
+      to: foundation-scheduler-user-credentials
   componentValues:
     backend:
       image:
@@ -81,6 +83,12 @@ spec:
         value: auth0-stg.meshx.app
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
         value: meshx-stg.eu.auth0.com
+      secret:
+        auth0:
+          enabled: false
+      dependencies:
+        foundationBackendConfigMap: ""
+        hiveMetastoreSecret: ""
       sidecar:
         mcp:
           enabled: true
@@ -192,7 +200,7 @@ spec:
       migrations:
         enabled: false
       serviceAccount:
-        name: foundation-processor
+        name: foundation-b-processor
       resources:
         limits:
           cpu: "1"
@@ -504,7 +512,7 @@ spec:
           user: foundation
           existingSecret: postgres-postgresql
           existingSecretSuperUserKey: postgres-password
-      fullnameOverride: watcher
+      fullnameOverride: watcher-foundation-b
 
   extraBundles:
   - url: oci://ghcr.io/meshxdata/dai-bundle:0.0.7

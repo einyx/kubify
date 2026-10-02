@@ -238,6 +238,17 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 
 	valsJSON, _ := yaml.Marshal(values)
 
+	// A failed release blocks upgrades; uninstall so the next reconcile does
+	// a clean install with the current values.
+	if existing != nil && existing.Info.Status == release.StatusFailed {
+		un := action.NewUninstall(cfg)
+		un.IgnoreNotFound = true
+		if _, err := un.Run(compName); err != nil {
+			return nil, fmt.Errorf("helm uninstall failed release %s: %w", compName, err)
+		}
+		existing = nil
+	}
+
 	if existing == nil {
 		inst := action.NewInstall(cfg)
 		inst.ReleaseName = compName

@@ -55,7 +55,10 @@ func (r *StackReconciler) ensureVirtualService(ctx context.Context, stack *platf
 	err := r.Get(ctx, client.ObjectKeyFromObject(u), u)
 	if apierrors.IsNotFound(err) {
 		u.Object["spec"] = spec
-		return r.Create(ctx, u)
+		if err := r.Create(ctx, u); err != nil {
+			return err
+		}
+		return r.deleteConflictingVirtualServices(ctx, stack.Namespace)
 	}
 	if err != nil {
 		return err
@@ -67,5 +70,27 @@ func (r *StackReconciler) ensureVirtualService(ctx context.Context, stack *platf
 		return nil
 	}
 	u.Object["spec"] = spec
-	return r.Update(ctx, u)
+	if err := r.Update(ctx, u); err != nil {
+		return err
+	}
+	return r.deleteConflictingVirtualServices(ctx, stack.Namespace)
+}
+
+// deleteConflictingVirtualServices removes helm-managed VSes that override
+// the operator-managed routes VS. The backend chart creates "backend-mcp"
+// with prefix "/" when MCP is enabled, which catches all traffic before the
+// operator's VS. We delete it after every reconcile so it self-heals.
+func (r *StackReconciler) deleteConflictingVirtualServices(ctx context.Context, namespace string) error {
+	conflicting := []string{"backend-mcp"}
+	for _, vsName := range conflicting {
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(virtualServiceGVK)
+		obj.SetName(vsName)
+		obj.SetNamespace(namespace)
+		err := r.Delete(ctx, obj)
+		if err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
 }

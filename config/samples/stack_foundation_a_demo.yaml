@@ -81,6 +81,12 @@ spec:
         value: auth0-stg.meshx.app
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
         value: meshx-stg.eu.auth0.com
+      secret:
+        auth0:
+          enabled: false
+      dependencies:
+        foundationBackendConfigMap: ""
+        hiveMetastoreSecret: ""
       sidecar:
         mcp:
           enabled: true

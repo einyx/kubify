@@ -58,6 +58,18 @@ rules:
   - update
   - watch
 - apiGroups:
+  - batch
+  resources:
+  - jobs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - helm.toolkit.fluxcd.io
   resources:
   - helmreleases
@@ -91,6 +103,7 @@ rules:
 - apiGroups:
   - platform.kubo.io
   resources:
+  - stackbackups
   - stackdefinitions
   - stackreleases
   - stacks
@@ -105,19 +118,20 @@ rules:
 - apiGroups:
   - platform.kubo.io
   resources:
-  - stackdefinitions/finalizers
-  - stacks/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - platform.kubo.io
-  resources:
+  - stackbackups/status
   - stackdefinitions/status
   - stackreleases/status
   - stacks/status
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - platform.kubo.io
+  resources:
+  - stackdefinitions/finalizers
+  - stacks/finalizers
+  verbs:
   - update
 - apiGroups:
   - policy
