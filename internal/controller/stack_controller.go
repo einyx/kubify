@@ -318,6 +318,13 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		firstErr = opErr
 	}
 
+	// Re-run secret propagation after Helm deploys: charts may create secrets
+	// with empty values (e.g. dai-frontend) that overwrite the operator's copy.
+	// A second pass ensures operator-propagated data always wins.
+	if _, serr := r.ensureSecrets(ctx, &stack); serr != nil {
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", serr)
+	}
+
 	allReady := true
 	for _, st := range statuses {
 		if st.Phase != platformv1alpha1.ComponentPhaseReady {
