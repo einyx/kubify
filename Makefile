@@ -129,7 +129,7 @@ DAI_CHARTS_ROOT ?= ../dai-charts
 BUNDLE_CHARTS := backend frontend watcher opa storage-engine vault-operator foundation-bootstrap scheduler processor
 DAI_BUNDLE_CHARTS := backend frontend
 BUNDLE_REF ?= ghcr.io/meshxdata/foundation-bundle:0.0.14
-DAI_BUNDLE_REF ?= ghcr.io/meshxdata/dai-bundle:0.0.1
+DAI_BUNDLE_REF ?= ghcr.io/meshxdata/dai-bundle:0.0.3
 
 .PHONY: bundle
 bundle: ## Package foundation charts and push the OCI bundle.
@@ -137,8 +137,8 @@ bundle: ## Package foundation charts and push the OCI bundle.
 		$(addprefix $(CHARTS_ROOT)/,$(BUNDLE_CHARTS))
 
 .PHONY: dai-bundle
-dai-bundle: ## Package dai charts and push to the dai OCI bundle.
-	go run ./cmd/bundle --push $(DAI_BUNDLE_REF) \
+dai-bundle: ## Package dai charts and push to the dai OCI bundle (charts prefixed with 'dai-').
+	go run ./cmd/bundle --push $(DAI_BUNDLE_REF) --name-prefix=dai- \
 		$(addprefix $(DAI_CHARTS_ROOT)/,$(DAI_BUNDLE_CHARTS))
 
 .PHONY: docker-build

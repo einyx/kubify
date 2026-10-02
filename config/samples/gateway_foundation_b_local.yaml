@@ -1,0 +1,24 @@
+apiVersion: networking.istio.io/v1
+kind: Gateway
+metadata:
+  name: foundation-gateway
+  namespace: foundation-b
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - hosts:
+    - foundation-b.localtest.me
+    port:
+      name: http
+      number: 80
+      protocol: HTTP
+  - hosts:
+    - foundation-b.localtest.me
+    port:
+      name: https
+      number: 443
+      protocol: HTTPS
+    tls:
+      credentialName: localtest-wildcard-tls
+      mode: SIMPLE
