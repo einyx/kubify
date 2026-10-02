@@ -3,127 +3,600 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kubo · stacks</title>
+<title>kubo · operator portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --border: #21262d; --text: #e6edf3;
-    --muted: #8b949e; --accent: #4493f8; --ok: #3fb950; --warn: #d29922;
-    --err: #f85149; --pend: #8b949e;
+    --bg:       #050505;
+    --surface:  #0e0e10;
+    --panel:    #111115;
+    --border:   rgba(255,255,255,0.07);
+    --border-hi:rgba(255,255,255,0.12);
+    --text:     #f0f0f2;
+    --muted:    #5a5a6e;
+    --muted2:   #8888a0;
+    --accent:   #6c63ff;
+    --accent2:  #8b82ff;
+    --ok:       #3ecf8e;
+    --warn:     #f5a623;
+    --err:      #f55353;
+    --pend:     #5a5a6e;
   }
-  * { box-sizing: border-box; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    min-height: 100dvh;
+    overflow-x: hidden;
   }
-  header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 24px; border-bottom: 1px solid var(--border);
+
+  /* ── Background mesh ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 50% at 10% 0%, rgba(108,99,255,0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 50% 40% at 90% 80%, rgba(62,207,142,0.07) 0%, transparent 60%);
   }
-  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
-  header h1 span { color: var(--muted); font-weight: 400; }
-  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
-  .row { display: flex; gap: 12px; align-items: center; }
-  table { width: 100%; border-collapse: collapse; background: var(--panel);
-          border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-  th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+
+  /* Noise grain overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    opacity: .025;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 200px 200px;
+  }
+
+  /* ── Floating nav pill ── */
+  nav {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    max-width: 1160px;
+    margin: 20px auto 0;
+    padding: 10px 14px 10px 18px;
+    background: rgba(14,14,16,0.72);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--border-hi);
+    border-radius: 9999px;
+    box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 8px 32px rgba(0,0,0,0.6);
+  }
+
+  .nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .nav-logo {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--ok) 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+    flex-shrink: 0;
+  }
+
+  .nav-title {
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  .nav-title span {
+    color: var(--muted2);
+    font-weight: 400;
+  }
+
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #updated {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.02em;
+  }
+
+  /* ── Button ── */
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 8px 7px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: 0;
+    border-radius: 9999px;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 500ms cubic-bezier(0.32,0.72,0,1);
+    box-shadow: 0 0 0 1px rgba(108,99,255,0.5), 0 4px 16px rgba(108,99,255,0.35);
+  }
+  .btn:hover {
+    background: var(--accent2);
+    box-shadow: 0 0 0 1px rgba(139,130,255,0.6), 0 6px 24px rgba(108,99,255,0.45);
+    transform: translateY(-1px);
+  }
+  .btn:active { transform: scale(0.97); }
+
+  .btn-icon {
+    width: 26px; height: 26px;
+    border-radius: 9999px;
+    background: rgba(255,255,255,0.15);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 400; line-height: 1;
+    transition: transform 400ms cubic-bezier(0.32,0.72,0,1);
+  }
+  .btn:hover .btn-icon { transform: rotate(90deg); }
+
+  .btn.secondary {
+    background: rgba(255,255,255,0.05);
+    box-shadow: none;
+    border: 1px solid var(--border);
+    color: var(--muted2);
+    font-weight: 500;
+  }
+  .btn.secondary:hover {
+    background: rgba(255,255,255,0.08);
+    color: var(--text);
+    transform: none;
+    box-shadow: none;
+  }
+  .btn:disabled { opacity: .4; cursor: default; pointer-events: none; }
+
+  /* ── Main ── */
+  main {
+    position: relative;
+    z-index: 2;
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 36px 24px 80px;
+  }
+
+  @media (max-width: 768px) {
+    nav { margin: 10px 12px 0; border-radius: 16px; }
+    main { padding: 24px 16px 60px; }
+  }
+
+  /* ── Page header ── */
+  .page-header {
+    margin-bottom: 28px;
+    opacity: 0;
+    transform: translateY(16px);
+    animation: fadeUp 700ms cubic-bezier(0.32,0.72,0,1) 100ms forwards;
+  }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    border: 1px solid rgba(108,99,255,0.3);
+    background: rgba(108,99,255,0.08);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent2);
+    margin-bottom: 12px;
+  }
+  .dot-live {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 6px var(--ok);
+    animation: pulse 2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .page-header h2 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text);
+  }
+
+  /* ── Double-bezel card ── */
+  .card-outer {
+    padding: 1.5px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.03) 100%);
+    opacity: 0;
+    transform: translateY(20px);
+    animation: fadeUp 700ms cubic-bezier(0.32,0.72,0,1) 200ms forwards;
+  }
+  .card-inner {
+    border-radius: calc(16px - 1.5px);
+    background: var(--panel);
+    overflow: hidden;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07);
+  }
+
+  /* ── Table ── */
+  table { width: 100%; border-collapse: collapse; }
+  thead tr {
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    text-align: left;
+    padding: 11px 16px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
   tr:last-child td { border-bottom: 0; }
-  tr.stack-row { cursor: pointer; }
-  tr.stack-row:hover { background: #1c2128; }
-  .phase { display: inline-block; padding: 2px 10px; border-radius: 99px;
-           font-size: 12px; font-weight: 600; }
-  .phase.Ready       { color: var(--ok);   background: rgba(63,185,80,.12); }
-  .phase.Progressing { color: var(--warn); background: rgba(210,153,34,.12); }
-  .phase.Failed      { color: var(--err);  background: rgba(248,81,73,.12); }
-  .phase.Pending     { color: var(--pend); background: rgba(139,148,158,.12); }
-  .muted { color: var(--muted); }
-  .failmsg { color: var(--err); font-size: 12px; }
-  button {
-    background: var(--accent); color: #fff; border: 0; border-radius: 6px;
-    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
+
+  tr.stack-row {
+    cursor: pointer;
+    transition: background 300ms cubic-bezier(0.32,0.72,0,1);
   }
-  button.secondary { background: var(--border); }
-  button:disabled { opacity: .5; cursor: default; }
+  tr.stack-row:hover { background: rgba(255,255,255,0.03); }
+
+  .cell-ns { color: var(--muted2); font-size: 12px; }
+  .cell-name { font-weight: 600; letter-spacing: -0.01em; }
+  .cell-mode {
+    font-size: 11px;
+    color: var(--muted2);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .cell-count { font-variant-numeric: tabular-nums; }
+
+  /* ── Phase badges ── */
+  .phase {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .phase::before {
+    content: '';
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+  .phase.Ready    { color: var(--ok);   background: rgba(62,207,142,.1); border: 1px solid rgba(62,207,142,.2); }
+  .phase.Ready::before { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
+  .phase.Progressing { color: var(--warn); background: rgba(245,166,35,.1); border: 1px solid rgba(245,166,35,.2); }
+  .phase.Progressing::before { background: var(--warn); animation: pulse 1.4s ease-in-out infinite; }
+  .phase.Failed   { color: var(--err);  background: rgba(245,83,83,.1); border: 1px solid rgba(245,83,83,.2); }
+  .phase.Failed::before { background: var(--err); }
+  .phase.Pending  { color: var(--muted2); background: rgba(90,90,110,.1); border: 1px solid rgba(90,90,110,.2); }
+  .phase.Pending::before { background: var(--muted); }
+
+  .comp-phase { font-size: 12px; font-weight: 600; }
+  .comp-phase.Ready      { color: var(--ok); }
+  .comp-phase.Deploying,
+  .comp-phase.Pending    { color: var(--warn); }
+  .comp-phase.Failed     { color: var(--err); }
+
+  .failmsg { font-size: 11px; color: var(--err); margin-top: 4px; opacity: 0.8; }
+
+  /* ── Ready bar ── */
+  .ready-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 80px;
+  }
+  .bar-track {
+    flex: 1;
+    height: 4px;
+    border-radius: 9999px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 9999px;
+    background: var(--ok);
+    transition: width 600ms cubic-bezier(0.32,0.72,0,1);
+  }
+  .bar-fill.warn { background: var(--warn); }
+  .bar-fill.err  { background: var(--err); }
+  .bar-label { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--muted2); white-space: nowrap; }
+
+  /* ── Empty / error ── */
+  .empty-row td {
+    padding: 48px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .list-error {
+    margin-top: 12px;
+    color: var(--err);
+    font-size: 12px;
+    min-height: 18px;
+  }
+
+  /* ── Detail view ── */
+  #detail { display: none; }
+
+  .detail-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 20px;
+    opacity: 0;
+    transform: translateY(12px);
+    animation: fadeUp 600ms cubic-bezier(0.32,0.72,0,1) forwards;
+  }
+  .back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--muted2);
+    border-radius: 9999px;
+    padding: 5px 12px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 400ms cubic-bezier(0.32,0.72,0,1);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .back-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
+
+  .detail-title { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  .detail-sub { font-size: 12px; color: var(--muted2); margin-top: 3px; }
+
+  /* ── Dialog ── */
   dialog {
-    background: var(--panel); color: var(--text); border: 1px solid var(--border);
-    border-radius: 10px; padding: 24px; width: 460px;
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border-hi);
+    border-radius: 20px;
+    padding: 0;
+    width: 480px;
+    max-width: calc(100vw - 32px);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset;
+    overflow: hidden;
   }
-  dialog::backdrop { background: rgba(0,0,0,.6); }
-  dialog h2 { margin: 0 0 4px; font-size: 15px; }
-  dialog p { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
-  label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+  dialog::backdrop { background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); }
+
+  .dialog-header {
+    padding: 22px 24px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dialog-header h2 { font-size: 15px; font-weight: 700; letter-spacing: -0.01em; }
+  .dialog-header p  { margin-top: 5px; font-size: 12px; color: var(--muted2); line-height: 1.6; }
+
+  .dialog-body { padding: 20px 24px; }
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted2);
+  }
+  .field { margin-bottom: 16px; }
+
   input, select {
-    width: 100%; background: var(--bg); color: var(--text);
-    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 14px;
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    color: var(--text);
+    border: 1px solid var(--border-hi);
+    border-radius: 10px;
+    padding: 9px 12px;
+    font-family: inherit;
+    font-size: 13px;
+    transition: border-color 300ms cubic-bezier(0.32,0.72,0,1), box-shadow 300ms cubic-bezier(0.32,0.72,0,1);
+    outline: none;
+    -webkit-appearance: none;
   }
-  .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
-  .error { color: var(--err); font-size: 13px; margin-top: 8px; min-height: 18px; }
+  input:focus, select:focus {
+    border-color: rgba(108,99,255,0.6);
+    box-shadow: 0 0 0 3px rgba(108,99,255,0.12);
+  }
+  select { cursor: pointer; }
+
+  .dialog-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+  }
+
+  .field-error { color: var(--err); font-size: 11px; margin-top: 6px; min-height: 16px; }
+
   pre {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
-    padding: 16px; overflow: auto; max-height: 340px; font-size: 12px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    overflow: auto;
+    max-height: 260px;
+    font-size: 11px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--muted2);
+    line-height: 1.6;
+    margin-top: 12px;
   }
-  #detail { display: none; margin-top: 20px; }
-  #detail h2 { font-size: 14px; margin: 0 0 8px; }
-  .back { background: none; border: 0; color: var(--accent); cursor: pointer;
-          font-size: 13px; padding: 0; margin-bottom: 8px; }
-  .comp-phase.Ready { color: var(--ok); } .comp-phase.Deploying, .comp-phase.Pending { color: var(--pend); }
-  .comp-phase.Failed { color: var(--err); }
+
+  /* ── Toast ── */
   #toast {
-    position: fixed; bottom: 20px; right: 20px; background: var(--ok); color: #041008;
-    padding: 10px 18px; border-radius: 8px; font-weight: 600; display: none;
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 200;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface);
+    border: 1px solid var(--border-hi);
+    border-radius: 12px;
+    padding: 12px 16px;
+    font-size: 13px;
+    font-weight: 500;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    animation: slideUp 400ms cubic-bezier(0.32,0.72,0,1);
+  }
+  #toast.ok  { color: var(--ok); }
+  #toast.err { color: var(--err); }
+  #toast-icon { font-size: 16px; }
+
+  @keyframes slideUp {
+    from { transform: translateY(12px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  /* ── Entry animation ── */
+  @keyframes fadeUp {
+    to { opacity: 1; transform: translateY(0); }
   }
 </style>
 </head>
 <body>
-<header>
-  <h1>kubo <span>/ operator portal</span></h1>
-  <div class="row">
-    <span class="muted" id="updated"></span>
-    <button onclick="document.getElementById('create').showModal()">+ New stack</button>
-  </div>
-</header>
-<main>
-  <table id="stacks">
-    <thead><tr>
-      <th>Namespace</th><th>Stack</th><th>Mode</th><th>Phase</th>
-      <th>Components</th><th>Age</th>
-    </tr></thead>
-    <tbody id="rows"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
-  </table>
 
-  <div id="detail">
-    <button class="back" onclick="hideDetail()">← all stacks</button>
-    <h2 id="detail-title"></h2>
-    <p class="muted" id="detail-sub"></p>
-    <table>
-      <thead><tr><th>Component</th><th>Phase</th><th>Rev</th><th>Message</th></tr></thead>
-      <tbody id="comp-rows"></tbody>
-    </table>
+<nav>
+  <div class="nav-brand">
+    <div class="nav-logo">K</div>
+    <div class="nav-title">kubo <span>/ operator portal</span></div>
   </div>
-  <div class="error" id="list-error"></div>
+  <div class="nav-right">
+    <span id="updated"></span>
+    <button class="btn" onclick="document.getElementById('create').showModal()">
+      New stack
+      <span class="btn-icon">+</span>
+    </button>
+  </div>
+</nav>
+
+<main>
+  <!-- Stack list -->
+  <div id="list-view">
+    <div class="page-header">
+      <div class="eyebrow"><span class="dot-live"></span>Live</div>
+      <h2>Stacks</h2>
+    </div>
+
+    <div class="card-outer">
+      <div class="card-inner">
+        <table id="stacks">
+          <thead>
+            <tr>
+              <th>Namespace</th>
+              <th>Stack</th>
+              <th>Mode</th>
+              <th>Phase</th>
+              <th>Components</th>
+              <th>Age</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr class="empty-row"><td colspan="6">loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="list-error" id="list-error"></div>
+  </div>
+
+  <!-- Detail view -->
+  <div id="detail">
+    <div class="detail-head">
+      <button class="back-btn" onclick="hideDetail()">← All stacks</button>
+      <div>
+        <div class="detail-title" id="detail-title"></div>
+        <div class="detail-sub" id="detail-sub"></div>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:100ms">
+      <div class="card-inner">
+        <table>
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th>Phase</th>
+              <th>Rev</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody id="comp-rows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
 </main>
 
+<!-- Create dialog -->
 <dialog id="create">
-  <h2>Create stack from template</h2>
-  <p>Renders the <b>foundation</b> demo template (foundation-a reference)
-     into a new namespace with its Stack manifest.</p>
-  <label for="tenant">Tenant slug (namespace: foundation-&lt;slug&gt;)</label>
-  <input id="tenant" placeholder="e.g. demo-b" autocomplete="off">
-  <label for="mode">Deployment mode</label>
-  <select id="mode">
-    <option value="Direct" selected>Direct (embedded helm engine)</option>
-    <option value="Flux">Flux (helm-controller)</option>
-  </select>
-  <div class="error" id="create-error"></div>
-  <div class="actions">
-    <button class="secondary" onclick="preview()">Preview YAML</button>
-    <button class="secondary" onclick="this.closest('dialog').close()">Cancel</button>
-    <button id="create-btn" onclick="create()">Create</button>
+  <div class="dialog-header">
+    <h2>Create stack from template</h2>
+    <p>Renders the <b>foundation</b> demo template (foundation-a reference)
+       into a new namespace with its Stack manifest.</p>
   </div>
-  <pre id="preview" style="display:none"></pre>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="tenant">Tenant slug <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(namespace: foundation-&lt;slug&gt;)</span></label>
+      <input id="tenant" placeholder="e.g. demo-b" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="mode">Deployment mode</label>
+      <select id="mode">
+        <option value="Direct" selected>Direct — embedded helm engine</option>
+        <option value="Flux">Flux — helm-controller</option>
+      </select>
+    </div>
+    <div class="field-error" id="create-error"></div>
+    <pre id="preview" style="display:none"></pre>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="preview()">Preview YAML</button>
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="create-btn" onclick="create()">
+      Create stack
+      <span class="btn-icon" style="font-size:13px">↗</span>
+    </button>
+  </div>
 </dialog>
 
-<div id="toast"></div>
+<div id="toast">
+  <span id="toast-icon"></span>
+  <span id="toast-msg"></span>
+</div>
 
 <script>
 const api = async (path, opts) => {
@@ -136,22 +609,35 @@ async function refresh() {
   try {
     const stacks = await api('/api/stacks');
     const tb = document.getElementById('rows');
-    document.getElementById('updated').textContent = 'updated ' + new Date().toLocaleTimeString();
+    const t = new Date();
+    document.getElementById('updated').textContent =
+      'updated ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('list-error').textContent = '';
     if (!stacks.length) {
-      tb.innerHTML = '<tr><td colspan="6" class="muted">no stacks yet — create one from the template</td></tr>';
+      tb.innerHTML = '<tr class="empty-row"><td colspan="6">No stacks yet — create one from the template.</td></tr>';
       return;
     }
-    tb.innerHTML = stacks.map(s => `
+    tb.innerHTML = stacks.map(s => {
+      const ratio = s.total > 0 ? s.ready / s.total : 0;
+      const barClass = ratio === 1 ? '' : ratio > 0.5 ? 'warn' : 'err';
+      return `
       <tr class="stack-row" onclick="showDetail('${esc(s.namespace)}','${esc(s.name)}')">
-        <td>${esc(s.namespace)}</td>
-        <td><b>${esc(s.name)}</b></td>
-        <td class="muted">${esc(s.mode)}</td>
-        <td><span class="phase ${esc(s.phase)}">${esc(s.phase)}</span>
-            ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}</td>
-        <td>${s.ready}/${s.total}</td>
-        <td class="muted">${esc(s.age)}</td>
-      </tr>`).join('');
+        <td class="cell-ns">${esc(s.namespace)}</td>
+        <td class="cell-name">${esc(s.name)}</td>
+        <td class="cell-mode">${esc(s.mode)}</td>
+        <td>
+          <span class="phase ${esc(s.phase)}">${esc(s.phase)}</span>
+          ${s.failureMsg ? `<div class="failmsg">${esc(s.failureMsg)}</div>` : ''}
+        </td>
+        <td>
+          <div class="ready-bar">
+            <div class="bar-track"><div class="bar-fill ${barClass}" style="width:${Math.round(ratio*100)}%"></div></div>
+            <span class="bar-label">${s.ready}/${s.total}</span>
+          </div>
+        </td>
+        <td class="cell-mode">${esc(s.age)}</td>
+      </tr>`;
+    }).join('');
   } catch (e) {
     document.getElementById('list-error').textContent = e.message;
   }
@@ -160,25 +646,25 @@ async function refresh() {
 async function showDetail(ns, name) {
   try {
     const d = await api(`/api/stacks/${ns}/${name}`);
-    document.getElementById('stacks').style.display = 'none';
-    const det = document.getElementById('detail');
-    det.style.display = 'block';
-    document.getElementById('detail-title').textContent = `${ns}/${name}`;
+    document.getElementById('list-view').style.display = 'none';
+    document.getElementById('detail').style.display = 'block';
+    document.getElementById('detail-title').textContent = `${ns} / ${name}`;
     document.getElementById('detail-sub').textContent =
       `${d.phase} · ${d.mode} · ${d.ready}/${d.total} components ready · age ${d.age}`;
     document.getElementById('comp-rows').innerHTML = d.components.map(c => `
       <tr>
-        <td><b>${esc(c.name)}</b></td>
+        <td class="cell-name">${esc(c.name)}</td>
         <td><span class="comp-phase ${esc(c.phase)}">${esc(c.phase)}</span></td>
-        <td class="muted">${esc(String(c.revision || ''))}</td>
-        <td class="muted">${esc((c.message || '').slice(0, 200))}</td>
-      </tr>`).join('') || '<tr><td colspan="4" class="muted">no component status yet</td></tr>';
-  } catch (e) { toast(e.message); }
+        <td class="cell-mode">${esc(String(c.revision || ''))}</td>
+        <td class="cell-ns">${esc((c.message || '').slice(0, 200))}</td>
+      </tr>`).join('')
+      || '<tr class="empty-row"><td colspan="4">No component status yet.</td></tr>';
+  } catch (e) { toast(e.message, false); }
 }
 
 function hideDetail() {
   document.getElementById('detail').style.display = 'none';
-  document.getElementById('stacks').style.display = '';
+  document.getElementById('list-view').style.display = 'block';
 }
 
 async function preview() {
@@ -203,7 +689,7 @@ async function create() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tenant: tenantVal(), mode: document.getElementById('mode').value }),
     });
-    toast('stack created — operator will reconcile it shortly');
+    toast('Stack created — operator will reconcile shortly', true);
     document.getElementById('create').close();
     document.getElementById('preview').style.display = 'none';
     refresh();
@@ -212,11 +698,17 @@ async function create() {
 }
 
 const tenantVal = () => document.getElementById('tenant').value.trim();
-const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-function toast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg; t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3500);
+const esc = s => String(s)
+  .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  .replace(/'/g,'&#39;').replace(/"/g,'&quot;');
+
+function toast(msg, ok = true) {
+  const el = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  document.getElementById('toast-icon').textContent = ok ? '✓' : '✕';
+  el.className = ok ? 'ok' : 'err';
+  el.style.display = 'flex';
+  setTimeout(() => el.style.display = 'none', 3800);
 }
 
 refresh();
