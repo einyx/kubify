@@ -103,6 +103,19 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
 		}
 	}
+	if stack.Spec.GitRef != nil {
+		gitCharts, err := r.chartsFromGitRepository(ctx, &stack)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "GitPullFailed", err)
+		}
+		if bundleCharts == nil {
+			bundleCharts = gitCharts
+		} else {
+			for k, v := range gitCharts {
+				bundleCharts[k] = v
+			}
+		}
+	}
 
 	// Resolve the stack definition from StackRef or Inline.
 	var def platformv1alpha1.StackDefinition
@@ -267,10 +280,11 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Prune releases dropped from the stack (exclude/removed component). Compares
-	// against the last observed component set, so nothing outside this Stack is touched.
+	// against the spec component set, not the attempted statuses, so a component
+	// that fails mid-reconcile is not spuriously pruned.
 	desired := map[string]bool{}
-	for _, s := range statuses {
-		desired[s.Name] = true
+	for name := range byName {
+		desired[name] = true
 	}
 	for _, prev := range stack.Status.Components {
 		if desired[prev.Name] {
