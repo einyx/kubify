@@ -580,9 +580,14 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 			return false, err
 		}
 		dst := corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: m.to, Namespace: stack.Namespace},
-			Type:       src.Type,
-			Data:       src.Data,
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      m.to,
+				Namespace: stack.Namespace,
+				// Prevent Helm from resetting this secret on upgrade.
+				Annotations: map[string]string{"helm.sh/resource-policy": "keep"},
+			},
+			Type: src.Type,
+			Data: src.Data,
 		}
 		// Use Update if already exists so rotation propagates.
 		var existing corev1.Secret
@@ -595,6 +600,10 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 		} else if err == nil {
 			existing.Data = src.Data
 			existing.Type = src.Type
+			if existing.Annotations == nil {
+				existing.Annotations = map[string]string{}
+			}
+			existing.Annotations["helm.sh/resource-policy"] = "keep"
 			if uerr := r.Update(ctx, &existing); uerr != nil {
 				return false, fmt.Errorf("sync secret %s→%s: %w", m.from, m.to, uerr)
 			}
