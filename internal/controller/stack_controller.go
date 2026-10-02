@@ -222,8 +222,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if err != nil {
 				st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseFailed, Message: err.Error()}
 				statuses = append(statuses, st)
-				firstErr = err
-				break
+				if firstErr == nil {
+					firstErr = err
+				}
+				// Isolate: a chart-pull failure for one component must not
+				// starve every component after it in the order.
+				continue
 			}
 		}
 		if ch == nil {
@@ -373,6 +377,8 @@ func (r *StackReconciler) deployDirect(
 	byName map[string]platformv1alpha1.StackComponentSpec,
 ) ([]platformv1alpha1.ComponentStatus, error) {
 	var statuses []platformv1alpha1.ComponentStatus
+	var firstErr error
+	processed := map[string]bool{}
 
 	for _, name := range order {
 		comp := byName[name]
@@ -380,6 +386,7 @@ func (r *StackReconciler) deployDirect(
 		if isClusterComponent(comp) {
 			st.Scope = platformv1alpha1.ComponentScopeCluster
 		}
+		processed[name] = true
 
 		pullSecret := ""
 		if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
@@ -391,7 +398,12 @@ func (r *StackReconciler) deployDirect(
 		if err != nil {
 			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
-			return statuses, err // dependency order: stop at first failure
+			// Isolate the failure: keep deploying later components instead of
+			// aborting the pass (a stuck release must not starve its siblings).
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
@@ -401,11 +413,11 @@ func (r *StackReconciler) deployDirect(
 			if adopted, done, aerr := r.adoptClusterRelease(name, targetNS); done || aerr != nil {
 				if aerr != nil {
 					adopted.Phase, adopted.Message = platformv1alpha1.ComponentPhaseFailed, aerr.Error()
+					if firstErr == nil {
+						firstErr = aerr
+					}
 				}
 				statuses = append(statuses, adopted)
-				if aerr != nil {
-					return statuses, aerr
-				}
 				continue
 			}
 		}
@@ -413,7 +425,10 @@ func (r *StackReconciler) deployDirect(
 		if err != nil {
 			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
 			statuses = append(statuses, st)
-			return statuses, err
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
 		}
 
 		st.Phase = platformv1alpha1.ComponentPhaseReady
@@ -427,10 +442,13 @@ func (r *StackReconciler) deployDirect(
 	}
 
 	// Carry over status of components not yet reached this pass.
-	for _, name := range order[len(statuses):] {
+	for _, name := range order {
+		if processed[name] {
+			continue
+		}
 		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhasePending})
 	}
-	return statuses, nil
+	return statuses, firstErr
 }
 
 func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stack, reason string, err error) error {
