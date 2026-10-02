@@ -31,7 +31,7 @@ spec:
     - from: foundation-b-dai-backend
       to: dai-backend
     - from: foundation-b-dai-frontend
-      to: dai-frontend
+      to: dai-frontend-auth0
     - from: foundation-b-foundation-scheduler-user-credentials
       to: foundation-scheduler-user-credentials
   componentValues:
