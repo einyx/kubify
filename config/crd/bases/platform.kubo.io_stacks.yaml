@@ -101,6 +101,88 @@ spec:
                 items:
                   type: string
                 type: array
+              extraBundles:
+                description: |-
+                  ExtraBundles lists additional OCI bundle artifacts to merge into the chart
+                  map alongside Bundle. Charts in later entries override earlier ones.
+                items:
+                  description: BundleSource is an OCI artifact that carries the stack's
+                    charts.
+                  properties:
+                    secretRef:
+                      description: |-
+                        SecretRef is a kubernetes.io/dockerconfigjson Secret used to pull the bundle.
+                        Required for private registries such as GHCR.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    url:
+                      description: |-
+                        URL is an OCI reference, including the tag or digest.
+                        Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+                      minLength: 1
+                      type: string
+                  required:
+                  - url
+                  type: object
+                type: array
+              gitRef:
+                description: |-
+                  GitRef points to a Flux GitRepository in the same namespace.
+                  Kubo reads status.artifact.url to fetch charts without cloning git directly,
+                  reusing Flux's existing auth secrets.
+                properties:
+                  path:
+                    description: |-
+                      Path is the file inside the cloned repo to use as the charts archive.
+                      Must be a .tgz containing Helm charts. Defaults to "charts.tgz".
+                    type: string
+                  provider:
+                    description: |-
+                      Provider enables cloud-native auth. Only "azure" is supported — uses
+                      workload identity (IMDS) to obtain an Azure DevOps access token.
+                      When set, SecretRef is ignored.
+                    type: string
+                  ref:
+                    description: Ref is the branch, tag, or commit SHA to check out.
+                      Defaults to "main".
+                    type: string
+                  secretRef:
+                    description: |-
+                      SecretRef names a Secret in the same namespace used for git authentication.
+                      For HTTPS: must contain "username" and "password" keys.
+                      For SSH: must contain an "identity" key (private key PEM).
+                      Ignored when Provider is set.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  url:
+                    description: |-
+                      URL is the HTTPS or SSH git repository URL.
+                      Example: https://github.com/org/repo.git
+                    minLength: 1
+                    type: string
+                required:
+                - url
+                type: object
               inline:
                 description: |-
                   Inline embeds the stack definition directly, so a Stack is a single

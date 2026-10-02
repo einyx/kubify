@@ -41,6 +41,11 @@ type StackSpec struct {
 	// +optional
 	Bundle *BundleSource `json:"bundle,omitempty"`
 
+	// ExtraBundles lists additional OCI bundle artifacts to merge into the chart
+	// map alongside Bundle. Charts in later entries override earlier ones.
+	// +optional
+	ExtraBundles []BundleSource `json:"extraBundles,omitempty"`
+
 	// Exclude names bundle charts to skip. Only applied when installing directly
 	// from a Bundle (no StackRef/Inline).
 	// +optional
@@ -84,6 +89,42 @@ type StackSpec struct {
 	// `kubectl create secret generic foundation-seeds --from-env-file=.env`).
 	// +optional
 	SeedVault *VaultSeed `json:"seedVault,omitempty"`
+
+	// GitRef points to a Flux GitRepository in the same namespace.
+	// Kubo reads status.artifact.url to fetch charts without cloning git directly,
+	// reusing Flux's existing auth secrets.
+	// +optional
+	GitRef *GitRefSource `json:"gitRef,omitempty"`
+}
+
+// GitRefSource references a git repository as a chart source.
+type GitRefSource struct {
+	// URL is the HTTPS or SSH git repository URL.
+	// Example: https://github.com/org/repo.git
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
+
+	// Ref is the branch, tag, or commit SHA to check out. Defaults to "main".
+	// +optional
+	Ref string `json:"ref,omitempty"`
+
+	// Provider enables cloud-native auth. Only "azure" is supported — uses
+	// workload identity (IMDS) to obtain an Azure DevOps access token.
+	// When set, SecretRef is ignored.
+	// +optional
+	Provider string `json:"provider,omitempty"`
+
+	// SecretRef names a Secret in the same namespace used for git authentication.
+	// For HTTPS: must contain "username" and "password" keys.
+	// For SSH: must contain an "identity" key (private key PEM).
+	// Ignored when Provider is set.
+	// +optional
+	SecretRef *corev1.LocalObjectReference `json:"secretRef,omitempty"`
+
+	// Path is the file inside the cloned repo to use as the charts archive.
+	// Must be a .tgz containing Helm charts. Defaults to "charts.tgz".
+	// +optional
+	Path string `json:"path,omitempty"`
 }
 
 // VaultSeed configures automatic seeding of the per-tenant Vault.
