@@ -484,6 +484,10 @@ spec:
       - name: acr-pull-secret
       virtualService:
         enabled: false
+      externalSecret:
+        enabled: true
+        target:
+          name: dai-frontend
       env:
       - name: NEXT_PUBLIC_BASE_PATH
         value: /dai
@@ -493,9 +497,6 @@ spec:
         value: https://product-b.demo.kubify.product/dai
       - name: API_URL
         value: http://dai-backend:8000
-      extraEnvFrom:
-      - secretRef:
-          name: dai-frontend-auth0
 
     watcher:
       replicaCount: 1
