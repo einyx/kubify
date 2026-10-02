@@ -66,6 +66,19 @@ func (px *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (px *Proxy) handleTunnel(w http.ResponseWriter, r *http.Request) {
+	// 0. Kill switch — deny-all before any other check (CONNECT tunnels
+	// otherwise bypass the scanner entirely in raw mode).
+	if px.scanner.KillSwitch != nil && px.scanner.KillSwitch.Tripped() {
+		px.scanner.Auditor.Log(Event{
+			Method:   r.Method,
+			URL:      r.Host,
+			Action:   "block",
+			Findings: []Finding{{Kind: "killswitch", Pattern: "deny-all"}},
+		})
+		http.Error(w, "agentfw: kill switch active — all traffic blocked", http.StatusForbidden)
+		return
+	}
+
 	if px.scanner.Policy.BlockPrivateEgress && IsPrivateHost(r.Host) {
 		px.scanner.Auditor.Log(Event{
 			Method:   r.Method,
