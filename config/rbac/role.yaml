@@ -92,6 +92,7 @@ rules:
   - platform.kubo.io
   resources:
   - stackdefinitions
+  - stackreleases
   - stacks
   verbs:
   - create
@@ -112,6 +113,7 @@ rules:
   - platform.kubo.io
   resources:
   - stackdefinitions/status
+  - stackreleases/status
   - stacks/status
   verbs:
   - get

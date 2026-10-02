@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/go-containerregistry/pkg/crane"
 	godigest "github.com/opencontainers/go-digest"
 	specs "github.com/opencontainers/image-spec/specs-go"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
@@ -31,17 +32,25 @@ func main() {
 	push := flag.String("push", "", "OCI reference to push, e.g. ghcr.io/org/product-bundle:0.0.9")
 	outDir := flag.String("out", "", "write charts.tgz + bundle.json to this directory instead of pushing")
 	imagesFile := flag.String("images", "", "YAML/JSON file of curated image refs: {images: [{ref: ghcr.io/org/foo:1.0}, ...]}. Overrides chart-default scan.")
+	mirror := flag.String("mirror", "", "registry host to copy images to, e.g. myacr.azurecr.io/mirror. Images are copied and bundle.json refs are rewritten.")
+	namePrefix := flag.String("name-prefix", "", "prefix prepended to each chart name in the bundle (e.g. 'dai-' → 'dai-backend')")
 	flag.Parse()
 	if (*push == "" && *outDir == "") || flag.NArg() == 0 {
-		fmt.Fprintln(os.Stderr, "usage: kubo-bundle (--push <ref> | --out <dir>) <chart-dir> [<chart-dir> ...]")
+		fmt.Fprintln(os.Stderr, "usage: kubo-bundle (--push <ref> | --out <dir>) [--mirror <registry>] [--name-prefix <p>] <chart-dir> [<chart-dir> ...]")
 		os.Exit(2)
 	}
-	chartsTGZ, images, err := build(flag.Args())
+	chartsTGZ, images, err := build(flag.Args(), *namePrefix)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if *imagesFile != "" {
 		images, err = loadImages(*imagesFile)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *mirror != "" {
+		images, err = mirrorImages(context.Background(), images, *mirror)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -84,7 +93,7 @@ func loadImages(path string) ([]imageRef, error) {
 	return doc.Images, nil
 }
 
-func build(dirs []string) ([]byte, []imageRef, error) {
+func build(dirs []string, namePrefix string) ([]byte, []imageRef, error) {
 	var buf bytes.Buffer
 	gw := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gw)
@@ -96,9 +105,10 @@ func build(dirs []string) ([]byte, []imageRef, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("load %s: %w", dir, err)
 		}
-		// Copy the chart directory into the outer tar under its chart name so the
+		chartKey := namePrefix + ch.Name()
+		// Copy the chart directory into the outer tar under its (prefixed) chart name so the
 		// controller's loadCharts walk finds Chart.yaml.
-		if err := addDir(tw, dir, ch.Name()); err != nil {
+		if err := addDir(tw, dir, chartKey); err != nil {
 			return nil, nil, fmt.Errorf("tar %s: %w", dir, err)
 		}
 		for _, ref := range extractImages(ch.Values) {
@@ -172,6 +182,37 @@ func extractImages(v any) []string {
 	}
 	walk(v)
 	return out
+}
+
+// mirrorImages copies each image to the mirror registry and returns updated refs.
+func mirrorImages(ctx context.Context, images []imageRef, mirrorHost string) ([]imageRef, error) {
+	out := make([]imageRef, 0, len(images))
+	for _, img := range images {
+		src := img.Ref
+		// Build dest: mirrorHost + "/" + last two path components of src (repo:tag).
+		// e.g. ghcr.io/einyx/foo:1.0 → myacr.azurecr.io/mirror/foo:1.0
+		dst := mirrorDest(mirrorHost, src)
+		fmt.Printf("copying %s → %s\n", src, dst)
+		if err := crane.Copy(src, dst, crane.WithContext(ctx)); err != nil {
+			return nil, fmt.Errorf("copy %s: %w", src, err)
+		}
+		out = append(out, imageRef{Ref: dst})
+	}
+	return out, nil
+}
+
+// mirrorDest builds <mirrorHost>/<name>:<tag> from a full image ref.
+func mirrorDest(host, src string) string {
+	// strip registry prefix
+	name := src
+	if i := strings.Index(src, "/"); i >= 0 {
+		// check if first segment looks like a registry (contains . or :)
+		first := src[:i]
+		if strings.ContainsAny(first, ".:") {
+			name = src[i+1:]
+		}
+	}
+	return host + "/" + name
 }
 
 func pushOCI(ctx context.Context, ref string, chartsTGZ, bundleJSON []byte) error {

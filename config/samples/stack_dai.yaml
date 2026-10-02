@@ -1,0 +1,16 @@
+# Deploy the DAI stack into namespace "team-alpha" (namespace is the tenant boundary).
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: dai
+  namespace: team-alpha
+spec:
+  stackRef: dai
+  values:
+    components:
+      backend:
+        replicaCount: 2
+  componentValues:
+    frontend:
+      ingress:
+        host: team-alpha.dai.kubo.io

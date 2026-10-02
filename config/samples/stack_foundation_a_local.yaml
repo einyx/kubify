@@ -1,0 +1,259 @@
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: product
+  namespace: product-a
+spec:
+  bundle:
+    secretRef:
+      name: ghcr
+    url: oci://ghcr.io/einyx/product-bundle:0.0.17
+  componentValues:
+    backend:
+      config:
+        auth0:
+          audience: https://dev.kubify.dev
+          client_id: 6Hi8cQPLy3zpaNWvz07BFwb2yZX08eYD
+          domain: auth0-stg.kubify.app
+          enabled: true
+        kafka:
+          cluster_host: kafka:9092
+        scheduler:
+          host: scheduler
+          port: 65434
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+      env:
+      - name: MX_AUTH0_CLIENT_ID
+        value: 6Hi8cQPLy3zpaNWvz07BFwb2yZX08eYD
+      - name: MX_POSTGRES_PASSWORD
+        value: product
+      - name: MX_SECRET_KEY
+        value: dev-local-secret
+      - name: MX_S3_ACCESS_KEY_ID
+        value: local
+      - name: MX_S3_SECRET_ACCESS_KEY
+        value: local
+      - name: MX_S3_ENDPOINT_LOCATION
+        value: http://storage-engine:8080
+      extraEnvFrom:
+      - secretRef:
+          name: postgres
+      - secretRef:
+          name: backend-auth0
+    frontend:
+      env:
+        internal_api_url: http://backend/
+        auth0:
+          audience: https://dev.kubify.dev
+          baseurl: http://product-a.localtest.me
+          client_id: 6Hi8cQPLy3zpaNWvz07BFwb2yZX08eYD
+          domain: auth0-stg.kubify.app
+          enabled: 'true'
+          issuer_baseurl: https://auth0-stg.kubify.app
+          # NOTE: auth0.secret is intentionally NOT stored here. Apply it
+          # out-of-band to the Stack CR (env.auth0.secret) in each namespace.
+      virtualService:
+        enabled: true
+        gateway: product-gateway
+        host: product-a.localtest.me
+        http:
+          cors:
+            allowHeaders:
+            - X-Account
+            - Content-Type
+            - Authorization
+            allowMethods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            allowOrigins:
+            - exact: https://product-a.localtest.me
+          destination:
+            host: frontend
+            port: 80
+          matchPrefix: /
+          name: frontend
+          responseHeaders:
+            StrictTransportSecurity: max-age=31536000
+          timeout: 50s
+        name: frontend
+    kafka:
+      extraConfig: ''
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/kafka
+      listeners:
+        client:
+          protocol: PLAINTEXT
+    opa:
+      volumeMounts:
+      - mountPath: /policies
+        name: opa-policies
+        readOnly: true
+      volumes:
+      - configMap:
+          name: opa-policies
+        name: opa-policies
+    postgres:
+      auth:
+        database: product
+        password: product
+        username: product
+      global:
+        security:
+          allowInsecureImages: true
+      image:
+        repository: bitnamilegacy/postgresql
+      primary:
+        initdb:
+          scripts:
+            grant_public.sql: |
+              GRANT CREATE ON SCHEMA public TO product;
+              CREATE EXTENSION IF NOT EXISTS pg_trgm;
+              CREATE EXTENSION IF NOT EXISTS vector;
+    processor:
+      config:
+        kafka:
+          cluster_host: kafka:9092
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+      env:
+      - name: MX_POSTGRES_PASSWORD
+        secretKey: MX_POSTGRES_PASSWORD
+        secretName: processor-local
+      - name: MX_S3_ACCESS_KEY_ID
+        secretKey: MX_S3_ACCESS_KEY_ID
+        secretName: processor-local
+      - name: MX_S3_SECRET_ACCESS_KEY
+        secretKey: MX_S3_SECRET_ACCESS_KEY
+        secretName: processor-local
+      externalSecret:
+        enabled: false
+      imagePullSecrets:
+      - name: ghcr
+      migrations:
+        enabled: false
+      serviceAccount:
+        name: product-processor
+    scheduler:
+      config:
+        MX_KAFKA_CLUSTER_HOST: kafka:9092
+        MX_POSTGRES_DATABASE: product
+        MX_POSTGRES_HOST: postgres-postgresql
+        MX_POSTGRES_PORT: 5432
+        MX_POSTGRES_USER: product
+        MX_SCHEDULER_HOST: 0.0.0.0
+      imagePullSecrets:
+      - name: ghcr
+      initContainer:
+        enabled: true
+      secret:
+        ACCESS_KEY_ID: local
+        MX_POSTGRES_PASSWORD: product
+        MX_SECRET_KEY: dev-local-secret
+        SECRET_ACCESS_KEY: local
+    storage-engine:
+      config:
+        storage:
+          provider: filesystem
+    watcher:
+      config:
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+      fullnameOverride: product-a-watcher
+  exclude:
+  - vault-operator
+  - watcher-v2
+  inline:
+    components:
+    - chartPullSecretRef:
+        name: ghcr
+      chartRef:
+        chartName: postgresql
+        chartVersion: 16.7.27
+        repoURL: oci://ghcr.io/einyx/charts
+      name: postgres
+      scope: Namespaced
+    - chartRef:
+        chartName: storage-engine
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - postgres
+      name: storage-engine
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: ghcr
+      chartRef:
+        chartName: kafka
+        chartVersion: 29.3.14
+        repoURL: oci://ghcr.io/einyx/charts
+      dependsOn:
+      - postgres
+      name: kafka
+      scope: Namespaced
+    - chartRef:
+        chartName: backend
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - postgres
+      - kafka
+      name: backend
+      scope: Namespaced
+    - chartRef:
+        chartName: frontend
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - backend
+      name: frontend
+      scope: Namespaced
+    - chartRef:
+        chartName: watcher
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - backend
+      name: watcher
+      scope: Namespaced
+    - chartRef:
+        chartName: opa
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - backend
+      name: opa
+      scope: Namespaced
+    - chartRef:
+        chartName: scheduler
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - backend
+      name: scheduler
+      scope: Namespaced
+    - chartRef:
+        chartName: processor
+        repoURL: https://charts.example.invalid/product-charts
+      dependsOn:
+      - backend
+      name: processor
+      scope: Namespaced
+    description: Product data mesh platform (tenant A)
+    title: Product A
+  mode: Direct
+  operators:
+    agentFW: true
+    certManager: true
+    istio: true
+    spark: true
+    vault: true
+
