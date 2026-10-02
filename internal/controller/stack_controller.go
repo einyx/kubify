@@ -103,6 +103,23 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
 		}
 	}
+	for _, extra := range stack.Spec.ExtraBundles {
+		ec, ei, err := r.chartsFromBundleSource(ctx, &stack, extra)
+		if err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BundlePullFailed", err)
+		}
+		if bundleCharts == nil {
+			bundleCharts = ec
+			bundleImages = ei
+		} else {
+			for k, v := range ec {
+				bundleCharts[k] = v
+			}
+			for k, v := range ei {
+				bundleImages[k] = v
+			}
+		}
+	}
 	if stack.Spec.GitRef != nil {
 		gitCharts, err := r.chartsFromGitRepository(ctx, &stack)
 		if err != nil {
@@ -475,6 +492,11 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 	pullNames := map[string]struct{}{}
 	if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
 		pullNames[stack.Spec.Bundle.SecretRef.Name] = struct{}{}
+	}
+	for _, extra := range stack.Spec.ExtraBundles {
+		if extra.SecretRef != nil && extra.SecretRef.Name != "" {
+			pullNames[extra.SecretRef.Name] = struct{}{}
+		}
 	}
 	if stack.Spec.Inline != nil {
 		for _, comp := range stack.Spec.Inline.Components {

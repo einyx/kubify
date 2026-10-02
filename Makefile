@@ -125,12 +125,21 @@ run: manifests generate fmt vet ## Run a controller from your host.
 # More info: https://docs.docker.com/develop/develop-images/build_enhancements/
 # Charts packed into the OCI bundle. scheduler and processor must stay in this list.
 CHARTS_ROOT ?= ../foundation-charts
+DAI_CHARTS_ROOT ?= ../dai-charts
 BUNDLE_CHARTS := backend frontend watcher opa storage-engine vault-operator foundation-bootstrap scheduler processor
+DAI_BUNDLE_CHARTS := backend frontend
 BUNDLE_REF ?= ghcr.io/meshxdata/foundation-bundle:0.0.14
+DAI_BUNDLE_REF ?= ghcr.io/meshxdata/dai-bundle:0.0.1
 
 .PHONY: bundle
-bundle: ## Package charts (including scheduler and processor) and push the OCI bundle.
-	go run ./cmd/bundle --push $(BUNDLE_REF) --images config/samples/bundle_images.yaml $(addprefix $(CHARTS_ROOT)/,$(BUNDLE_CHARTS))
+bundle: ## Package foundation charts and push the OCI bundle.
+	go run ./cmd/bundle --push $(BUNDLE_REF) --images config/samples/bundle_images.yaml \
+		$(addprefix $(CHARTS_ROOT)/,$(BUNDLE_CHARTS))
+
+.PHONY: dai-bundle
+dai-bundle: ## Package dai charts and push to the dai OCI bundle.
+	go run ./cmd/bundle --push $(DAI_BUNDLE_REF) \
+		$(addprefix $(DAI_CHARTS_ROOT)/,$(DAI_BUNDLE_CHARTS))
 
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
