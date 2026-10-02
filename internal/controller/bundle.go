@@ -34,7 +34,11 @@ type bundleImage struct {
 }
 
 func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv1alpha1.Stack) (map[string]*chart.Chart, map[string]bundleImage, error) {
-	ref, err := parseOCI(stack.Spec.Bundle.URL)
+	return r.chartsFromBundleSource(ctx, stack, *stack.Spec.Bundle)
+}
+
+func (r *StackReconciler) chartsFromBundleSource(ctx context.Context, stack *platformv1alpha1.Stack, src platformv1alpha1.BundleSource) (map[string]*chart.Chart, map[string]bundleImage, error) {
+	ref, err := parseOCI(src.URL)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -45,11 +49,11 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 	repo.Client = &auth.Client{
 		Client:     auth.DefaultClient.Client,
 		Cache:      auth.NewCache(),
-		Credential: r.bundleCredential(ctx, stack, ref.Registry),
+		Credential: r.bundleCredentialFor(ctx, stack, src, ref.Registry),
 	}
 	desc, err := repo.Resolve(ctx, ref.Reference)
 	if err != nil {
-		return nil, nil, fmt.Errorf("resolve bundle %s: %w", stack.Spec.Bundle.URL, err)
+		return nil, nil, fmt.Errorf("resolve bundle %s: %w", src.URL, err)
 	}
 	// ponytail: cache by digest — avoids re-fetching the same bundle for every tenant stack
 	cacheKey := desc.Digest.String()
@@ -82,7 +86,7 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 		}
 	}
 	if layer == nil {
-		return nil, nil, fmt.Errorf("bundle %s has no %s layer", stack.Spec.Bundle.URL, bundleChartsLayer)
+		return nil, nil, fmt.Errorf("bundle %s has no %s layer", src.URL, bundleChartsLayer)
 	}
 	blob, err := repo.Fetch(ctx, *layer)
 	if err != nil {
@@ -102,7 +106,7 @@ func (r *StackReconciler) chartsFromBundle(ctx context.Context, stack *platformv
 		return nil, nil, err
 	}
 	r.bundleCache.Store(cacheKey, bundleCacheEntry{charts: charts, images: images})
-	log.FromContext(ctx).Info("bundle parsed", "url", stack.Spec.Bundle.URL, "charts", len(charts), "images", len(images))
+	log.FromContext(ctx).Info("bundle parsed", "url", src.URL, "charts", len(charts), "images", len(images))
 	return charts, images, nil
 }
 
@@ -294,12 +298,16 @@ func applyBundleImage(values map[string]interface{}, img bundleImage, pullSecret
 }
 
 func (r *StackReconciler) bundleCredential(ctx context.Context, stack *platformv1alpha1.Stack, registryHost string) auth.CredentialFunc {
+	return r.bundleCredentialFor(ctx, stack, *stack.Spec.Bundle, registryHost)
+}
+
+func (r *StackReconciler) bundleCredentialFor(ctx context.Context, stack *platformv1alpha1.Stack, src platformv1alpha1.BundleSource, registryHost string) auth.CredentialFunc {
 	return func(context.Context, string) (auth.Credential, error) {
-		if stack.Spec.Bundle.SecretRef == nil || stack.Spec.Bundle.SecretRef.Name == "" {
+		if src.SecretRef == nil || src.SecretRef.Name == "" {
 			return auth.EmptyCredential, nil
 		}
 		var secret corev1.Secret
-		if err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: stack.Spec.Bundle.SecretRef.Name}, &secret); err != nil {
+		if err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: src.SecretRef.Name}, &secret); err != nil {
 			return auth.EmptyCredential, err
 		}
 		raw := secret.Data[".dockerconfigjson"]
