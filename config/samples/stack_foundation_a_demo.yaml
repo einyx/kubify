@@ -107,7 +107,7 @@ spec:
       env:
         host: ""
         api_url: ""
-        internal_api_url: http://backend:8000/
+        internal_api_url: http://backend/
         api_proxy_prefix: "api"
         foundation_env: ""
         auth0:
