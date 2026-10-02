@@ -31,7 +31,7 @@ spec:
     - from: product-b-dai-backend
       to: dai-backend
     - from: product-b-dai-frontend
-      to: dai-frontend-auth0
+      to: dai-frontend
     - from: product-b-product-scheduler-user-credentials
       to: product-scheduler-user-credentials
   componentValues:

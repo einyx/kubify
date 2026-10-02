@@ -31,7 +31,7 @@ spec:
     - from: product-a-dai-backend
       to: dai-backend
     - from: product-a-dai-frontend
-      to: dai-frontend-auth0
+      to: dai-frontend
   componentValues:
     backend:
       image:
