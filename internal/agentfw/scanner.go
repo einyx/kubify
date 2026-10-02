@@ -81,13 +81,43 @@ func (s *Scanner) InspectResponse(resp *http.Response) error {
 	if resp.Body == nil {
 		return nil
 	}
+	scannedTotal.Inc()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20)) // 4 MB cap
 	resp.Body.Close()
 	if err != nil {
 		return err
 	}
+	bodyStr := string(body)
 
-	findings := ScanInjection(string(body))
+	findings := ScanInjection(bodyStr)
+
+	// DLP on response bodies: an LLM can echo secrets from retrieved context
+	// or tool output. Same action as requests — redact (default) or block.
+	// Kept separate from injection findings: DLP hits follow DLPAction
+	// (redact/block), they must not trip the injection-block branch.
+	dlpFindings := ScanDLP(bodyStr)
+	if s.Policy.DLPAction == "block" && len(dlpFindings) > 0 {
+		s.Auditor.Log(Event{
+			Method:   resp.Request.Method,
+			URL:      resp.Request.URL.String(),
+			Action:   "block",
+			Findings: dlpFindings,
+		})
+		bodyStr = "agentfw: DLP block on response body"
+		resp.Header.Del("Content-Length")
+		resp.Body = io.NopCloser(strings.NewReader(bodyStr))
+		resp.ContentLength = int64(len(bodyStr))
+		return nil
+	}
+	if len(dlpFindings) > 0 {
+		bodyStr = Redact(bodyStr)
+		s.Auditor.Log(Event{
+			Method:   resp.Request.Method,
+			URL:      resp.Request.URL.String(),
+			Action:   "redact",
+			Findings: dlpFindings,
+		})
+	}
 
 	// Session taint escalation
 	sessionAction := ""
@@ -120,8 +150,8 @@ func (s *Scanner) InspectResponse(resp *http.Response) error {
 		return err
 	}
 
-	resp.Body = io.NopCloser(bytes.NewReader(body))
-	resp.ContentLength = int64(len(body))
+	resp.Body = io.NopCloser(bytes.NewReader([]byte(bodyStr)))
+	resp.ContentLength = int64(len(bodyStr))
 	return nil
 }
 

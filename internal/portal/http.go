@@ -3,7 +3,9 @@ package portal
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 )
 
 // Mux returns the portal HTTP handler:
@@ -13,10 +15,15 @@ import (
 //	GET  /api/stacks/{ns}/{name} component-level detail
 //	GET  /api/template?tenant=x  rendered template YAML (dry run)
 //	POST /api/stacks             {"tenant":"x","mode":"Direct"} → create
+//
+// The portal is unauthenticated by design (it is a local operator tool):
+// requests whose Host is not a loopback form are rejected, which defeats
+// DNS-rebinding drive-by attacks against a developer's kubeconfig.
 func (p *Portal) Mux() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Write([]byte(p.GetIndexHTML()))
 	})
 	mux.HandleFunc("GET /api/stacks", func(w http.ResponseWriter, r *http.Request) {
@@ -32,7 +39,8 @@ func (p *Portal) Mux() http.Handler {
 			Tenant string `json:"tenant"`
 			Mode   string `json:"mode"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
 			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
 			return
 		}
@@ -49,7 +57,29 @@ func (p *Portal) Mux() http.Handler {
 		d, err := p.GetStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
 		respond(w, r, d, err)
 	})
-	return mux
+	return loopbackHostOnly(mux)
+}
+
+// loopbackHostOnly rejects requests whose Host header is not a loopback
+// form. DNS-rebinding attacks make a browser send an attacker-chosen Host
+// while connecting to 127.0.0.1; blocking non-loopback Hosts closes that
+// route without breaking normal local use.
+func loopbackHostOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if host != "localhost" {
+			if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+				w.WriteHeader(http.StatusForbidden)
+				w.Write([]byte(`{"error":"portal: loopback access only"}`))
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func respond(w http.ResponseWriter, r *http.Request, v any, err error) {
