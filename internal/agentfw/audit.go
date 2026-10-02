@@ -36,6 +36,7 @@ func (a *Auditor) WithSigner(s *Signer) *Auditor { a.signer = s; return a }
 
 func (a *Auditor) Log(ev Event) {
 	ev.Time = time.Now().UTC().Format(time.RFC3339)
+	observeEvent(ev)
 	b, err := json.Marshal(ev)
 	if err != nil {
 		log.Printf("agentfw audit marshal: %v", err)

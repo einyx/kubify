@@ -14,8 +14,8 @@ import (
 	"github.com/einyx/kubo/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/apimachinery/pkg/types"
+	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/yaml"
@@ -50,14 +50,14 @@ func NewInCluster() (*Portal, error) {
 
 // StackSummary is one row in the stacks table.
 type StackSummary struct {
-	Namespace   string `json:"namespace"`
-	Name        string `json:"name"`
-	Mode        string `json:"mode"`
-	Phase       string `json:"phase"`
-	Ready       int    `json:"ready"`
-	Total       int    `json:"total"`
-	Age         string `json:"age"`
-	FailureMsg  string `json:"failureMsg,omitempty"`
+	Namespace  string `json:"namespace"`
+	Name       string `json:"name"`
+	Mode       string `json:"mode"`
+	Phase      string `json:"phase"`
+	Ready      int    `json:"ready"`
+	Total      int    `json:"total"`
+	Age        string `json:"age"`
+	FailureMsg string `json:"failureMsg,omitempty"`
 }
 
 // GetIndexHTML returns the embedded single-page UI.
@@ -107,10 +107,10 @@ type StackDetail struct {
 
 // ComponentView is one component row.
 type ComponentView struct {
-	Name    string `json:"name"`
-	Phase   string `json:"phase"`
-	Revision int   `json:"revision,omitempty"`
-	Message string `json:"message,omitempty"`
+	Name     string `json:"name"`
+	Phase    string `json:"phase"`
+	Revision int    `json:"revision,omitempty"`
+	Message  string `json:"message,omitempty"`
 }
 
 // GetStack returns the component-level status of one stack.
@@ -253,7 +253,8 @@ func truncate(s string, n int) string {
 	return s[:n] + "…"
 }
 
-func since(t time.Time) string {	d := time.Since(t)
+func since(t time.Time) string {
+	d := time.Since(t)
 	switch {
 	case d < time.Minute:
 		return fmt.Sprintf("%ds", int(d.Seconds()))

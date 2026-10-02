@@ -26,7 +26,7 @@ const (
 
 func isClusterOperator(name string) bool {
 	switch name {
-	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres", "cert-manager":
+	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres", "cert-manager", "training-operator":
 		return true
 	default:
 		return false
@@ -96,6 +96,14 @@ func kubegresChart() platformv1alpha1.ChartRef {
 	}
 }
 
+func kubeflowTrainingOperatorChart() platformv1alpha1.ChartRef {
+	return platformv1alpha1.ChartRef{
+		RepoURL:      "oci://ghcr.io/kubeflow/charts",
+		ChartName:    "training-operator",
+		ChartVersion: "v1.8.1",
+	}
+}
+
 func istioGatewayChart() platformv1alpha1.ChartRef {
 	return platformv1alpha1.ChartRef{
 		RepoURL:      "https://blob.istio.io/istio-release/charts",
@@ -120,6 +128,7 @@ func (r *StackReconciler) reconcileOperators(ctx context.Context, stack *platfor
 		{"cert-manager", stack.Spec.Operators != nil && stack.Spec.Operators.CertManager},
 		{"kubegres", stack.Spec.Operators != nil && stack.Spec.Operators.Postgres},
 		{"agentfw", stack.Spec.Operators != nil && stack.Spec.Operators.AgentFW},
+		{"training-operator", stack.Spec.Operators != nil && stack.Spec.Operators.Kubeflow},
 	} {
 		if !op.on {
 			// Shared cluster operators are never auto-removed: they hold
@@ -192,6 +201,9 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 	if ch == nil && name == "istio-ingress" {
 		ch, err = r.Helm.EnsureChart(istioGatewayChart(), "", clusterOperatorsNamespace)
 	}
+	if ch == nil && name == "training-operator" {
+		ch, err = r.Helm.EnsureChart(kubeflowTrainingOperatorChart(), "", clusterOperatorsNamespace)
+	}
 	if ch == nil && err == nil {
 		err = fmt.Errorf("no chart for %s", name)
 	}
@@ -243,6 +255,13 @@ func (r *StackReconciler) ensureOperator(ctx context.Context, name string, bundl
 			"crds": map[string]interface{}{"enabled": true},
 			"resources": map[string]interface{}{
 				"requests": map[string]interface{}{"cpu": "50m", "memory": "64Mi"},
+			},
+		}
+	}
+	if name == "training-operator" {
+		values = map[string]interface{}{
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{"cpu": "100m", "memory": "256Mi"},
 			},
 		}
 	}

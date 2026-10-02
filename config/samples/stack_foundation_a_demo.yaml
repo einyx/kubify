@@ -31,7 +31,7 @@ spec:
     - from: foundation-a-dai-backend
       to: dai-backend
     - from: foundation-a-dai-frontend
-      to: dai-frontend-auth0
+      to: dai-frontend
   componentValues:
     backend:
       image:
@@ -96,45 +96,34 @@ spec:
         enabled: true
         target:
           name: foundation-frontend-auth0
-      extraEnv:
-      - name: INTERNAL_API_URL
-        value: http://backend:8000/
+      ingress:
+        enabled: false
+      env:
+        host: ""
+        api_url: ""
+        internal_api_url: http://backend:8000/
+        api_proxy_prefix: "api"
+        foundation_env: ""
+        auth0:
+          domain: ""
+          client_id: ""
+          audience: ""
+          secret: ""
+          baseurl: ""
+          issuer_baseurl: ""
+        jwt_disabled: "true"
+        sentry:
+          dsn: ""
+          environment: ""
+          traces_sample_rate: "0.1"
+          profiles_sample_rate: "0.1"
+          enabled: "false"
       virtualService:
         enabled: true
+        name: frontend
         gateway: foundation-gateway
         gatewayNamespace: foundation
         host: foundation-a.demo.meshx.foundation
-        extraHttp:
-        - name: dai
-          match:
-          - uri:
-              prefix: /dai
-          route:
-          - destination:
-              host: dai-frontend
-              port:
-                number: 3000
-          timeout: 50s
-        - name: mcp
-          match:
-          - uri:
-              prefix: /mcp
-          route:
-          - destination:
-              host: backend
-              port:
-                number: 8765
-          timeout: 300s
-        - name: ai
-          match:
-          - uri:
-              prefix: /ai
-          route:
-          - destination:
-              host: ai-foundation-ai
-              port:
-                number: 8000
-          timeout: 300s
         http:
           cors:
             allowHeaders:
@@ -157,7 +146,6 @@ spec:
           responseHeaders:
             StrictTransportSecurity: max-age=31536000
           timeout: 50s
-        name: frontend
 
     kafka:
       extraConfig: ''
@@ -684,3 +672,53 @@ spec:
     istio: false
     spark: false
     vault: true
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: foundation-a-extra-routes
+  namespace: foundation-a
+spec:
+  hosts:
+    - foundation-a.demo.meshx.foundation
+  gateways:
+    - foundation/foundation-gateway
+  http:
+    - name: dai
+      match:
+        - uri:
+            prefix: /dai
+      route:
+        - destination:
+            host: dai-frontend
+            port:
+              number: 3000
+      timeout: 50s
+    - name: mcp
+      match:
+        - uri:
+            prefix: /mcp
+      route:
+        - destination:
+            host: backend
+            port:
+              number: 8765
+      timeout: 300s
+    - name: ai-root-redirect
+      match:
+        - uri:
+            exact: /ai
+      redirect:
+        uri: /ai/dev
+    - name: ai
+      match:
+        - uri:
+            prefix: /ai/
+      rewrite:
+        uri: /
+      route:
+        - destination:
+            host: ai-foundation-ai
+            port:
+              number: 8000
+      timeout: 300s
