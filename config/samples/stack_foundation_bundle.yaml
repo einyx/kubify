@@ -1,0 +1,58 @@
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: foundation
+  namespace: foundation
+spec:
+  operators:
+    vault: true    # vault-operator in `operators` + per-tenant Vault CR (bank-vaults)
+    spark: true
+    istio: true
+    kafka: true
+    postgres: true
+  # Secrets never live in the Stack spec. Seed the per-tenant Vault with
+  # scripts/seed-vault.sh, then reference values via vault: paths — the
+  # vault-secrets-webhook injects them at pod admission, e.g.:
+  # componentValues:
+  #   frontend:
+  #     podAnnotations:
+  #       vault.security.banzaicloud.io/vault-addr: http://vault.foundation.svc:8200
+  #       vault.security.banzaicloud.io/vault-role: default
+  #       vault.security.banzaicloud.io/vault-env: "true"
+  #     env:
+  #       auth0:
+  #         secret: vault:secret/data/frontend/auth0#AUTH0_CLIENT_SECRET
+  #         domain: vault:secret/data/frontend/auth0#AUTH0_DOMAIN
+  bundle:
+    url: oci://ghcr.io/meshxdata/foundation-bundle:0.0.14
+    secretRef:
+      name: ghcr
+  componentValues:
+    watcher:
+      config:
+        postgres:
+          host: postgres-postgresql
+          port: 5432
+          database: foundation
+    backend:
+      config:
+        postgres:
+          host: postgres-postgresql
+          port: 5432
+          database: foundation
+      extraEnvFrom:
+        - secretRef:
+            name: postgres
+    storage-engine:
+      config:
+        storage:
+          provider: filesystem
+    opa:
+      volumes:
+        - name: opa-policies
+          configMap:
+            name: opa-policies
+      volumeMounts:
+        - name: opa-policies
+          mountPath: /policies
+          readOnly: true

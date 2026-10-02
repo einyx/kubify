@@ -66,9 +66,10 @@ const (
 
 // ChartRef locates a Helm chart.
 type ChartRef struct {
-	// RepoURL is the Helm repository URL.
-	// +kubebuilder:validation:MinLength=1
-	RepoURL string `json:"repoURL"`
+	// RepoURL is the Helm repository URL. Optional when the chart is
+	// resolved from a Bundle or ExtraBundles entry.
+	// +optional
+	RepoURL string `json:"repoURL,omitempty"`
 
 	// ChartName is the chart name within the repository.
 	// +kubebuilder:validation:MinLength=1

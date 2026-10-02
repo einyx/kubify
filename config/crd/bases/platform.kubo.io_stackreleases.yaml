@@ -1,0 +1,97 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: stackreleases.platform.kubo.io
+spec:
+  group: platform.kubo.io
+  names:
+    kind: StackRelease
+    listKind: StackReleaseList
+    plural: stackreleases
+    singular: stackrelease
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.stackRef
+      name: Stack
+      type: string
+    - jsonPath: .spec.component
+      name: Component
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.revision
+      name: Revision
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          StackRelease tracks the deployment state of a single Stack component.
+          One StackRelease is created per component per Stack, named <stack>-<component>.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              component:
+                description: Component is the component name within the Stack.
+                type: string
+              stackRef:
+                description: StackRef is the name of the parent Stack.
+                type: string
+            required:
+            - component
+            - stackRef
+            type: object
+          status:
+            properties:
+              lastDeployedAt:
+                description: LastDeployedAt is when the component was last successfully
+                  deployed.
+                format: date-time
+                type: string
+              message:
+                description: Message is a human-readable status description.
+                type: string
+              phase:
+                description: 'Phase is the current deployment phase: Deploying, Ready,
+                  Failed.'
+                enum:
+                - Pending
+                - Deploying
+                - Ready
+                - Failed
+                - Degraded
+                type: string
+              revision:
+                description: Revision is the Helm release revision.
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
