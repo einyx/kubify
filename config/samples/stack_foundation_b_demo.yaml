@@ -26,6 +26,12 @@ spec:
       to: trino-s3-credentials
     - from: foundation-b-ai-secrets
       to: foundation-ai-secrets
+    - from: foundation-b-hive-metastore-minio-credentials
+      to: hive-metastore-minio-credentials
+    - from: foundation-b-dai-backend
+      to: dai-backend
+    - from: foundation-b-dai-frontend
+      to: dai-frontend
   componentValues:
     backend:
       image:
@@ -90,57 +96,30 @@ spec:
         enabled: true
         target:
           name: foundation-frontend-auth0
+      ingress:
+        enabled: false
       env:
-        internal_api_url: http://backend/
+        host: ""
+        api_url: ""
+        internal_api_url: http://backend:8000/
+        api_proxy_prefix: "api"
+        foundation_env: ""
+        auth0:
+          domain: ""
+          client_id: ""
+          audience: ""
+          secret: ""
+          baseurl: ""
+          issuer_baseurl: ""
+        jwt_disabled: "true"
+        sentry:
+          dsn: ""
+          environment: ""
+          traces_sample_rate: "0.1"
+          profiles_sample_rate: "0.1"
+          enabled: "false"
       virtualService:
-        enabled: true
-        gateway: foundation-gateway
-        gatewayNamespace: foundation
-        host: foundation-b.demo.meshx.foundation
-        extraHttp:
-        - name: mcp
-          match:
-          - uri:
-              prefix: /mcp
-          route:
-          - destination:
-              host: backend
-              port:
-                number: 8765
-          timeout: 300s
-        - name: ai
-          match:
-          - uri:
-              prefix: /ai
-          route:
-          - destination:
-              host: ai-foundation-b
-              port:
-                number: 8000
-          timeout: 300s
-        http:
-          cors:
-            allowHeaders:
-            - X-Account
-            - Content-Type
-            - Authorization
-            allowMethods:
-            - GET
-            - POST
-            - PUT
-            - DELETE
-            - OPTIONS
-            allowOrigins:
-            - exact: https://foundation-b.demo.meshx.foundation
-          destination:
-            host: frontend
-            port: 80
-          matchPrefix: /
-          name: frontend
-          responseHeaders:
-            StrictTransportSecurity: max-age=31536000
-          timeout: 50s
-        name: frontend
+        enabled: false
 
     kafka:
       extraConfig: ''
@@ -436,6 +415,13 @@ spec:
       - name: acr-pull-secret
       externalSecret:
         enabled: false
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        timeoutSeconds: 5
+        periodSeconds: 15
       extraEnvFrom:
       - secretRef:
           name: foundation-ai-secrets
@@ -451,6 +437,57 @@ spec:
           MX_FOUNDATION_DATA_MCP_URL: http://backend:8765/mcp
           MX_MCP_OAUTH_REDIRECT_URI: https://foundation-b.demo.meshx.foundation/ai/oauth/mcp-callback
           MX_DEFAULT_MODEL: claude-sonnet-4-6
+          HTTPS_PROXY: http://agentfw:8080
+          HTTP_PROXY: http://agentfw:8080
+          NO_PROXY: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+          no_proxy: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+
+    dai-backend:
+      image:
+        repository: meshxregistry.azurecr.io/cached/ecr-meshx/dai/backend
+        tag: v0.2.79
+      imagePullSecrets:
+      - name: acr-pull-secret
+      migrations:
+        enabled: true
+      streamlit:
+        enabled: false
+      configMap:
+        data:
+          MX_MONGO_DATABASE: "dai"
+          MX_LLM_PROVIDER_TYPE: "anthropic"
+          MX_AUTH0_DOMAIN: "auth0-stg.meshx.app"
+          MX_AUTH0_ISSUER: "https://auth0-stg.meshx.app/"
+          MX_AUTH0_AUDIENCE: "https://demo.meshx.foundation/"
+          MX_AUTH0_ENABLED: "true"
+          MX_ENV: "production"
+          MX_RELEASE_TAG: "v0.2.79"
+          MX_POSTGRES_HOST: "postgres-postgresql"
+          MX_POSTGRES_PORT: "5432"
+          MX_POSTGRES_USER: "foundation"
+          MX_POSTGRES_DATABASE: "foundation"
+          MX_POSTGRES_SSLMODE: "disable"
+
+    dai-frontend:
+      image:
+        repository: meshxregistry.azurecr.io/foundation/dai-frontend
+        tag: basepath
+      imagePullSecrets:
+      - name: acr-pull-secret
+      virtualService:
+        enabled: false
+      env:
+      - name: NEXT_PUBLIC_BASE_PATH
+        value: /dai
+      - name: AUTH0_ISSUER_BASE_URL
+        value: https://auth0-stg.meshx.app
+      - name: AUTH0_BASE_URL
+        value: https://foundation-b.demo.meshx.foundation/dai
+      - name: API_URL
+        value: http://dai-backend:8000
+      extraEnvFrom:
+      - secretRef:
+          name: dai-frontend-auth0
 
     watcher:
       replicaCount: 1
@@ -469,8 +506,12 @@ spec:
           existingSecretSuperUserKey: postgres-password
       fullnameOverride: watcher
 
-  exclude:
-  - vault-operator
+  extraBundles:
+  - url: oci://ghcr.io/meshxdata/dai-bundle:0.0.7
+    secretRef:
+      name: ghcr-pull-secret
+
+  exclude: []
 
   inline:
     components:
@@ -515,6 +556,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: frontend
+        chartVersion: 0.4.12
         repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - backend
@@ -579,6 +621,18 @@ spec:
       - postgres
       name: ai
       scope: Namespaced
+    - chartRef:
+        chartName: dai-backend
+      dependsOn:
+      - postgres
+      name: dai-backend
+      scope: Namespaced
+    - chartRef:
+        chartName: dai-frontend
+      dependsOn:
+      - dai-backend
+      name: dai-frontend
+      scope: Namespaced
     description: Foundation data mesh platform (tenant foundation-b)
     title: Foundation B (demo)
 
@@ -588,4 +642,66 @@ spec:
     certManager: false
     istio: false
     spark: false
-    vault: false
+    vault: true
+
+  virtualService:
+    gateway: foundation/foundation-gateway
+    host: foundation-b.demo.meshx.foundation
+    http:
+      - name: dai
+        match:
+          - uri:
+              prefix: /dai
+        route:
+          - destination:
+              host: dai-frontend
+              port:
+                number: 3000
+        timeout: 50s
+      - name: mcp
+        match:
+          - uri:
+              prefix: /mcp
+        route:
+          - destination:
+              host: backend
+              port:
+                number: 8765
+        timeout: 300s
+      - name: ai-root-redirect
+        match:
+          - uri:
+              exact: /ai
+        redirect:
+          uri: /ai/dev
+      - name: ai
+        match:
+          - uri:
+              prefix: /ai/
+        rewrite:
+          uri: /
+        route:
+          - destination:
+              host: ai-foundation-ai
+              port:
+                number: 8000
+        timeout: 300s
+      - name: frontend
+        match:
+          - uri:
+              prefix: /
+        route:
+          - destination:
+              host: frontend
+              port:
+                number: 3000
+        timeout: 50s
+        corsPolicy:
+          allowHeaders: [X-Account, Content-Type, Authorization]
+          allowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+          allowOrigins:
+            - exact: https://foundation-b.demo.meshx.foundation
+        headers:
+          response:
+            set:
+              Strict-Transport-Security: max-age=31536000

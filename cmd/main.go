@@ -29,6 +29,7 @@ import (
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/controller"
+	"github.com/einyx/kubo/internal/mcpserver"
 	"github.com/einyx/kubo/internal/prereqs"
 	kubowh "github.com/einyx/kubo/internal/webhook"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -68,6 +69,7 @@ func main() {
 	var probeAddr string
 	var secureMetrics bool
 	var enableHTTP2 bool
+	var mcpAddr string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -86,6 +88,7 @@ func main() {
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
+	flag.StringVar(&mcpAddr, "mcp-bind-address", ":9090", "The address the MCP server binds to.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -297,6 +300,11 @@ func main() {
 	}
 	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up ready check")
+		os.Exit(1)
+	}
+
+	if err := mgr.Add(mcpserver.New(mgr.GetClient(), mcpAddr)); err != nil {
+		setupLog.Error(err, "unable to add MCP server")
 		os.Exit(1)
 	}
 
