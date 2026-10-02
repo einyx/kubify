@@ -119,33 +119,7 @@ spec:
           profiles_sample_rate: "0.1"
           enabled: "false"
       virtualService:
-        enabled: true
-        name: frontend
-        gateway: foundation-gateway
-        gatewayNamespace: foundation
-        host: foundation-a.demo.meshx.foundation
-        http:
-          cors:
-            allowHeaders:
-            - X-Account
-            - Content-Type
-            - Authorization
-            allowMethods:
-            - GET
-            - POST
-            - PUT
-            - DELETE
-            - OPTIONS
-            allowOrigins:
-            - exact: https://foundation-a.demo.meshx.foundation
-          destination:
-            host: frontend
-            port: 3000
-          matchPrefix: /
-          name: frontend
-          responseHeaders:
-            StrictTransportSecurity: max-age=31536000
-          timeout: 50s
+        enabled: false
 
     kafka:
       extraConfig: ''
@@ -672,53 +646,65 @@ spec:
     istio: false
     spark: false
     vault: true
----
-apiVersion: networking.istio.io/v1
-kind: VirtualService
-metadata:
-  name: foundation-a-extra-routes
-  namespace: foundation-a
-spec:
-  hosts:
-    - foundation-a.demo.meshx.foundation
-  gateways:
-    - foundation/foundation-gateway
-  http:
-    - name: dai
-      match:
-        - uri:
-            prefix: /dai
-      route:
-        - destination:
-            host: dai-frontend
-            port:
-              number: 3000
-      timeout: 50s
-    - name: mcp
-      match:
-        - uri:
-            prefix: /mcp
-      route:
-        - destination:
-            host: backend
-            port:
-              number: 8765
-      timeout: 300s
-    - name: ai-root-redirect
-      match:
-        - uri:
-            exact: /ai
-      redirect:
-        uri: /ai/dev
-    - name: ai
-      match:
-        - uri:
-            prefix: /ai/
-      rewrite:
-        uri: /
-      route:
-        - destination:
-            host: ai-foundation-ai
-            port:
-              number: 8000
-      timeout: 300s
+
+  virtualService:
+    gateway: foundation/foundation-gateway
+    host: foundation-a.demo.meshx.foundation
+    http:
+      - name: dai
+        match:
+          - uri:
+              prefix: /dai
+        route:
+          - destination:
+              host: dai-frontend
+              port:
+                number: 3000
+        timeout: 50s
+      - name: mcp
+        match:
+          - uri:
+              prefix: /mcp
+        route:
+          - destination:
+              host: backend
+              port:
+                number: 8765
+        timeout: 300s
+      - name: ai-root-redirect
+        match:
+          - uri:
+              exact: /ai
+        redirect:
+          uri: /ai/dev
+      - name: ai
+        match:
+          - uri:
+              prefix: /ai/
+        rewrite:
+          uri: /
+        route:
+          - destination:
+              host: ai-foundation-ai
+              port:
+                number: 8000
+        timeout: 300s
+      - name: frontend
+        match:
+          - uri:
+              prefix: /
+        route:
+          - destination:
+              host: frontend
+              port:
+                number: 3000
+        timeout: 50s
+        corsPolicy:
+          allowHeaders: [X-Account, Content-Type, Authorization]
+          allowMethods: [GET, POST, PUT, DELETE, OPTIONS]
+          allowOrigins:
+            - exact: https://foundation-a.demo.meshx.foundation
+        headers:
+          response:
+            set:
+              Strict-Transport-Security: max-age=31536000

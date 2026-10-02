@@ -322,6 +322,11 @@ spec:
                       Kafka installs the Strimzi kafka-operator. Stacks then run Kafka via
                       Kafka/KafkaTopic custom resources instead of a per-stack kafka chart.
                     type: boolean
+                  kubeflow:
+                    description: |-
+                      Kubeflow installs the Kubeflow training-operator into the operators
+                      namespace. Stacks can then run PyTorchJob, TFJob, and MPIJob workloads.
+                    type: boolean
                   postgres:
                     description: |-
                       Postgres installs the kubegres operator. Stacks then run Postgres via
@@ -414,6 +419,37 @@ spec:
                 description: Version pins the StackDefinition to a content version.
                   Empty = latest.
                 type: string
+              virtualService:
+                description: |-
+                  VirtualService defines an Istio VirtualService the operator manages for
+                  this Stack. All HTTP routes are reconciled on every cycle, so extra `---`
+                  documents in the Stack file are not needed.
+                properties:
+                  gateway:
+                    description: Gateway reference in "namespace/name" or just "name"
+                      form.
+                    minLength: 1
+                    type: string
+                  host:
+                    description: Host is the virtual host (DNS name).
+                    minLength: 1
+                    type: string
+                  http:
+                    description: |-
+                      HTTP is the ordered list of route rules, passed verbatim into the VS spec.
+                      Use the same structure as Istio's HTTPRoute.
+                    items:
+                      x-kubernetes-preserve-unknown-fields: true
+                    minItems: 1
+                    type: array
+                  name:
+                    description: Name of the VirtualService. Defaults to "<stack-name>-routes".
+                    type: string
+                required:
+                - gateway
+                - host
+                - http
+                type: object
             type: object
           status:
             description: StackStatus defines the observed state of Stack.
