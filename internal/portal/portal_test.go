@@ -3,6 +3,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -150,14 +151,14 @@ func TestHTTPMux(t *testing.T) {
 
 	// UI is served.
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "kubo") {
 		t.Fatalf("index: %d", rec.Code)
 	}
 
 	// Template preview is YAML with the tenant substituted.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/template?tenant=web", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/template?tenant=web", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "foundation-web") {
 		t.Fatalf("template preview: %d %s", rec.Code, rec.Body.String())
 	}
@@ -165,30 +166,75 @@ func TestHTTPMux(t *testing.T) {
 	// Create via POST, then list + detail round-trip.
 	body := strings.NewReader(`{"tenant":"web","mode":"Direct"}`)
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/stacks", body))
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "http://localhost/api/stacks", body))
 	if rec.Code != 200 {
 		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/stacks", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks", nil))
 	var stacks []StackSummary
 	if err := json.Unmarshal(rec.Body.Bytes(), &stacks); err != nil || len(stacks) != 1 {
 		t.Fatalf("list after create: %s (%v)", rec.Body.String(), err)
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "/api/stacks/foundation-web/foundation", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks/foundation-web/foundation", nil))
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d", rec.Code)
 	}
 
 	// Invalid tenant is a 400 with a JSON error the UI can show.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("POST", "/api/stacks",
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "http://localhost/api/stacks",
 		strings.NewReader(`{"tenant":"NOT VALID"}`)))
 	if rec.Code != 400 {
 		t.Fatalf("invalid tenant: %d", rec.Code)
 	}
 	if !strings.Contains(rec.Body.String(), "error") {
 		t.Fatalf("error body: %s", rec.Body.String())
+	}
+}
+
+// A non-loopback Host header (e.g. a DNS-rebinding domain resolving to
+// 127.0.0.1) must be rejected on every route, including the create POST.
+func TestHostAllowlistBlocksRebinding(t *testing.T) {
+	p := newFake(t)
+	h := p.Mux()
+
+	for _, path := range []string{"/", "/api/stacks", "/api/template?tenant=x"} {
+		req := httptest.NewRequest("GET", "http://evil.example"+path, nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("GET %s with rebinding Host: %d, want 403", path, rec.Code)
+		}
+	}
+	req := httptest.NewRequest("POST", "http://evil.example/api/stacks",
+		strings.NewReader(`{"tenant":"evil"}`))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("POST with rebinding Host: %d, want 403", rec.Code)
+	}
+
+	// Loopback forms still pass.
+	for _, host := range []string{"localhost", "127.0.0.1", "[::1]"} {
+		req = httptest.NewRequest("GET", "http://"+host+"/api/stacks", nil)
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code == http.StatusForbidden {
+			t.Fatalf("loopback host %s rejected", host)
+		}
+	}
+}
+
+// Oversized create bodies are rejected instead of buffered into memory.
+func TestCreateBodySizeCap(t *testing.T) {
+	p := newFake(t)
+	h := p.Mux()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("POST", "http://localhost/api/stacks",
+		strings.NewReader(`{"tenant":"`+strings.Repeat("a", 2<<20)+`"}`)))
+	if rec.Code != 400 {
+		t.Fatalf("oversized body: %d, want 400", rec.Code)
 	}
 }
