@@ -455,6 +455,39 @@
     margin-top: 12px;
   }
 
+  /* ── Admin: stats / toolbar / spec chips ── */
+  .stat-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .stat {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 18px; min-width: 92px;
+  }
+  .stat-num { font-size: 20px; font-weight: 700; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stat.ready    .stat-num { color: var(--ok); }
+  .stat.progressing .stat-num { color: var(--warn); }
+  .stat.failed   .stat-num { color: var(--err); }
+  .stat.pending  .stat-num { color: var(--muted); }
+  .stat.total    .stat-num { color: var(--accent); }
+  .toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+  .tool-input, .tool-select {
+    background: var(--surface); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 8px 12px; font-size: 13px;
+  }
+  .tool-input { flex: 1; max-width: 320px; }
+  .detail-spec { margin-bottom: 14px; }
+  .spec-chip {
+    display: inline-block; margin: 4px 6px 4px 0; padding: 4px 12px;
+    background: rgba(68,147,248,.08); border: 1px solid rgba(68,147,248,.25);
+    border-radius: 99px; font-size: 12px;
+  }
+  .spec-key { color: var(--accent); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .05em; margin-right: 4px; }
+  .section-title {
+    font-size: 12px; color: var(--muted); text-transform: uppercase;
+    letter-spacing: .06em; padding: 12px 16px 0;
+  }
+  .detail-head .btn.secondary { color: var(--err); border-color: rgba(248,81,73,.4); }
+
   /* ── Toast ── */
   #toast {
     position: fixed;
@@ -512,6 +545,19 @@
       <h2>Stacks</h2>
     </div>
 
+    <div class="stat-row" id="stats"></div>
+
+    <div class="toolbar">
+      <input id="search" class="tool-input" placeholder="Search namespace or name…" autocomplete="off">
+      <select id="phase-filter" class="tool-select">
+        <option value="">All phases</option>
+        <option>Ready</option>
+        <option>Progressing</option>
+        <option>Failed</option>
+        <option>Pending</option>
+      </select>
+    </div>
+
     <div class="card-outer">
       <div class="card-inner">
         <table id="stacks">
@@ -542,6 +588,10 @@
         <div class="detail-title" id="detail-title"></div>
         <div class="detail-sub" id="detail-sub"></div>
       </div>
+      <button class="btn secondary" id="delete-btn" onclick="askDelete()" style="margin-left:auto;color:var(--err)">Delete…</button>
+    </div>
+    <div class="detail-spec card-outer" style="animation-delay:60ms">
+      <div class="card-inner" id="spec-chips"></div>
     </div>
     <div class="card-outer" style="animation-delay:100ms">
       <div class="card-inner">
@@ -558,6 +608,21 @@
         </table>
       </div>
     </div>
+    <div class="card-outer" style="animation-delay:140ms">
+      <div class="card-inner">
+        <div class="section-title">Conditions</div>
+        <table>
+          <thead><tr><th>Type</th><th>Status</th><th>Reason</th><th>Since</th><th>Message</th></tr></thead>
+          <tbody id="cond-rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:180ms">
+      <div class="card-inner">
+        <div class="section-title">Live manifest</div>
+        <pre id="stack-yaml" style="max-height:420px">loading…</pre>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -565,10 +630,15 @@
 <dialog id="create">
   <div class="dialog-header">
     <h2>Create stack from template</h2>
-    <p>Renders the <b>foundation</b> demo template (foundation-a reference)
-       into a new namespace with its Stack manifest.</p>
+    <p>Renders a template into a new namespace with its Stack manifest.
+       Secrets must already exist in kubo-system with the tenant prefix.</p>
   </div>
   <div class="dialog-body">
+    <div class="field">
+      <label for="template">Template</label>
+      <select id="template"></select>
+      <div class="muted" id="template-desc" style="font-size:11px;margin-top:6px;min-height:14px"></div>
+    </div>
     <div class="field">
       <label for="tenant">Tenant slug <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(namespace: foundation-&lt;slug&gt;)</span></label>
       <input id="tenant" placeholder="e.g. demo-b" autocomplete="off">
@@ -576,7 +646,8 @@
     <div class="field">
       <label for="mode">Deployment mode</label>
       <select id="mode">
-        <option value="Direct" selected>Direct — embedded helm engine</option>
+        <option value="" selected>Template default</option>
+        <option value="Direct">Direct — embedded helm engine</option>
         <option value="Flux">Flux — helm-controller</option>
       </select>
     </div>
@@ -593,6 +664,32 @@
   </div>
 </dialog>
 
+<!-- Delete dialog -->
+<dialog id="del">
+  <div class="dialog-header">
+    <h2 style="color:var(--err)">Delete stack</h2>
+    <p>Deletes the Stack resource — the operator will uninstall its releases.
+       Type <b id="del-ns"></b> to confirm.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="del-confirm">Confirmation</label>
+      <input id="del-confirm" autocomplete="off" placeholder="namespace">
+    </div>
+    <div class="field">
+      <label style="display:flex;gap:8px;align-items:center;cursor:pointer;text-transform:none">
+        <input type="checkbox" id="purge" style="width:auto">
+        Also delete the namespace (destructive — removes everything in it)
+      </label>
+    </div>
+    <div class="field-error" id="del-error"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="del-btn" style="background:var(--err)" onclick="doDelete()">Delete</button>
+  </div>
+</dialog>
+
 <div id="toast">
   <span id="toast-icon"></span>
   <span id="toast-msg"></span>
@@ -605,6 +702,8 @@ const api = async (path, opts) => {
   return r.json();
 };
 
+let currentDetail = null; // {ns, name}
+
 async function refresh() {
   try {
     const stacks = await api('/api/stacks');
@@ -613,11 +712,17 @@ async function refresh() {
     document.getElementById('updated').textContent =
       'updated ' + t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     document.getElementById('list-error').textContent = '';
-    if (!stacks.length) {
-      tb.innerHTML = '<tr class="empty-row"><td colspan="6">No stacks yet — create one from the template.</td></tr>';
+    renderStats(stacks);
+    const q = document.getElementById('search').value.trim().toLowerCase();
+    const phase = document.getElementById('phase-filter').value;
+    const visible = stacks.filter(s =>
+      (!phase || s.phase === phase) &&
+      (!q || s.namespace.includes(q) || s.name.includes(q)));
+    if (!visible.length) {
+      tb.innerHTML = `<tr class="empty-row"><td colspan="6">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet — create one from a template.'}</td></tr>`;
       return;
     }
-    tb.innerHTML = stacks.map(s => {
+    tb.innerHTML = visible.map(s => {
       const ratio = s.total > 0 ? s.ready / s.total : 0;
       const barClass = ratio === 1 ? '' : ratio > 0.5 ? 'warn' : 'err';
       return `
@@ -643,9 +748,25 @@ async function refresh() {
   }
 }
 
+function renderStats(stacks) {
+  const counts = {};
+  for (const s of stacks) counts[s.phase] = (counts[s.phase] || 0) + 1;
+  const order = ['Ready', 'Progressing', 'Failed', 'Pending'];
+  document.getElementById('stats').innerHTML = order.map(p => `
+    <div class="stat ${p.toLowerCase()}">
+      <div class="stat-num">${counts[p] || 0}</div>
+      <div class="stat-label">${p}</div>
+    </div>`).join('') + `
+    <div class="stat total"><div class="stat-num">${stacks.length}</div><div class="stat-label">Total</div></div>`;
+}
+
 async function showDetail(ns, name) {
+  currentDetail = { ns, name };
   try {
-    const d = await api(`/api/stacks/${ns}/${name}`);
+    const [d, yamlText] = await Promise.all([
+      api(`/api/stacks/${ns}/${name}`),
+      fetch(`/api/stacks/${ns}/${name}/yaml`).then(r => r.ok ? r.text() : '(unavailable)'),
+    ]);
     document.getElementById('list-view').style.display = 'none';
     document.getElementById('detail').style.display = 'block';
     document.getElementById('detail-title').textContent = `${ns} / ${name}`;
@@ -659,19 +780,97 @@ async function showDetail(ns, name) {
         <td class="cell-ns">${esc((c.message || '').slice(0, 200))}</td>
       </tr>`).join('')
       || '<tr class="empty-row"><td colspan="4">No component status yet.</td></tr>';
+    renderSpec(d);
+    document.getElementById('cond-rows').innerHTML = (d.conditions || []).map(c => `
+      <tr>
+        <td class="cell-name">${esc(c.type)}</td>
+        <td>${esc(c.status)}</td>
+        <td class="cell-mode">${esc(c.reason || '')}</td>
+        <td class="cell-mode">${esc(c.lastTransition || '')}</td>
+        <td class="cell-ns">${esc(c.message || '')}</td>
+      </tr>`).join('')
+      || '<tr class="empty-row"><td colspan="5">No conditions.</td></tr>';
+    document.getElementById('stack-yaml').textContent = yamlText;
   } catch (e) { toast(e.message, false); }
 }
 
+function renderSpec(d) {
+  const chips = [];
+  if (d.bundle) chips.push(['Bundle', d.bundle]);
+  if (d.operators) for (const [k, v] of Object.entries(d.operators)) {
+    if (v) chips.push(['Operator', k]);
+  }
+  if (d.exclude && d.exclude.length) chips.push(['Excluded', d.exclude.join(', ')]);
+  const html = chips.map(([k, v]) =>
+    `<span class="spec-chip"><span class="spec-key">${esc(k)}</span> ${esc(v)}</span>`).join('');
+  document.getElementById('spec-chips').innerHTML =
+    html || '<span class="muted" style="font-size:12px">No spec highlights.</span>';
+}
+
+function askDelete() {
+  if (!currentDetail) return;
+  document.getElementById('del-ns').textContent = currentDetail.ns;
+  document.getElementById('del-confirm').value = '';
+  document.getElementById('del-error').textContent = '';
+  document.getElementById('purge').checked = false;
+  document.getElementById('del').showModal();
+}
+
+async function doDelete() {
+  if (!currentDetail) return;
+  const { ns, name } = currentDetail;
+  const confirmVal = document.getElementById('del-confirm').value.trim();
+  const purge = document.getElementById('purge').checked;
+  const err = document.getElementById('del-error');
+  err.textContent = '';
+  const btn = document.getElementById('del-btn');
+  btn.disabled = true;
+  try {
+    await fetch(`/api/stacks/${ns}/${name}?confirm=${encodeURIComponent(confirmVal)}&purge=${purge}`, { method: 'DELETE' })
+      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(`Stack ${ns}/${name} deleted${purge ? ' (namespace purging)' : ''}`, true);
+    document.getElementById('del').close();
+    hideDetail();
+    refresh();
+  } catch (e) { err.textContent = e.message; }
+  btn.disabled = false;
+}
+
 function hideDetail() {
+  currentDetail = null;
   document.getElementById('detail').style.display = 'none';
   document.getElementById('list-view').style.display = 'block';
+}
+
+async function loadTemplates() {
+  try {
+    const templates = await api('/api/templates');
+    const sel = document.getElementById('template');
+    sel.innerHTML = templates.map(t =>
+      `<option value="${esc(t.id)}">${esc(t.name || t.id)}</option>`).join('');
+    const syncDesc = () => {
+      const t = templates.find(t => t.id === sel.value);
+      document.getElementById('template-desc').textContent = t ? (t.description || '') : '';
+    };
+    sel.onchange = syncDesc;
+    syncDesc();
+  } catch (e) { /* non-fatal */ }
 }
 
 async function preview() {
   const err = document.getElementById('create-error');
   err.textContent = '';
   try {
-    const yaml = await api('/api/template?tenant=' + encodeURIComponent(tenantVal()));
+    const params = new URLSearchParams({
+      template: document.getElementById('template').value,
+      tenant: tenantVal(),
+    });
+    const mode = document.getElementById('mode').value;
+    if (mode) params.set('mode', mode);
+    const yaml = await fetch('/api/template?' + params).then(async r => {
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+      return r.text();
+    });
     const pre = document.getElementById('preview');
     pre.style.display = 'block';
     pre.textContent = yaml;
@@ -684,10 +883,16 @@ async function create() {
   const btn = document.getElementById('create-btn');
   btn.disabled = true;
   try {
+    const body = {
+      template: document.getElementById('template').value,
+      tenant: tenantVal(),
+    };
+    const mode = document.getElementById('mode').value;
+    if (mode) body.mode = mode;
     await api('/api/stacks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tenant: tenantVal(), mode: document.getElementById('mode').value }),
+      body: JSON.stringify(body),
     });
     toast('Stack created — operator will reconcile shortly', true);
     document.getElementById('create').close();
@@ -711,6 +916,10 @@ function toast(msg, ok = true) {
   setTimeout(() => el.style.display = 'none', 3800);
 }
 
+document.getElementById('search').addEventListener('input', refresh);
+document.getElementById('phase-filter').addEventListener('change', refresh);
+
+loadTemplates();
 refresh();
 setInterval(refresh, 10000);
 </script>

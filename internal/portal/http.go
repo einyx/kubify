@@ -10,11 +10,14 @@ import (
 
 // Mux returns the portal HTTP handler:
 //
-//	GET  /                       single-page UI
-//	GET  /api/stacks             JSON list of all stacks
-//	GET  /api/stacks/{ns}/{name} component-level detail
-//	GET  /api/template?tenant=x  rendered template YAML (dry run)
-//	POST /api/stacks             {"tenant":"x","mode":"Direct"} → create
+//	GET  /                        single-page UI
+//	GET  /api/stacks              JSON list of all stacks
+//	GET  /api/stacks/{ns}/{name}  component-level detail
+//	GET  /api/stacks/{ns}/{name}/yaml  live manifest
+//	DELETE /api/stacks/{ns}/{name}?confirm=<ns>&purge=true
+//	GET  /api/templates           template registry (metadata only)
+//	GET  /api/template            rendered YAML preview (template + tenant)
+//	POST /api/stacks              {"template","tenant","mode",...} → create
 //
 // The portal is unauthenticated by design (it is a local operator tool):
 // requests whose Host is not a loopback form are rejected, which defeats
@@ -30,24 +33,28 @@ func (p *Portal) Mux() http.Handler {
 		stacks, err := p.ListStacks(r.Context())
 		respond(w, r, stacks, err)
 	})
+	mux.HandleFunc("GET /api/templates", func(w http.ResponseWriter, r *http.Request) {
+		templates, err := p.registry.List(r.Context())
+		respond(w, r, templates, err)
+	})
 	mux.HandleFunc("GET /api/template", func(w http.ResponseWriter, r *http.Request) {
-		out, err := p.CreateFromTemplate(r.Context(), r.URL.Query().Get("tenant"), "Direct", true)
+		q := r.URL.Query()
+		req := CreateRequest{
+			Template: q.Get("template"),
+			Tenant:   q.Get("tenant"),
+			Mode:     q.Get("mode"),
+		}
+		out, err := p.CreateFromTemplate(r.Context(), req, true)
 		respondYAML(w, r, out, err)
 	})
 	mux.HandleFunc("POST /api/stacks", func(w http.ResponseWriter, r *http.Request) {
-		var req struct {
-			Tenant string `json:"tenant"`
-			Mode   string `json:"mode"`
-		}
+		var req CreateRequest
 		body := http.MaxBytesReader(w, r.Body, 1<<20)
 		if err := json.NewDecoder(body).Decode(&req); err != nil {
 			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
 			return
 		}
-		if req.Mode == "" {
-			req.Mode = "Direct"
-		}
-		if _, err := p.CreateFromTemplate(r.Context(), req.Tenant, req.Mode, false); err != nil {
+		if _, err := p.CreateFromTemplate(r.Context(), req, false); err != nil {
 			respond(w, r, nil, err)
 			return
 		}
@@ -56,6 +63,20 @@ func (p *Portal) Mux() http.Handler {
 	mux.HandleFunc("GET /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		d, err := p.GetStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
 		respond(w, r, d, err)
+	})
+	mux.HandleFunc("GET /api/stacks/{namespace}/{name}/yaml", func(w http.ResponseWriter, r *http.Request) {
+		out, err := p.GetStackYAML(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
+		respondYAML(w, r, out, err)
+	})
+	mux.HandleFunc("DELETE /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		err := p.DeleteStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"),
+			q.Get("confirm"), q.Get("purge") == "true")
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"deleted": true}, nil)
 	})
 	return loopbackHostOnly(mux)
 }
