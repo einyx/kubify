@@ -762,11 +762,18 @@ function renderStats(stacks) {
 
 async function showDetail(ns, name) {
   currentDetail = { ns, name };
+  await fetchDetail(ns, name);
+}
+
+// fetchDetail loads (or re-loads) the detail view. The list auto-refreshes
+// every 10s; the detail must follow suit or it freezes on stale failures.
+async function fetchDetail(ns, name) {
   try {
     const [d, yamlText] = await Promise.all([
       api(`/api/stacks/${ns}/${name}`),
       fetch(`/api/stacks/${ns}/${name}/yaml`).then(r => r.ok ? r.text() : '(unavailable)'),
     ]);
+    if (!currentDetail || currentDetail.ns !== ns || currentDetail.name !== name) return;
     document.getElementById('list-view').style.display = 'none';
     document.getElementById('detail').style.display = 'block';
     document.getElementById('detail-title').textContent = `${ns} / ${name}`;
@@ -921,7 +928,12 @@ document.getElementById('phase-filter').addEventListener('change', refresh);
 
 loadTemplates();
 refresh();
-setInterval(refresh, 10000);
+setInterval(() => {
+  refresh();
+  if (currentDetail && document.getElementById('detail').style.display !== 'none') {
+    fetchDetail(currentDetail.ns, currentDetail.name);
+  }
+}, 10000);
 </script>
 </body>
 </html>
