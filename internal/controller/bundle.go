@@ -418,11 +418,12 @@ func loadCharts(root string) (map[string]*chart.Chart, error) {
 		if err != nil {
 			return err
 		}
-		name := filepath.Base(filepath.Dir(path))
-		if ch.Name() != "" {
-			out[ch.Name()] = ch
-		}
-		out[name] = ch
+		// Key ONLY by the bundle directory name (the bundle build prefixes
+		// chart names via --name-prefix, e.g. dai-bundle stores "backend" as
+		// "dai-backend"). Indexing by Chart.yaml name as well would let an
+		// extra bundle's "backend" chart shadow the main bundle's "backend",
+		// deploying completely wrong charts/values to same-named components.
+		out[filepath.Base(filepath.Dir(path))] = ch
 		return nil
 	})
 	return out, err

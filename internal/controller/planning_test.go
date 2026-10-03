@@ -19,7 +19,7 @@ func mustJSON(t *testing.T, s string) *apiextensionsv1.JSON {
 func TestTopoOrderRespectsDependencies(t *testing.T) {
 	comps := []platformv1alpha1.StackComponentSpec{
 		{Name: "frontend", DependsOn: []string{"backend"}},
-		{Name: "backend", DependsOnReady: []string{"postgres"}},
+		{Name: "backend", DependsOn: []string{"postgres"}},
 		{Name: "postgres"},
 	}
 	got, err := topoOrder(comps)
@@ -80,31 +80,5 @@ func TestResolveComponentValuesPrecedence(t *testing.T) {
 	img := got["image"].(map[string]interface{})
 	if img["tag"] != "v2" {
 		t.Errorf("component override lost: %v", img)
-	}
-}
-
-
-
-func TestExtractImages(t *testing.T) {
-	m := `---
-kind: Deployment
-spec:
-  template:
-    spec:
-      containers:
-      - image: ghcr.io/meshxdata/backend:v0.5.62
-      - image: "meshxregistry.azurecr.io/cached/ecr-meshx/opa:v1.18.1"
----
-kind: ConfigMap
-data:
-  # not a container image, must be ignored by kind filter? (we match all image: lines)
-  image: not/an/image
-`
-	imgs := extractImages(m)
-	if len(imgs) != 3 {
-		t.Fatalf("expected 3 images, got %d: %+v", len(imgs), imgs)
-	}
-	if imgs[0].Repository != "ghcr.io/meshxdata/backend" || imgs[0].Tag != "v0.5.62" {
-		t.Errorf("bad split: %+v", imgs[0])
 	}
 }

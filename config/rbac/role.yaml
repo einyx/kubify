@@ -104,7 +104,6 @@ rules:
   - platform.kubo.io
   resources:
   - stackbackups
-  - stackbootstraps
   - stackdefinitions
   - stackreleases
   - stacks
@@ -120,7 +119,6 @@ rules:
   - platform.kubo.io
   resources:
   - stackbackups/status
-  - stackbootstraps/status
   - stackdefinitions/status
   - stackreleases/status
   - stacks/status

@@ -8,11 +8,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/einyx/kubo/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -65,6 +67,127 @@ func newFake(t *testing.T, objs ...client.Object) *Portal {
 	}
 	p.SetTemplateDir(dir)
 	return p
+}
+
+func testStack(ns string) *v1alpha1.Stack {
+	return &v1alpha1.Stack{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "foundation",
+			Namespace: ns,
+		},
+		Spec: v1alpha1.StackSpec{
+			Mode:    v1alpha1.DeploymentModeDirect,
+			Exclude: []string{"kafka"},
+		},
+	}
+}
+
+func TestReconcileStack(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t, testStack("foundation-demo"))
+	if err := p.ReconcileStack(ctx, "foundation-demo", "foundation"); err != nil {
+		t.Fatal(err)
+	}
+	var s v1alpha1.Stack
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Annotations[reconcileAnnotation] == "" {
+		t.Fatal("reconcile-at annotation not set")
+	}
+	if err := p.ReconcileStack(ctx, "foundation-demo", "nope"); err == nil {
+		t.Fatal("expected error for missing stack")
+	}
+}
+
+func TestPatchStackSpec(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t, testStack("foundation-demo"))
+
+	flux := "Flux"
+	clearBundle := ""
+	bundle := "oci://ghcr.io/org/bundle:v2"
+	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{
+		Mode: flux, Bundle: &bundle, Exclude: []string{"kafka", "spark"},
+		Operators: map[string]bool{"vault": true, "istio": false},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var s v1alpha1.Stack
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Spec.Mode != v1alpha1.DeploymentModeFlux {
+		t.Fatalf("mode = %q", s.Spec.Mode)
+	}
+	if s.Spec.Bundle == nil || s.Spec.Bundle.URL != bundle {
+		t.Fatalf("bundle = %+v", s.Spec.Bundle)
+	}
+	if len(s.Spec.Exclude) != 2 || s.Spec.Exclude[1] != "spark" {
+		t.Fatalf("exclude = %v", s.Spec.Exclude)
+	}
+	if s.Spec.Operators == nil || !s.Spec.Operators.Vault || s.Spec.Operators.Istio {
+		t.Fatalf("operators = %+v", s.Spec.Operators)
+	}
+
+	// Clearing the bundle URL drops the BundleSource entirely.
+	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Bundle: &clearBundle}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Spec.Bundle != nil {
+		t.Fatalf("bundle not cleared: %+v", s.Spec.Bundle)
+	}
+
+	// Invalid mode and invalid bundle URL are rejected without patching.
+	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Mode: "bogus"}); err == nil {
+		t.Fatal("expected invalid mode error")
+	}
+	bad := "ghcr.io/no-scheme"
+	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Bundle: &bad}); err == nil {
+		t.Fatal("expected invalid bundle error")
+	}
+}
+
+func TestListStackEvents(t *testing.T) {
+	ctx := context.Background()
+	older := metav1.NewTime(time.Now().Add(-time.Hour))
+	newer := metav1.NewTime(time.Now())
+	events := []client.Object{
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "foundation-demo", Name: "e1"},
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web-0"},
+			Reason:         "Pulled", Type: corev1.EventTypeNormal, Count: 2,
+			LastTimestamp: older, Message: "Pull complete",
+		},
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "foundation-demo", Name: "e2"},
+			InvolvedObject: corev1.ObjectReference{Kind: "HelmRelease", Name: "vault"},
+			Reason:         "InstallFailed", Type: corev1.EventTypeWarning, Count: 1,
+			LastTimestamp: newer, Message: "helm install failed",
+		},
+		// Other namespace — must not appear.
+		&corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "other", Name: "e3"},
+			Reason:     "Noisy", LastTimestamp: newer,
+		},
+	}
+	p := newFake(t, events...)
+	got, err := p.ListStackEvents(ctx, "foundation-demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d events, want 2: %+v", len(got), got)
+	}
+	if got[0].Reason != "InstallFailed" || got[0].Type != "Warning" || got[0].Object != "HelmRelease/vault" {
+		t.Fatalf("first event wrong: %+v", got[0])
+	}
+	if got[1].Reason != "Pulled" || got[1].Count != 2 {
+		t.Fatalf("second event wrong: %+v", got[1])
+	}
 }
 
 func TestBuiltinEmptyTemplate(t *testing.T) {

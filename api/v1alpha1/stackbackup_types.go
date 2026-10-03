@@ -70,8 +70,9 @@ type S3Backup struct {
 	// Buckets lists buckets to mirror. Empty = mirror all buckets.
 	// +optional
 	Buckets []string `json:"buckets,omitempty"`
-	// SourceCredentialsSecret in SourceNamespace. Must contain keys
-	// "access-key" and "secret-key" (or override via AccessKeyKey/SecretKeyKey).
+	// SourceCredentialsSecret in SourceNamespace. Defaults to secret
+	// "storage-engine" key "auth-credential" (the secret access key); the
+	// access key ID defaults to the namespace name (tenant identity).
 	// +optional
 	SourceCredentialsSecret *SecretKeyRef `json:"sourceCredentialsSecret,omitempty"`
 	// TargetCredentialsSecret in TargetNamespace. Same shape.

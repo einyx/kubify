@@ -6,6 +6,7 @@ import (
 	"context"
 	_ "embed"
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 	"time"
@@ -329,6 +330,134 @@ func (p *Portal) CreateFromTemplate(ctx context.Context, req CreateRequest, dryR
 		}
 	}
 	return b.String(), nil
+}
+
+// reconcileAnnotation triggers a controller reconcile when changed. It
+// mirrors the convention used by the MCP server (internal/mcpserver).
+const reconcileAnnotation = "kubify.io/reconcile-at"
+
+// ReconcileStack stamps the reconcile-at annotation on the Stack CR so the
+// controller enqueues it immediately.
+func (p *Portal) ReconcileStack(ctx context.Context, ns, name string) error {
+	var s v1alpha1.Stack
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	if err := p.client.Get(ctx, key, &s); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(s.DeepCopy())
+	if s.Annotations == nil {
+		s.Annotations = map[string]string{}
+	}
+	s.Annotations[reconcileAnnotation] = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := p.client.Patch(ctx, &s, patch); err != nil {
+		return fmt.Errorf("trigger reconcile: %w", err)
+	}
+	return nil
+}
+
+// PatchRequest is the PATCH /api/stacks/{ns}/{name} payload. Every field is
+// optional; only the fields present (non-nil) are applied.
+type PatchRequest struct {
+	Mode      string          `json:"mode,omitempty"`
+	Bundle    *string         `json:"bundle,omitempty"`
+	Exclude   []string        `json:"exclude,omitempty"`
+	Operators map[string]bool `json:"operators,omitempty"`
+}
+
+// PatchStackSpec applies partial spec updates (mode, bundle, exclude,
+// operators) to a live Stack. Passing an empty-string bundle clears it.
+func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchRequest) error {
+	var s v1alpha1.Stack
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	if err := p.client.Get(ctx, key, &s); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(s.DeepCopy())
+
+	if req.Mode != "" {
+		switch req.Mode {
+		case "Direct":
+			s.Spec.Mode = v1alpha1.DeploymentModeDirect
+		case "Flux":
+			s.Spec.Mode = v1alpha1.DeploymentModeFlux
+		default:
+			return fmt.Errorf("invalid mode %q (want Direct or Flux)", req.Mode)
+		}
+	}
+	if req.Bundle != nil {
+		url := strings.TrimSpace(*req.Bundle)
+		if url != "" && !strings.Contains(url, "://") {
+			return fmt.Errorf("bundle %q must be an OCI URL (oci://…)", url)
+		}
+		if url == "" {
+			s.Spec.Bundle = nil
+		} else {
+			if s.Spec.Bundle == nil {
+				s.Spec.Bundle = &v1alpha1.BundleSource{}
+			}
+			s.Spec.Bundle.URL = url
+		}
+	}
+	if req.Exclude != nil {
+		s.Spec.Exclude = req.Exclude
+	}
+	if req.Operators != nil {
+		op := s.Spec.Operators
+		if op == nil {
+			op = &v1alpha1.ClusterOperators{}
+			s.Spec.Operators = op
+		}
+		applyOperators(op, req.Operators)
+	}
+	if err := p.client.Patch(ctx, &s, patch); err != nil {
+		return fmt.Errorf("patch stack: %w", err)
+	}
+	return nil
+}
+
+// EventView is one row in the namespace activity feed.
+type EventView struct {
+	Reason   string `json:"reason"`
+	Type     string `json:"type"`
+	Object   string `json:"object,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Count    int32  `json:"count"`
+	LastSeen string `json:"lastSeen"`
+}
+
+// ListStackEvents returns recent events in the stack's namespace, newest
+// first, capped at 50.
+func (p *Portal) ListStackEvents(ctx context.Context, ns string) ([]EventView, error) {
+	var list corev1.EventList
+	if err := p.client.List(ctx, &list, client.InNamespace(ns)); err != nil {
+		return nil, fmt.Errorf("portal: list events: %w", err)
+	}
+	sort.Slice(list.Items, func(i, j int) bool {
+		ti, tj := list.Items[i].LastTimestamp.Time, list.Items[j].LastTimestamp.Time
+		if ti.Equal(tj) {
+			return list.Items[i].CreationTimestamp.Time.After(list.Items[j].CreationTimestamp.Time)
+		}
+		return ti.After(tj)
+	})
+	if len(list.Items) > 50 {
+		list.Items = list.Items[:50]
+	}
+	out := make([]EventView, 0, len(list.Items))
+	for _, e := range list.Items {
+		seen := e.LastTimestamp.Time
+		if seen.IsZero() {
+			seen = e.CreationTimestamp.Time
+		}
+		out = append(out, EventView{
+			Reason:   e.Reason,
+			Type:     e.Type,
+			Object:   strings.TrimPrefix(e.InvolvedObject.Kind+"/"+e.InvolvedObject.Name, "/"),
+			Message:  truncate(e.Message, 200),
+			Count:    e.Count,
+			LastSeen: seen.Format("01-02 15:04:05"),
+		})
+	}
+	return out, nil
 }
 
 // applyOperators sets only the toggles present in the request map.

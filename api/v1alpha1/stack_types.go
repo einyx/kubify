@@ -243,25 +243,8 @@ type ComponentStatus struct {
 	// +optional
 	Message string `json:"message,omitempty"`
 
-	// Images lists the container images rendered into this component's
-	// workloads at last deploy.
-	// +optional
-	Images []ComponentImage `json:"images,omitempty"`
-
 	// +optional
 	LastDeployed *metav1.Time `json:"lastDeployed,omitempty"`
-}
-
-// ComponentImage is one container image observed in a component's workloads.
-type ComponentImage struct {
-	// Repository is the image name without tag (e.g. ghcr.io/org/app).
-	Repository string `json:"repository"`
-	// Tag is the image tag (e.g. v1.2.3). Empty when pinned by digest only.
-	// +optional
-	Tag string `json:"tag,omitempty"`
-	// Digest is set when the image is pinned by digest (repo@sha256:...).
-	// +optional
-	Digest string `json:"digest,omitempty"`
 }
 
 // +kubebuilder:validation:Enum=Pending;Deploying;Ready;Failed;Degraded
