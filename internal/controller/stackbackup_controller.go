@@ -193,7 +193,10 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 set -euo pipefail
 
 if %t; then
-  echo "[db] reset target schema public"
+  echo "[db] reset target: drop all non-system schemas (mirror restore)"
+  PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s -Atc \
+    "SELECT format('DROP SCHEMA IF EXISTS %%I CASCADE', nspname) FROM pg_namespace WHERE nspname <> 'public' AND nspname NOT LIKE 'pg\\_%%' AND nspname <> 'information_schema'" \
+    | PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s
   PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
     -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;'
   echo "[db] pg_dump %s -> %s"
@@ -222,6 +225,8 @@ fi
 echo "done."
 `,
 		doDB, dstDBHost, port, user, db,
+		dstDBHost, port, user, db,
+		dstDBHost, port, user, db,
 		srcDBHost, dstDBHost,
 		srcDBHost, port, user, db,
 		dstDBHost, port, user, db,
