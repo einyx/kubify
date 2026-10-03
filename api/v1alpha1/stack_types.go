@@ -167,7 +167,7 @@ type VaultSeed struct {
 	// are shared across demo deployments. Created only if the target Secret
 	// does not exist; never overwritten.
 	// +optional
-	Static []BootstrapSecret `json:"static,omitempty"`
+	Static []VaultSeedSecret `json:"static,omitempty"`
 
 	// Generated creates fresh RANDOM per-tenant credentials (Trino JWT/S3
 	// keys, DB passwords, session secrets). Every tenant gets its own values.
@@ -175,11 +175,11 @@ type VaultSeed struct {
 	// already exist (e.g. created by Static), only keys that are still
 	// missing are added — existing values are never overwritten.
 	// +optional
-	Generated []BootstrapSecret `json:"generated,omitempty"`
+	Generated []VaultSeedSecret `json:"generated,omitempty"`
 }
 
-// BootstrapSecret describes one kubo-system Secret kubo creates at bootstrap.
-type BootstrapSecret struct {
+// VaultSeedSecret describes one kubo-system Secret kubo creates at bootstrap.
+type VaultSeedSecret struct {
 	// Name of the kubo-system Secret, e.g. foundation-c-trino-s3-credentials.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
@@ -204,7 +204,7 @@ type BootstrapSecret struct {
 	// CopyFrom copies keys from an existing kubo-system Secret (the
 	// canonical source of shared credentials such as Auth0 clients).
 	// +optional
-	CopyFrom *BootstrapCopyFrom `json:"copyFrom,omitempty"`
+	CopyFrom *VaultSeedCopyFrom `json:"copyFrom,omitempty"`
 }
 
 // GeneratedKey describes a random value to generate for a Secret key.
@@ -227,19 +227,8 @@ type GeneratedKey struct {
 	Length int `json:"length,omitempty"`
 }
 
-// BootstrapCopyFrom copies keys from an existing kubo-system Secret.
-type BootstrapCopyFrom struct {
-	// Name of the source kubo-system Secret.
-	// +kubebuilder:validation:MinLength=1
-	Name string `json:"name"`
-
-	// Keys maps this Secret's key → source Secret key.
-	// +kubebuilder:validation:MinProperties=1
-	Keys map[string]string `json:"keys"`
-}
-
-// BootstrapCopyFrom copies keys from an existing kubo-system Secret.
-type BootstrapCopyFrom struct {
+// VaultSeedCopyFrom copies keys from an existing kubo-system Secret.
+type VaultSeedCopyFrom struct {
 	// Name of the source kubo-system Secret.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
