@@ -117,6 +117,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// it and retry next reconcile.
 	cpVault, _ := r.ensureControlPlaneVault(ctx)
 
+	// Cluster-level Cloudflare tunnel (platform ingress infra). No-op when
+	// the kubo-cloudflared-config ConfigMap is absent.
+	if err := r.ensureCloudflareTunnel(ctx); err != nil {
+		logf.FromContext(ctx).Error(err, "cloudflare tunnel reconcile failed")
+	}
+
 	// Bootstrap seeding must run BEFORE propagation so a fresh tenant's
 	// kubo-system secrets exist on the very first pass (generated per-tenant
 	// credentials + static shared credentials copied from canonical sources).
@@ -136,9 +142,6 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err := r.ensureVirtualService(ctx, &stack); err != nil {
 		return ctrl.Result{}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
-	}
-	if err := r.ensureTunnel(ctx, &stack); err != nil {
-		return ctrl.Result{}, r.fail(ctx, &stack, "TunnelFailed", err)
 	}
 
 	var bundleCharts map[string]*chart.Chart
