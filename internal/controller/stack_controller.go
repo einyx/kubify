@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"helm.sh/helm/v3/pkg/chart"
+	"helm.sh/helm/v3/pkg/release"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -43,10 +44,21 @@ type bundleCacheEntry struct {
 
 type StackReconciler struct {
 	client.Client
-	Scheme      *runtime.Scheme
-	Helm        *HelmEngine
+	Scheme *runtime.Scheme
+	// Helm is the embedded Helm engine. Declared as an interface so deploy
+	// paths can be tested with a fake.
+	Helm        HelmDeployer
 	Flux        *FluxStrategy
 	bundleCache sync.Map // digest string → bundleCacheEntry
+}
+
+// HelmDeployer is the subset of the embedded Helm engine that the Stack
+// reconciler uses. *HelmEngine implements it.
+type HelmDeployer interface {
+	EnsureChart(ref platformv1alpha1.ChartRef, pullSecret, ns string) (*chart.Chart, error)
+	Deploy(compName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error)
+	Uninstall(name, namespace string) error
+	ReleaseStatus(name, namespace string) (release.Status, error)
 }
 
 // +kubebuilder:rbac:groups=platform.kubo.io,resources=stacks,verbs=get;list;watch;create;update;patch;delete

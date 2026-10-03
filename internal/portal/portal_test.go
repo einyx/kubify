@@ -455,6 +455,49 @@ func TestTemplateValidation(t *testing.T) {
 	}
 }
 
+func TestSameOriginMutations(t *testing.T) {
+	p := newFake(t)
+	h := p.Mux()
+	post := func(hdr map[string]string) int {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("POST", "http://localhost/api/stacks",
+			strings.NewReader(`{}`))
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	// Cross-site Origin is rejected before anything else.
+	if code := post(map[string]string{"Origin": "https://evil.example"}); code != http.StatusForbidden {
+		t.Fatalf("cross-site origin: %d, want 403", code)
+	}
+	// Cross-site Sec-Fetch-Site (no Origin) is rejected.
+	if code := post(map[string]string{"Sec-Fetch-Site": "cross-site"}); code != http.StatusForbidden {
+		t.Fatalf("sec-fetch-site cross-site: %d, want 403", code)
+	}
+	// Same-origin Origin is allowed through (400 = invalid JSON body, i.e.
+	// the request reached the handler).
+	if code := post(map[string]string{"Origin": "http://localhost:9090"}); code != http.StatusBadRequest {
+		t.Fatalf("same-origin origin: %d, want 400", code)
+	}
+	if code := post(map[string]string{"Origin": "http://127.0.0.1:9090"}); code != http.StatusBadRequest {
+		t.Fatalf("loopback alias origin: %d, want 400", code)
+	}
+	// No browser headers (curl-style) is allowed.
+	if code := post(nil); code != http.StatusBadRequest {
+		t.Fatalf("no headers: %d, want 400", code)
+	}
+	// Reads are never blocked cross-site (CORS already prevents reads).
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "http://localhost/api/stacks", nil)
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("cross-site GET: %d, want 200", rec.Code)
+	}
+}
+
 func TestBuiltinEmptyTemplate(t *testing.T) {
 	p := newFake(t) // registry also has the temp-dir fixture
 	all, err := p.registry.List(context.Background())

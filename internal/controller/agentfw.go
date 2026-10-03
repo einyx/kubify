@@ -18,7 +18,7 @@ import (
 
 const (
 	agentfwName      = "agentfw"
-	agentfwImage     = "ghcr.io/einyx/kubo/agentfw:main"
+	agentfwImage     = "meshxregistry.azurecr.io/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
 	agentfwPort      = 8080
 	agentfwPolicyKey = "policy.yaml"
 )
