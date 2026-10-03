@@ -303,7 +303,10 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	if existing.Info != nil && existing.Info.Status == release.StatusDeployed {
 		dr := action.NewUpgrade(cfg)
 		dr.DryRun = true
-		dr.DryRunOption = "client"
+		// Server-side dry-run: bitnami-style charts render lookup-based
+		// content (generated secrets) differently on client-only renders,
+		// which would defeat the comparison.
+		dr.DryRunOption = "server"
 		dr.Namespace = namespace
 		dr.SkipSchemaValidation = true
 		dr.ReuseValues = false
