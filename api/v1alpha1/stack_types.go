@@ -101,6 +101,28 @@ type StackSpec struct {
 	// documents in the Stack file are not needed.
 	// +optional
 	VirtualService *StackVirtualService `json:"virtualService,omitempty"`
+
+	// Tunnel configures a per-tenant cloudflared tunnel connector for
+	// clusters without public ingress or tenants with their own domain.
+	// With token-mode connectors, the public hostname routing is configured
+	// in Cloudflare (public hostname → http://frontend.<ns>:80); kubo
+	// guarantees the connector Deployment is running and current.
+	// +optional
+	Tunnel *StackTunnel `json:"tunnel,omitempty"`
+}
+
+// StackTunnel describes one cloudflared tunnel connector for the Stack.
+type StackTunnel struct {
+	// Hostname routed to this Stack through the tunnel. Informational —
+	// recorded as an annotation on the connector Deployment for operators.
+	// +kubebuilder:validation:MinLength=1
+	Hostname string `json:"hostname"`
+
+	// TokenSecret references a Secret in the Stack namespace holding the
+	// cloudflared tunnel token. Provision it via VaultSeed (static) or
+	// out-of-band; rotate by updating the Secret and restarting. Key
+	// defaults to "token".
+	TokenSecret corev1.SecretKeySelector `json:"tokenSecret"`
 }
 
 // StackVirtualService describes a managed Istio VirtualService.

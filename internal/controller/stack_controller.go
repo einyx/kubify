@@ -137,6 +137,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err := r.ensureVirtualService(ctx, &stack); err != nil {
 		return ctrl.Result{}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
 	}
+	if err := r.ensureTunnel(ctx, &stack); err != nil {
+		return ctrl.Result{}, r.fail(ctx, &stack, "TunnelFailed", err)
+	}
 
 	var bundleCharts map[string]*chart.Chart
 	var bundleImages map[string]bundleImage
