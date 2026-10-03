@@ -25,13 +25,13 @@ import (
 )
 
 const (
-	stackBackupSA    = "kubo-stackbackup"
-	defaultPGImage   = "postgres:16-alpine" // ponytail: has pg_dump/psql; script curls mc at runtime so no custom image needed
-	defaultPGHost    = "postgres-postgresql"
-	defaultPGSecret  = "postgres-postgresql"
-	defaultPGPwdKey  = "postgres-password"
-	defaultS3URL     = "http://storage-engine:8080"
-	defaultS3Secret  = "storage-engine"
+	stackBackupSA   = "kubo-stackbackup"
+	defaultPGImage  = "postgres:16-alpine" // ponytail: has pg_dump/psql; script curls mc at runtime so no custom image needed
+	defaultPGHost   = "postgres-postgresql"
+	defaultPGSecret = "postgres-postgresql"
+	defaultPGPwdKey = "postgres-password"
+	defaultS3URL    = "http://storage-engine:8080"
+	defaultS3Secret = "storage-engine"
 	// Storage-engine convention: the chart stores only the secret access key
 	// (key auth-credential); the access key ID is the tenant identity, which
 	// equals the namespace name.
