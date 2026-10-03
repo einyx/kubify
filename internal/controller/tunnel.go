@@ -9,10 +9,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	kptr "k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
@@ -21,44 +20,53 @@ import (
 // for clusters without Docker Hub egress.
 const tunnelImage = "cloudflare/cloudflared:2025.1.0"
 
-// ensureTunnel reconciles the per-tenant cloudflared connector Deployment.
-// With a nil spec the connector is removed (the owner reference also GCs it
-// when the Stack is deleted). Hostname→service routing is configured in
-// Cloudflare; see docs/design/ingress-tunnel.md.
+// ensureTunnel reconciles the per-tenant cloudflared connector Deployment,
+// its credentials Secret mount, and the rendered tunnel config (ingress:
+// hostname → http://frontend:80, 404 catch-all). Locally-managed mode: no
+// manual Cloudflare dashboard steps. With a nil spec everything is removed
+// (owner references also GC it when the Stack is deleted). See
+// docs/design/ingress-tunnel.md.
 func (r *StackReconciler) ensureTunnel(ctx context.Context, stack *platformv1alpha1.Stack) error {
 	name := stack.Name + "-tunnel"
 	ns := stack.Namespace
 
 	if stack.Spec.Tunnel == nil {
-		var dep appsv1.Deployment
-		err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &dep)
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if dep.Labels["app.kubernetes.io/managed-by"] == "kubo" {
-			return r.Delete(ctx, &dep)
+		for _, obj := range []client.Object{
+			&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+			&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}},
+		} {
+			err := r.Get(ctx, client.ObjectKeyFromObject(obj), obj)
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			if obj.GetLabels()["app.kubernetes.io/managed-by"] == "kubo" {
+				if err := r.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
+					return err
+				}
+			}
 		}
 		return nil
 	}
 
 	t := stack.Spec.Tunnel
-	token := t.TokenSecret
-	if token == nil {
-		// Convention: the token is seeded via VaultSeed into
-		// "<stack>-tunnel-token", key "token".
-		token = &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: stack.Name + "-tunnel-token"},
-			Key:                  "token",
+	if t.TunnelID == "" {
+		return fmt.Errorf("tunnel.tunnelID is required")
+	}
+	creds := t.CredentialsSecret
+	if creds == nil {
+		creds = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: stack.Name + "-tunnel-credentials"},
+			Key:                  "credentials.json",
 		}
 	}
-	if token.Name == "" {
-		return fmt.Errorf("tunnel.tokenSecret.name is required")
+	if creds.Name == "" {
+		return fmt.Errorf("tunnel.credentialsSecret.name is required")
 	}
-	if token.Key == "" {
-		token.Key = "token"
+	if creds.Key == "" {
+		creds.Key = "credentials.json"
 	}
 
 	labels := map[string]string{
@@ -66,6 +74,21 @@ func (r *StackReconciler) ensureTunnel(ctx context.Context, stack *platformv1alp
 		"app.kubernetes.io/name":       "cloudflared",
 		"app.kubernetes.io/instance":   name,
 	}
+
+	// Rendered tunnel config: locally-managed mode, so hostname→service
+	// routing is declarative here instead of a Cloudflare dashboard step.
+	config := fmt.Sprintf(`tunnel: %s
+credentials-file: /etc/cloudflared/credentials.json
+ingress:
+  - hostname: %s
+    service: http://frontend:80
+  - service: http_status:404
+`, t.TunnelID, t.Hostname)
+	cm := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns, Labels: labels},
+		Data:       map[string]string{"config.yaml": config},
+	}
+
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -76,18 +99,30 @@ func (r *StackReconciler) ensureTunnel(ctx context.Context, stack *platformv1alp
 			},
 		},
 	}
+	depSpec := tunnelDeploymentSpec(t, creds, name, labels)
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, dep, func() error {
 		dep.Labels = labels
 		dep.Annotations = map[string]string{
 			"platform.kubo.io/tunnel-hostname": t.Hostname,
 		}
-		dep.Spec = tunnelDeploymentSpec(token, name, labels)
+		dep.Spec = depSpec
 		return controllerutil.SetControllerReference(stack, dep, r.Scheme)
+	})
+	if err != nil {
+		return err
+	}
+
+	// ConfigMap is owned by the Deployment's controller reference pattern:
+	// create-or-update with the same labels; owner reference GCs it.
+	_, err = controllerutil.CreateOrUpdate(ctx, r.Client, cm, func() error {
+		cm.Labels = labels
+		cm.Data = map[string]string{"config.yaml": config}
+		return controllerutil.SetControllerReference(stack, cm, r.Scheme)
 	})
 	return err
 }
 
-func tunnelDeploymentSpec(token *corev1.SecretKeySelector, name string, labels map[string]string) appsv1.DeploymentSpec {
+func tunnelDeploymentSpec(t *platformv1alpha1.StackTunnel, creds *corev1.SecretKeySelector, name string, labels map[string]string) appsv1.DeploymentSpec {
 	replicas := int32(1)
 	return appsv1.DeploymentSpec{
 		Replicas: &replicas,
@@ -98,14 +133,16 @@ func tunnelDeploymentSpec(token *corev1.SecretKeySelector, name string, labels m
 				Containers: []corev1.Container{{
 					Name:  "cloudflared",
 					Image: tunnelImage,
-					Args:  []string{"tunnel", "--no-autoupdate", "run"},
-					Env: []corev1.EnvVar{{
-						Name: "TUNNEL_TOKEN",
-						ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: token.Name},
-							Key:                  token.Key,
-						}},
-					}},
+					Args: []string{
+						"tunnel",
+						"--no-autoupdate",
+						"--config", "/etc/cloudflared/config.yaml",
+						"run",
+					},
+					VolumeMounts: []corev1.VolumeMount{
+						{Name: "credentials", MountPath: "/etc/cloudflared/credentials.json", SubPath: creds.Key, ReadOnly: true},
+						{Name: "config", MountPath: "/etc/cloudflared/config.yaml", SubPath: "config.yaml", ReadOnly: true},
+					},
 					SecurityContext: &corev1.SecurityContext{
 						RunAsNonRoot: kptr.To(true),
 						// The cloudflared image declares the user as
@@ -127,6 +164,22 @@ func tunnelDeploymentSpec(token *corev1.SecretKeySelector, name string, labels m
 						},
 					},
 				}},
+				Volumes: []corev1.Volume{
+					{
+						Name: "credentials",
+						VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+							SecretName: creds.Name,
+							Items:      []corev1.KeyToPath{{Key: creds.Key, Path: "credentials.json"}},
+						}},
+					},
+					{
+						Name: "config",
+						VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+							LocalObjectReference: corev1.LocalObjectReference{Name: name},
+							Items:                []corev1.KeyToPath{{Key: "config.yaml", Path: "config.yaml"}},
+						}},
+					},
+				},
 			},
 		},
 	}

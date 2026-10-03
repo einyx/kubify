@@ -602,18 +602,13 @@ spec:
                   in Cloudflare (public hostname → http://frontend.<ns>:80); kubo
                   guarantees the connector Deployment is running and current.
                 properties:
-                  hostname:
+                  credentialsSecret:
                     description: |-
-                      Hostname routed to this Stack through the tunnel. Informational —
-                      recorded as an annotation on the connector Deployment for operators.
-                    minLength: 1
-                    type: string
-                  tokenSecret:
-                    description: |-
-                      TokenSecret overrides where the tunnel token comes from. By
-                      convention the token lives in the "<stack>-tunnel-token" Secret, key
-                      "token", provisioned via VaultSeed (static, copyFrom canonical) —
-                      like every other tenant credential. Only set this to deviate.
+                      CredentialsSecret overrides where the tunnel credentials JSON comes
+                      from. By convention it lives in the "<stack>-tunnel-credentials"
+                      Secret, key "credentials.json", provisioned via VaultSeed (static,
+                      copyFrom canonical) — like every other tenant credential. Only set
+                      this to deviate.
                     properties:
                       key:
                         description: The key of the secret to select from.  Must be
@@ -636,8 +631,18 @@ spec:
                     - key
                     type: object
                     x-kubernetes-map-type: atomic
+                  hostname:
+                    description: Hostname routed to this Stack through the tunnel.
+                    minLength: 1
+                    type: string
+                  tunnelID:
+                    description: TunnelID is the Cloudflare tunnel UUID (cloudflared
+                      tunnel create).
+                    minLength: 1
+                    type: string
                 required:
                 - hostname
+                - tunnelID
                 type: object
               values:
                 description: |-
