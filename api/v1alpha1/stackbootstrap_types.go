@@ -62,7 +62,7 @@ type StackBootstrapSpec struct {
 	// Secrets are mounted read-only at /bootstrap/secrets/<name>/. Scripts
 	// read credentials from there instead of taking them via env.
 	// +optional
-	Secrets []BootstrapSecret `json:"secrets,omitempty"`
+	Secrets []BootstrapSecretMount `json:"secrets,omitempty"`
 
 	// ServiceAccountName for the Job. Defaults to kubo-stackbootstrap.
 	// +optional
@@ -77,8 +77,8 @@ type StackBootstrapSpec struct {
 	BackoffLimit *int32 `json:"backoffLimit,omitempty"`
 }
 
-// BootstrapSecret mounts a Secret into the bootstrap container.
-type BootstrapSecret struct {
+// BootstrapSecretMount mounts a Secret into the bootstrap container.
+type BootstrapSecretMount struct {
 	// Name of the Secret, in the same namespace as the StackBootstrap.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
