@@ -43,12 +43,20 @@ const DefaultTemplatesDir = defaultTemplatesDir
 
 // Portal is the operator portal server.
 type Portal struct {
-	client      client.Client
-	registry    *Registry
-	metrics     *Metrics
-	agentfwURL  string
+	client       client.Client
+	registry     *Registry
+	metrics      *Metrics
+	agentfwURL   string
 	agentfwProxy http.Handler
+	// vaultAddrOverride, when set, replaces the in-cluster Vault address
+	// template (http://vault.<ns>.svc:8200) — used for local development
+	// against a port-forwarded Vault.
+	vaultAddrOverride func(ns string) string
 }
+
+// SetVaultAddrFunc overrides how the portal derives the Vault address for a
+// namespace. Pass nil to restore the in-cluster default.
+func (p *Portal) SetVaultAddrFunc(fn func(ns string) string) { p.vaultAddrOverride = fn }
 
 // New builds a Portal using the provided client and the default template
 // sources (embedded built-ins + default local dir; no ConfigMap source).

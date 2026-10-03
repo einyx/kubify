@@ -107,7 +107,11 @@ func tunnelDeploymentSpec(token *corev1.SecretKeySelector, name string, labels m
 						}},
 					}},
 					SecurityContext: &corev1.SecurityContext{
-						RunAsNonRoot:             kptr.To(true),
+						RunAsNonRoot: kptr.To(true),
+						// The cloudflared image declares the user as
+						// "nonroot" (non-numeric), which the kubelet cannot
+						// verify against runAsNonRoot — pin the UID.
+						RunAsUser:                kptr.To(int64(65532)),
 						ReadOnlyRootFilesystem:   kptr.To(true),
 						AllowPrivilegeEscalation: kptr.To(false),
 						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},

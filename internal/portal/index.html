@@ -706,6 +706,19 @@
         </table>
       </div>
     </div>
+    <div class="card-outer" style="animation-delay:220ms">
+      <div class="card-inner">
+        <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Vault <span class="muted" id="vault-health"></span></span>
+          <button class="btn secondary" style="padding:3px 10px;font-size:11px;margin:8px" onclick="openVaultEntry()">Add secret…</button>
+        </div>
+        <div class="muted" id="vault-path" style="font-size:11px;margin:4px 8px"></div>
+        <table>
+          <thead><tr><th>Name</th><th>Version</th><th>Updated</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody id="vault-rows"><tr><td colspan="4" class="muted">—</td></tr></tbody>
+        </table>
+      </div>
+    </div>
     <div class="card-outer" style="animation-delay:260ms">
       <div class="card-inner">
         <div class="section-title">Live manifest</div>
@@ -887,6 +900,33 @@
   </div>
 </dialog>
 
+<!-- Vault entry dialog -->
+<dialog id="vault-entry">
+  <div class="dialog-header">
+    <h2 id="vault-entry-title">Vault secret</h2>
+    <p>Stored in this namespace's Vault under secret/. Writing creates a new
+       version; old versions stay recoverable until destroyed.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="vault-path-input">Path</label>
+      <input id="vault-path-input" placeholder="app/config" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="vault-kv">Key/value pairs (JSON object)</label>
+      <textarea id="vault-kv" rows="6" class="code" placeholder='{"TOKEN":"…"}'></textarea>
+      <div class="field-error" id="vault-error"></div>
+    </div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" onclick="saveVaultEntry()">
+      Save
+      <span class="btn-icon" style="font-size:13px">↗</span>
+    </button>
+  </div>
+</dialog>
+
 <div id="toast">
   <div id="toast-inner">
     <span id="toast-icon"></span>
@@ -1019,6 +1059,7 @@ async function fetchDetail(ns, name) {
     syncPaused(d);
     renderValues(d);
     loadBackups(ns);
+    loadVault(ns);
     document.getElementById('cond-rows').innerHTML = (d.conditions || []).map(c => `
       <tr>
         <td class="cell-name">${esc(c.type)}</td>
@@ -1417,6 +1458,119 @@ setInterval(() => {
     fetchDetail(currentDetail.ns, currentDetail.name);
   }
 }, 10000);
+
+// ── Vault ──────────────────────────────────────────────────────────────
+let vaultPath = '';
+
+async function loadVault(ns) {
+  const healthEl = document.getElementById('vault-health');
+  const rows = document.getElementById('vault-rows');
+  try {
+    const health = await api(`/api/namespaces/${ns}/vault/health`);
+    if (!health.installed) {
+      healthEl.textContent = '— not installed';
+      rows.innerHTML = '<tr><td colspan="4" class="muted">No Vault in this namespace (operators.vault is off).</td></tr>';
+      return;
+    }
+    if (health.sealed) {
+      healthEl.textContent = '— SEALED';
+      rows.innerHTML = '<tr><td colspan="4" class="muted">Vault is sealed. Unseal it to manage secrets.</td></tr>';
+      return;
+    }
+    healthEl.textContent = '— unsealed';
+  } catch (e) {
+    healthEl.textContent = '— unreachable';
+    rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(String(e.message || e))}</td></tr>`;
+    return;
+  }
+
+  try {
+    const t = await api(`/api/namespaces/${ns}/vault/tree?path=${encodeURIComponent(vaultPath)}`);
+    const prefix = vaultPath ? vaultPath + '/' : '';
+    let html = '';
+    if (vaultPath) {
+      const parent = vaultPath.split('/').slice(0, -1).join('/');
+      html += `<tr><td colspan="4"><a href="#" onclick="vaultNav('${esc(parent)}');return false" class="muted">← ..</a></td></tr>`;
+    }
+    for (const fo of (t.folders || [])) {
+      html += `<tr><td colspan="4"><a href="#" onclick="vaultNav('${esc(prefix + fo)}');return false">📁 ${esc(fo)}</a></td></tr>`;
+    }
+    for (const en of (t.entries || [])) {
+      const full = prefix + en;
+      html += `<tr>
+        <td><a href="#" onclick="viewVaultEntry('${esc(full)}');return false">${esc(en)}</a></td>
+        <td class="cell-count" colspan="3" style="text-align:right">
+          <button class="btn secondary" style="padding:2px 8px;font-size:11px" onclick="openVaultEntry('${esc(full)}')">Edit</button>
+          <button class="btn secondary" style="padding:2px 8px;font-size:11px;color:var(--err)" onclick="deleteVaultEntry('${esc(full)}')">Delete…</button>
+        </td>
+      </tr>`;
+    }
+    rows.innerHTML = html || '<tr><td colspan="4" class="muted">Empty</td></tr>';
+    document.getElementById('vault-path').textContent = 'secret/' + (vaultPath || '');
+  } catch (e) {
+    rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(String(e.message || e))}</td></tr>`;
+  }
+}
+
+function vaultNav(path) {
+  vaultPath = path.replace(/\/$/, '');
+  loadVault(currentDetail.ns);
+}
+
+async function viewVaultEntry(path) {
+  const e = await api(`/api/namespaces/${currentDetail.ns}/vault/entry?path=${encodeURIComponent(path)}&reveal=true`);
+  openVaultDialog(path, e.data || {});
+}
+
+function openVaultEntry(path = '') {
+  openVaultDialog(path, null);
+}
+
+function openVaultDialog(path, data) {
+  document.getElementById('vault-entry-title').textContent = path ? 'Edit Vault secret' : 'Add Vault secret';
+  document.getElementById('vault-path-input').value = path;
+  document.getElementById('vault-kv').value = data ? JSON.stringify(data, null, 2) : '{\n  \n}';
+  document.getElementById('vault-error').textContent = '';
+  document.getElementById('vault-entry').showModal();
+}
+
+async function saveVaultEntry() {
+  const ns = currentDetail.ns;
+  const path = document.getElementById('vault-path-input').value.trim().replace(/^\/+|\/+$/g, '');
+  let data;
+  try {
+    data = JSON.parse(document.getElementById('vault-kv').value || '{}');
+  } catch (e) {
+    document.getElementById('vault-error').textContent = 'Invalid JSON: ' + e.message;
+    return;
+  }
+  try {
+    await api(`/api/namespaces/${ns}/vault/entry`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path, data }),
+    });
+    document.getElementById('vault-entry').close();
+    toast('ok', 'Saved ' + path);
+    vaultPath = path.includes('/') ? path.split('/').slice(0, -1).join('/') : '';
+    loadVault(ns);
+  } catch (e) {
+    document.getElementById('vault-error').textContent = e.message;
+  }
+}
+
+async function deleteVaultEntry(path) {
+  const ns = currentDetail.ns;
+  const answer = prompt(`Permanent delete of "${path}" destroys ALL versions.\nType the namespace (${ns}) to confirm:`);
+  if (answer !== ns) return;
+  try {
+    await api(`/api/namespaces/${ns}/vault/entry?path=${encodeURIComponent(path)}&permanent=true&confirm=${encodeURIComponent(ns)}`, { method: 'DELETE' });
+    toast('Deleted ' + path, true);
+  } catch (e) {
+    toast(e.message, false);
+  }
+  loadVault(ns);
+}
 </script>
 </body>
 </html>
