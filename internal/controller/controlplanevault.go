@@ -42,6 +42,19 @@ func (r *StackReconciler) ensureControlPlaneVault(ctx context.Context) (*vaultCl
 		return nil, false
 	}
 
+	// Same identity + RBAC shape as tenant vaults. The ACR pull secret is
+	// provisioned in kubo-vault (it lives outside kubo-system on purpose).
+	pull := "acr-pull-secret"
+	if err := applyVaultObject(ctx, r.Client, vaultServiceAccount(cpVaultNS, pull)); err != nil {
+		return nil, false
+	}
+	if err := applyVaultObject(ctx, r.Client, vaultSecretRole(cpVaultNS)); err != nil {
+		return nil, false
+	}
+	if err := applyVaultObject(ctx, r.Client, vaultSecretRoleBinding(cpVaultNS)); err != nil {
+		return nil, false
+	}
+
 	if err := applyVaultCR(ctx, r.Client, cpVaultNS, controlPlaneVaultSpec()); err != nil {
 		return nil, false
 	}
