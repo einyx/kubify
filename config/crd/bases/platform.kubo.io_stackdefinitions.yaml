@@ -99,18 +99,8 @@ spec:
                       - chartName
                       type: object
                     dependsOn:
-                      description: |-
-                        DependsOn lists component names that must deploy before this one
-                        (gate type "Deployed": only requires the dependency's Helm release to
-                        exist). Ordering is enforced topologically.
-                      items:
-                        type: string
-                      type: array
-                    dependsOnReady:
-                      description: |-
-                        DependsOnReady lists component names whose workloads must be Running
-                        and Ready before this component is deployed. Use for migration jobs
-                        and app charts that need a reachable database. Implies dependsOn.
+                      description: DependsOn lists component names that must be Ready
+                        before this one.
                       items:
                         type: string
                       type: array

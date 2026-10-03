@@ -94,13 +94,8 @@ func (s *FluxStrategy) Reconcile(
 		}
 
 		// Flux v2 dependsOn references other HelmReleases in the same namespace.
-		// dependsOnReady gates (workload readiness) are Direct-mode only;
-		// Flux dependsOn orders by release, matching the Deployed gate.
 		var deps []helmv2.DependencyReference
 		for _, dep := range comp.DependsOn {
-			deps = append(deps, helmv2.DependencyReference{Name: dep})
-		}
-		for _, dep := range comp.DependsOnReady {
 			deps = append(deps, helmv2.DependencyReference{Name: dep})
 		}
 

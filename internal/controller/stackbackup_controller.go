@@ -34,8 +34,10 @@ const (
 	defaultPGPwdKey  = "postgres-password"
 	defaultS3URL     = "http://storage-engine:8080"
 	defaultS3Secret  = "storage-engine"
-	defaultS3AkKey   = "access-key"
-	defaultS3SkKey   = "secret-key"
+	// Product convention: the storage-engine chart stores only the secret
+	// access key (chart key auth-credential); the access key ID is the tenant
+	// identity, which equals the namespace name (product-<tenant>).
+	defaultS3SkKey = "auth-credential"
 )
 
 // StackBackupReconciler reconciles StackBackup objects by spawning a Job
@@ -235,9 +237,10 @@ echo "done."
 						Env: []corev1.EnvVar{
 							envFromSecret("SRC_PGPASSWORD", srcPgSec, srcPgKey),
 							envFromSecret("DST_PGPASSWORD", dstPgSec, dstPgKey),
-							envFromSecret("SRC_S3_AK", srcS3Sec, defaultS3AkKey),
+							// Access key ID = tenant identity = namespace name.
+							corev1.EnvVar{Name: "SRC_S3_AK", Value: bk.Spec.SourceNamespace},
+							corev1.EnvVar{Name: "DST_S3_AK", Value: bk.Spec.TargetNamespace},
 							envFromSecret("SRC_S3_SK", srcS3Sec, defaultS3SkKey),
-							envFromSecret("DST_S3_AK", dstS3Sec, defaultS3AkKey),
 							envFromSecret("DST_S3_SK", dstS3Sec, defaultS3SkKey),
 						},
 					}},

@@ -27,12 +27,6 @@ spec:
     - jsonPath: .status.revision
       name: Revision
       type: integer
-    - jsonPath: .status.images[0].repository
-      name: Image
-      type: string
-    - jsonPath: .status.images[0].tag
-      name: Tag
-      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -74,30 +68,6 @@ spec:
             type: object
           status:
             properties:
-              images:
-                description: |-
-                  Images lists the container images rendered into this component's
-                  workloads at last deploy.
-                items:
-                  description: ComponentImage is one container image observed in a
-                    component's workloads.
-                  properties:
-                    digest:
-                      description: Digest is set when the image is pinned by digest
-                        (repo@sha256:...).
-                      type: string
-                    repository:
-                      description: Repository is the image name without tag (e.g.
-                        ghcr.io/org/app).
-                      type: string
-                    tag:
-                      description: Tag is the image tag (e.g. v1.2.3). Empty when
-                        pinned by digest only.
-                      type: string
-                  required:
-                  - repository
-                  type: object
-                type: array
               lastDeployedAt:
                 description: LastDeployedAt is when the component was last successfully
                   deployed.

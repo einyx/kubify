@@ -29,3 +29,4 @@ go.work
 # local sample stacks (environment-specific, not portable)
 config/samples/
 internal/portal/template.yaml
+graphify-out/

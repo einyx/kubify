@@ -11,8 +11,6 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // +kubebuilder:printcolumn:name="Component",type=string,JSONPath=`.spec.component`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Revision",type=integer,JSONPath=`.status.revision`
-// +kubebuilder:printcolumn:name="Image",type=string,JSONPath=`.status.images[0].repository`
-// +kubebuilder:printcolumn:name="Tag",type=string,JSONPath=`.status.images[0].tag`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 type StackRelease struct {
 	metav1.TypeMeta   `json:",inline"`
@@ -39,10 +37,6 @@ type StackReleaseStatus struct {
 	// Message is a human-readable status description.
 	// +optional
 	Message string `json:"message,omitempty"`
-	// Images lists the container images rendered into this component's
-	// workloads at last deploy.
-	// +optional
-	Images []ComponentImage `json:"images,omitempty"`
 	// LastDeployedAt is when the component was last successfully deployed.
 	// +optional
 	LastDeployedAt *metav1.Time `json:"lastDeployedAt,omitempty"`
