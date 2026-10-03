@@ -26,7 +26,7 @@ import (
 
 const (
 	stackBackupSA   = "kubo-stackbackup"
-	defaultPGImage  = "postgres:16-alpine" // ponytail: has pg_dump/psql; script curls mc at runtime so no custom image needed
+	defaultPGImage  = "postgres:17-alpine" // ponytail: matches tenant PG17 servers; has pg_dump/psql; script curls mc at runtime so no custom image needed
 	defaultPGHost   = "postgres-postgresql"
 	defaultPGSecret = "postgres-postgresql"
 	defaultPGPwdKey = "postgres-password"
@@ -193,8 +193,11 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 set -euo pipefail
 
 if %t; then
+  echo "[db] reset target schema public"
+  PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
+    -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;'
   echo "[db] pg_dump %s -> %s"
-  PGPASSWORD="$SRC_PGPASSWORD" pg_dump -h %s -p %d -U %s -d %s --no-owner --clean --if-exists \
+  PGPASSWORD="$SRC_PGPASSWORD" pg_dump -h %s -p %d -U %s -d %s --no-owner \
     | PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=1
 fi
 
@@ -218,7 +221,8 @@ if %t; then
 fi
 echo "done."
 `,
-		doDB, srcDBHost, dstDBHost,
+		doDB, dstDBHost, port, user, db,
+		srcDBHost, dstDBHost,
 		srcDBHost, port, user, db,
 		dstDBHost, port, user, db,
 		doS3, srcS3Host, dstS3Host,

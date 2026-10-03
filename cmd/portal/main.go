@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/einyx/kubo/internal/portal"
 )
@@ -17,6 +18,9 @@ func main() {
 	templatesDir := flag.String("templates", portal.DefaultTemplatesDir, "local templates dir")
 	agentfwURL := flag.String("agentfw", os.Getenv("AGENTFW_URL"),
 		"agentfw admin base URL to surface the session archive under /agentfw/ (empty = disabled)")
+	vaultAddrTpl := flag.String("vault-addr-template", os.Getenv("KUBO_VAULT_ADDR_TEMPLATE"),
+		"Vault address template overriding the in-cluster default (http://vault.<ns>.svc.cluster.local:8200). "+
+			"Use {ns} for the namespace, e.g. http://localhost:8200 for a single port-forwarded Vault")
 	allowRemote := flag.Bool("allow-remote", false,
 		"bind non-loopback addresses — the portal has NO authentication; "+
 			"only do this behind an authenticating proxy or NetworkPolicy")
@@ -31,6 +35,13 @@ func main() {
 		log.Fatalf("portal: %v", err)
 	}
 	p.SetTemplateDir(*templatesDir)
+	if *vaultAddrTpl != "" {
+		tpl := *vaultAddrTpl
+		p.SetVaultAddrFunc(func(ns string) string {
+			return strings.ReplaceAll(tpl, "{ns}", ns)
+		})
+		log.Printf("portal: vault addr template %s", tpl)
+	}
 	if err := p.SetAgentfwURL(*agentfwURL); err != nil {
 		log.Fatalf("portal: %v", err)
 	}
