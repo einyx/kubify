@@ -227,15 +227,21 @@ type GeneratedKey struct {
 	Length int `json:"length,omitempty"`
 }
 
-// VaultSeedCopyFrom copies keys from an existing kubo-system Secret.
+// VaultSeedCopyFrom copies keys from an existing Secret.
 type VaultSeedCopyFrom struct {
-	// Name of the source kubo-system Secret.
+	// Name of the source Secret.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
-	// Keys maps this Secret's key → source Secret key.
-	// +kubebuilder:validation:MinProperties=1
-	Keys map[string]string `json:"keys"`
+	// Namespace of the source Secret. Defaults to kubo-system. Use
+	// acr-cache-system for canonical registry credentials.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// Keys maps this Secret's key → source Secret key. When empty, ALL
+	// source keys are copied and the source Secret's type is preserved.
+	// +optional
+	Keys map[string]string `json:"keys,omitempty"`
 }
 
 // VaultSeedEntry copies a set of source Secret keys into one Vault path.

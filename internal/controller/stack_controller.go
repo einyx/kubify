@@ -105,6 +105,15 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// it and retry next reconcile.
 	cpVault, _ := r.ensureControlPlaneVault(ctx)
 
+	// Bootstrap seeding must run BEFORE propagation so a fresh tenant's
+	// kubo-system secrets exist on the very first pass (generated per-tenant
+	// credentials + static shared credentials copied from canonical sources).
+	if stack.Spec.SeedVault != nil {
+		if err := r.ensureVaultSeedSecrets(ctx, stack.Spec.SeedVault); err != nil {
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "BootstrapSeedFailed", err)
+		}
+	}
+
 	secretsReady, err := r.ensureSecrets(ctx, &stack, cpVault)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", err)
@@ -185,7 +194,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 		seen := map[*chart.Chart]string{}
 		for name, ch := range bundleCharts {
-			if excluded[name] || isClusterOperator(name) {
+			if excluded[name] || isPlatformOperator(name) {
 				continue
 			}
 			if _, ok := seen[ch]; ok {
@@ -224,7 +233,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	var rest []string
 	for _, name := range order {
 		comp := byName[name]
-		if isClusterOperator(name) || isClusterOperator(comp.ChartRef.ChartName) {
+		if isPlatformOperator(name) || isPlatformOperator(comp.ChartRef.ChartName) {
 			continue
 		}
 		// An explicit chartRef.RepoURL means the component pins a specific chart
@@ -634,7 +643,7 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 		var firstErr error
 		var failed []string
 		for _, comp := range stack.Status.Components {
-			if isClusterOperator(comp.Name) {
+			if comp.Scope == platformv1alpha1.ComponentScopeCluster || isPlatformOperator(comp.Name) {
 				continue // handled below via releaseOperators (refcounted)
 			}
 			if err := r.uninstallComponent(ctx, stack, comp); err != nil {
@@ -660,7 +669,7 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 // uninstalled when no other live Stack still uses them.
 func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platformv1alpha1.Stack, comp platformv1alpha1.ComponentStatus) error {
 	if comp.Scope == platformv1alpha1.ComponentScopeCluster {
-		if isClusterOperator(comp.Name) {
+		if isPlatformOperator(comp.Name) {
 			return nil
 		}
 		if r.clusterReleaseInUse(ctx, stack, comp.Name) {
