@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kubify · Kubo architecture</title>
+<meta name="description" content="How Kubo reconciles Stacks: the controller, CRDs, shared operators, and OCI bundles.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#f6f6f4; --surface:#ffffff; --border:rgba(15,18,25,0.08); --border-hi:rgba(15,18,25,0.14);
+    --text:#16181d; --muted:#7c8290; --muted2:#565d6b; --accent:#5b54ec; --accent2:#4438e6; --ok:#14946a;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body { background:var(--bg); color:var(--text); font-family:'Plus Jakarta Sans',system-ui,sans-serif; font-size:16px; line-height:1.65; }
+  body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
+    background: radial-gradient(ellipse 55% 45% at 12% 0%, rgba(108,99,255,0.10) 0%, transparent 70%); }
+  nav { position:sticky; top:0; z-index:100; display:flex; align-items:center; justify-content:space-between;
+    max-width:900px; margin:20px auto 0; padding:10px 14px 10px 18px;
+    background:rgba(255,255,255,0.78); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--border-hi); border-radius:9999px; box-shadow:0 8px 32px rgba(22,26,45,0.10); }
+  .brand { display:flex; align-items:center; gap:10px; }
+  .logo { width:30px; height:30px; border-radius:9px; background:linear-gradient(135deg,var(--accent),var(--ok));
+    display:flex; align-items:center; justify-content:center; color:#fff; font-weight:700; font-size:14px; }
+  .brand b { font-family:'Space Grotesk',sans-serif; font-size:16px; }
+  .brand span { color:var(--muted); font-weight:400; }
+  .back { color:var(--muted2); text-decoration:none; font-size:13.5px; font-weight:500; }
+  .back:hover { color:var(--accent); }
+  main { position:relative; z-index:1; max-width:900px; margin:0 auto; padding:0 24px 80px; }
+  header { padding:72px 0 48px; }
+  .eyebrow { display:inline-flex; padding:4px 12px; border-radius:9999px; border:1px solid rgba(91,84,236,0.3);
+    background:rgba(91,84,236,0.06); font-size:10px; font-weight:600; letter-spacing:0.18em;
+    text-transform:uppercase; color:var(--accent2); margin-bottom:18px; }
+  h1 { font-family:'Space Grotesk',sans-serif; font-size:clamp(30px,4.6vw,44px); letter-spacing:-0.035em; }
+  h2 { font-family:'Space Grotesk',sans-serif; font-size:22px; letter-spacing:-0.02em; margin:44px 0 14px; }
+  p { color:var(--muted2); max-width:720px; }
+  .card { padding:1.5px; border-radius:18px; background:linear-gradient(135deg,rgba(15,18,25,0.08),rgba(15,18,25,0.02));
+    margin:28px 0; }
+  .card-inner { border-radius:calc(18px - 1.5px); background:#16181d; padding:26px 28px; overflow-x:auto; }
+  pre { font-family:'SF Mono','Fira Code',monospace; font-size:12.5px; line-height:1.75; color:#c9cede; white-space:pre; }
+  footer { border-top:1px solid var(--border); margin-top:48px; padding:32px 0;
+    display:flex; justify-content:space-between; color:var(--muted); font-size:13.5px; }
+  footer a { color:var(--muted2); text-decoration:none; }
+  footer a:hover { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="brand">
+    <div class="logo">K</div>
+    <div><b>kubify</b> <span>/ architecture</span></div>
+  </div>
+  <a class="back" href="index.html">← kubify.dev</a>
+</nav>
+
+<main>
+  <header>
+    <div class="eyebrow">Architecture</div>
+    <h1>How Kubo reconciles a Stack</h1>
+  </header>
+
+  <h2>The flow</h2>
+  <p>A Stack manifest lands in the cluster (from kubectl, ArgoCD, or the kubify-website SaaS portal).
+     The kubo operator watches every Stack CR, pulls its OCI bundle, and installs components as
+     Helm releases in dependency order — propagating secrets and reconciling Istio routing along
+     the way.</p>
+
+  <div class="card"><div class="card-inner">
+<pre>                       ┌──────────────────────────┐
+                       │  kubify-website (SaaS)    │
+                       │  customer deploys stack  │
+                       └────────────┬─────────────┘
+                                    │ kubectl apply / ArgoCD
+                                    ▼
+┌───────────────────────────────────────────────────────────────┐
+│  Kubernetes cluster (AKS)                                     │
+│                                                               │
+│  kubo-system                    tenant namespace (stack-a)    │
+│  ┌──────────────────┐           ┌──────────────────────────┐  │
+│  │ kubo operator    │ watch     │ Stack CR (stack-a)       │  │
+│  │ (controller-mgr) │──────────▶│ Helm releases            │  │
+│  │ Stack CRD        │ helm      │ (backend, frontend,      │  │
+│  │ StackDefinition  │ install   │  processor, ai, …)       │  │
+│  └────────┬─────────┘           │ propagated secrets       │  │
+│           │ pulls OCI           │ Istio VirtualService     │  │
+└───────────┼─────────────────────┴──────────────────────────┘  │
+            │                        ▲    │
+            ▼                        │    │ secretsRef
+┌───────────────────────┐   pull    │    ▼
+│ OCI registries        │───────────┘  acr-pull-secret,
+│ ghcr.io: product-…    │              stack-a-secrets
+│         dai-bundle    │             (kubo-system)
+└───────────────────────┘</pre>
+  </div></div>
+
+  <h2>Bundle once, deploy anywhere</h2>
+  <p>Bundles are plain OCI artifacts on any registry — ghcr.io included. Because a Stack references
+     a bundle by URL, the same artifact deploys to any cluster: dev, staging, or a customer's AKS
+     estate. Composition is by reference, so products can build on shared bundles without
+     vendoring each other's charts.</p>
+
+  <h2>Shared operators</h2>
+  <p>Vault, Spark, Istio and friends install once per cluster into the operators namespace and
+     watch every tenant namespace. Tenants get the operators they declare — never duplicate
+     controllers, never cross-tenant coupling.</p>
+
+  <footer>
+    <div>© 2026 kubify · Apache-2.0</div>
+    <div><a href="index.html">Home</a> · <a href="https://github.com/einyx/kubo">GitHub</a></div>
+  </footer>
+</main>
+</body>
+</html>
