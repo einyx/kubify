@@ -75,12 +75,17 @@ func TestBuildJobWiring(t *testing.T) {
 	if env["SRC_S3_AK"] != "stack-a" || env["DST_S3_AK"] != "stack-b" {
 		t.Errorf("S3 access keys wrong: %v", env)
 	}
-	// Secret keys follow the storage-engine convention.
-	if env["SRC_S3_SK"] != "storage-engine/auth-credential" || env["DST_S3_SK"] != "storage-engine/auth-credential" {
+	// Secret keys follow the storage-engine convention. DST refs point at
+	// the job-local copies the reconciler makes of the target-ns secrets
+	// (cross-namespace secret refs are impossible in k8s).
+	if env["SRC_S3_SK"] != "storage-engine/auth-credential" || env["DST_S3_SK"] != "stackbackup-target-s3/auth-credential" {
 		t.Errorf("S3 secret keys wrong: %v", env)
 	}
 	if env["SRC_PGPASSWORD"] != "postgres-postgresql/postgres-password" {
 		t.Errorf("pg password ref wrong: %v", env["SRC_PGPASSWORD"])
+	}
+	if env["DST_PGPASSWORD"] != "stackbackup-target-pg/postgres-password" {
+		t.Errorf("dst pg ref wrong: %v", env["DST_PGPASSWORD"])
 	}
 
 	script := c.Command[2]
@@ -124,8 +129,12 @@ func TestBuildJobOverrides(t *testing.T) {
 			env[e.Name] = e.ValueFrom.SecretKeyRef.LocalObjectReference.Name + "/" + e.ValueFrom.SecretKeyRef.Key
 		}
 	}
-	if env["SRC_PGPASSWORD"] != "pg-src/pw" || env["DST_PGPASSWORD"] != "pg-dst/pw" {
-		t.Errorf("pg secret overrides ignored: %v", env)
+	if env["SRC_PGPASSWORD"] != "pg-src/pw" {
+		t.Errorf("pg source override ignored: %v", env)
+	}
+	// DST always uses the reconciler-made target-credential copies.
+	if env["DST_PGPASSWORD"] != "stackbackup-target-pg/postgres-password" {
+		t.Errorf("dst pg ref wrong: %v", env)
 	}
 	if env["SRC_S3_SK"] != "creds/sk" {
 		t.Errorf("s3 credential override ignored: %v", env["SRC_S3_SK"])

@@ -68,32 +68,35 @@
      Helm releases in dependency order — propagating secrets and reconciling Istio routing along
      the way.</p>
 
-  <div class="card"><div class="card-inner">
-<pre>                       ┌──────────────────────────┐
-                       │  kubify-website (SaaS)    │
-                       │  customer deploys stack  │
-                       └────────────┬─────────────┘
-                                    │ kubectl apply / ArgoCD
-                                    ▼
-┌───────────────────────────────────────────────────────────────┐
-│  Kubernetes cluster (AKS)                                     │
-│                                                               │
-│  kubo-system                    tenant namespace (stack-a)    │
-│  ┌──────────────────┐           ┌──────────────────────────┐  │
-│  │ kubo operator    │ watch     │ Stack CR (stack-a)       │  │
-│  │ (controller-mgr) │──────────▶│ Helm releases            │  │
-│  │ Stack CRD        │ helm      │ (backend, frontend,      │  │
-│  │ StackDefinition  │ install   │  processor, ai, …)       │  │
-│  └────────┬─────────┘           │ propagated secrets       │  │
-│           │ pulls OCI           │ Istio VirtualService     │  │
-└───────────┼─────────────────────┴──────────────────────────┘  │
-            │                        ▲    │
-            ▼                        │    │ secretsRef
-┌───────────────────────┐   pull    │    ▼
-│ OCI registries        │───────────┘  acr-pull-secret,
-│ ghcr.io: product-…    │              stack-a-secrets
-│         dai-bundle    │             (kubo-system)
-└───────────────────────┘</pre>
+  <div class="card"><div class="card-inner mermaid-wrap">
+<pre class="mermaid">
+flowchart TD
+    WEB["kubify-website (SaaS portal)<br/>Customer signs up or deploys a stack"]
+    subgraph K8S["Kubernetes cluster (AKS)"]
+        direction TB
+        subgraph SYS["kubo-system namespace"]
+            OP["kubo operator<br/>(controller-manager)"]
+            CRDS["Stack CRD · StackDefinition CRD"]
+            PULL["acr-pull-secret · stack-a-secrets"]
+        end
+        subgraph TEN["stack-a namespace (tenant)"]
+            STACK["Stack CR (stack-a)"]
+            HELM["Helm releases<br/>(backend, frontend, processor, ai, …)"]
+            SECRETS["Propagated secrets<br/>(from kubo-system)"]
+            VS["Istio VirtualService<br/>(extraHttp routes)"]
+        end
+    end
+    OCI["OCI registries (ghcr.io)<br/>product-bundle: backend, frontend, scheduler, processor, …"]
+
+    WEB -- "kubectl apply / ArgoCD Stack manifest" --> STACK
+    STACK -- "watched by" --> OP
+    OP -- "reads CRD schema" --> CRDS
+    OP -- "pulls OCI artifacts" --> OCI
+    OP -- "Helm install/upgrade" --> HELM
+    OP -- "copies secrets (secretsRef)" --> SECRETS
+    OP -- "reconciles" --> VS
+    PULL -- "secretsRef propagation" --> SECRETS
+</pre>
   </div></div>
 
   <h2>Bundle once, deploy anywhere</h2>
