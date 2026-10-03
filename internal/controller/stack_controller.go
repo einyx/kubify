@@ -294,7 +294,6 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Revision = rel.Version
 		st.Message = rel.Info.Description
-		st.Images = extractImages(rel.Manifest)
 		statuses = append(statuses, st)
 		r.upsertStackRelease(ctx, &stack, st)
 	}
@@ -387,136 +386,178 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
-// deployDirect deploys all components via the embedded Helm engine,
-// stopping at the first failure (components are dependency-ordered).
+// deployDirect deploys all components via the embedded Helm engine.
+// Components are grouped into dependency waves from the DAG; every component
+// in a wave has all its dependencies in earlier waves, so a wave's members
+// deploy concurrently (bounded by maxDeployWorkers). Failures are isolated:
+// a failed component's dependents are skipped, but unrelated components in
+// later waves still deploy.
 func (r *StackReconciler) deployDirect(
 	ctx context.Context,
 	stack *platformv1alpha1.Stack,
 	order []string,
 	byName map[string]platformv1alpha1.StackComponentSpec,
 ) ([]platformv1alpha1.ComponentStatus, error) {
-	var statuses []platformv1alpha1.ComponentStatus
-	var firstErr error
-	processed := map[string]bool{}
-
-	for _, name := range order {
-		comp := byName[name]
-		st := platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhaseDeploying}
-		if isClusterComponent(comp) {
-			st.Scope = platformv1alpha1.ComponentScopeCluster
-		}
-		processed[name] = true
-
-		// Gate on dependsOnReady: the dependency's workloads must be Running
-		// and Ready before this component is deployed (e.g. migrations before
-		// a reachable postgres). Plain dependsOn ordering is enforced by
-		// topoOrder.
-		waiting := ""
-		for _, dep := range comp.DependsOnReady {
-			if ok, why := r.componentReady(ctx, stack.Namespace, dep); !ok {
-				waiting = fmt.Sprintf("waiting for dependency %q to be Ready: %s", dep, why)
-				break
-			}
-		}
-		if waiting != "" {
-			st.Phase = platformv1alpha1.ComponentPhasePending
-			st.Message = waiting
-			statuses = append(statuses, st)
-			continue
-		}
-
-		pullSecret := ""
-		if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
-			pullSecret = comp.ChartPullSecretRef.Name
-		} else if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
-			pullSecret = stack.Spec.Bundle.SecretRef.Name
-		}
-		chart, err := r.Helm.EnsureChart(comp.ChartRef, pullSecret, stack.Namespace)
-		if err != nil {
-			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
-			statuses = append(statuses, st)
-			// Isolate the failure: keep deploying later components instead of
-			// aborting the pass (a stuck release must not starve its siblings).
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-
-		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
-		targetNS := stack.Namespace
-		if isClusterComponent(comp) {
-			targetNS = clusterOperatorsNamespace
-			if adopted, done, aerr := r.adoptClusterRelease(name, targetNS); done || aerr != nil {
-				if aerr != nil {
-					adopted.Phase, adopted.Message = platformv1alpha1.ComponentPhaseFailed, aerr.Error()
-					if firstErr == nil {
-						firstErr = aerr
-					}
-				}
-				statuses = append(statuses, adopted)
-				continue
-			}
-		}
-		rel, err := r.Helm.Deploy(name, targetNS, chart, values)
-		if err != nil {
-			st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
-			statuses = append(statuses, st)
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-
-		st.Phase = platformv1alpha1.ComponentPhaseReady
-		st.Message = rel.Info.Description
-		ts := metav1.Time{Time: rel.Info.FirstDeployed.Time}
-		st.LastDeployed = &ts
-		if rel.Info != nil {
-			st.Revision = rel.Version
-		}
-		st.Images = extractImages(rel.Manifest)
-		statuses = append(statuses, st)
+	waves, err := deployWaves(order, byName)
+	if err != nil {
+		return nil, err
 	}
 
-	// Carry over status of components not yet reached this pass.
-	for _, name := range order {
-		if processed[name] {
+	byWave := map[string]int{} // name -> wave index
+	for i, wave := range waves {
+		for _, name := range wave {
+			byWave[name] = i
+		}
+	}
+
+	statuses := make([]platformv1alpha1.ComponentStatus, 0, len(order))
+	failed := map[string]bool{}
+	var firstErr error
+
+	for _, wave := range waves {
+		runnable := make([]platformv1alpha1.StackComponentSpec, 0, len(wave))
+		for _, name := range wave {
+			comp := byName[name]
+			// Skip components whose dependencies failed this pass — the
+			// deploy would fail anyway and the error would bury the real one.
+			var brokenDep string
+			for _, dep := range comp.DependsOn {
+				if failed[dep] {
+					brokenDep = dep
+					break
+				}
+			}
+			if brokenDep != "" {
+				msg := fmt.Sprintf("skipped: dependency %q failed", brokenDep)
+				statuses = append(statuses, platformv1alpha1.ComponentStatus{
+					Name: name, Phase: platformv1alpha1.ComponentPhasePending, Message: msg,
+				})
+				failed[name] = true
+				continue
+			}
+			runnable = append(runnable, comp)
+		}
+		if len(runnable) == 0 {
 			continue
 		}
-		statuses = append(statuses, platformv1alpha1.ComponentStatus{Name: name, Phase: platformv1alpha1.ComponentPhasePending})
+
+		results := make([]platformv1alpha1.ComponentStatus, len(runnable))
+		errs := make([]error, len(runnable))
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, maxDeployWorkers)
+		for i, comp := range runnable {
+			wg.Add(1)
+			go func(i int, comp platformv1alpha1.StackComponentSpec) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				results[i], errs[i] = r.deployComponent(ctx, stack, comp)
+			}(i, comp)
+		}
+		wg.Wait()
+
+		for i, comp := range runnable {
+			st := results[i]
+			statuses = append(statuses, st)
+			if errs[i] != nil && firstErr == nil {
+				firstErr = errs[i]
+			}
+			if st.Phase == platformv1alpha1.ComponentPhaseFailed {
+				failed[comp.Name] = true
+			}
+		}
 	}
 	return statuses, firstErr
 }
 
-// componentReady reports whether the workloads of a component release are
-// Running and Ready. It matches pods by the standard Helm instance label;
-// components with no pods (e.g. pure CRD charts) count as Ready once the
-// release exists and its other workloads (deployments/statefulsets) are
-// available.
-func (r *StackReconciler) componentReady(ctx context.Context, ns, name string) (bool, string) {
-	var pods corev1.PodList
-	if err := r.List(ctx, &pods, client.InNamespace(ns),
-		client.MatchingLabels{"app.kubernetes.io/instance": name}); err != nil {
-		return false, err.Error()
-	}
-	if len(pods.Items) == 0 {
-		return false, "no pods found yet"
-	}
-	for _, p := range pods.Items {
-		if p.Status.Phase != corev1.PodRunning {
-			return false, fmt.Sprintf("pod %s is %s", p.Name, p.Status.Phase)
-		}
-		for _, c := range p.Status.ContainerStatuses {
-			if !c.Ready {
-				return false, fmt.Sprintf("pod %s container %s not Ready", p.Name, c.Name)
+// maxDeployWorkers bounds how many components of one dependency wave are
+// deployed concurrently.
+const maxDeployWorkers = 4
+
+// deployWaves groups a topologically ordered component list into waves: every
+// component's dependencies live in strictly earlier waves, so each wave can
+// be deployed concurrently.
+func deployWaves(order []string, byName map[string]platformv1alpha1.StackComponentSpec) ([][]string, error) {
+	level := map[string]int{}
+	maxDep := func(name string) int {
+		m := 0
+		for _, dep := range byName[name].DependsOn {
+			if level[dep] > m {
+				m = level[dep]
 			}
 		}
+		return m
 	}
-	return true, ""
+	var waves [][]string
+	for _, name := range order { // order is topological
+		lvl := maxDep(name) + 1
+		level[name] = lvl
+		for len(waves) <= lvl {
+			waves = append(waves, nil)
+		}
+		waves[lvl] = append(waves[lvl], name)
+	}
+	// Components with no dependencies land at level 1; drop the empty wave 0
+	// so roots deploy in the first pass.
+	if len(waves) > 0 && len(waves[0]) == 0 {
+		waves = waves[1:]
+	}
+	return waves, nil
 }
 
-// fail marks the Stack Failed with the given reason.
+// deployComponent deploys one component and returns its resulting status.
+// The returned status always has Phase set; err is non-nil when deployment
+// failed.
+func (r *StackReconciler) deployComponent(
+	ctx context.Context,
+	stack *platformv1alpha1.Stack,
+	comp platformv1alpha1.StackComponentSpec,
+) (platformv1alpha1.ComponentStatus, error) {
+	st := platformv1alpha1.ComponentStatus{Name: comp.Name, Phase: platformv1alpha1.ComponentPhaseDeploying}
+	if isClusterComponent(comp) {
+		st.Scope = platformv1alpha1.ComponentScopeCluster
+	}
+
+	pullSecret := ""
+	if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
+		pullSecret = comp.ChartPullSecretRef.Name
+	} else if stack.Spec.Bundle != nil && stack.Spec.Bundle.SecretRef != nil {
+		pullSecret = stack.Spec.Bundle.SecretRef.Name
+	}
+	chart, err := r.Helm.EnsureChart(comp.ChartRef, pullSecret, stack.Namespace)
+	if err != nil {
+		st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
+		return st, err
+	}
+
+	values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, comp.Name)
+	targetNS := stack.Namespace
+	if isClusterComponent(comp) {
+		targetNS = clusterOperatorsNamespace
+		if adopted, done, aerr := r.adoptClusterRelease(comp.Name, targetNS); done || aerr != nil {
+			if aerr != nil {
+				adopted.Phase, adopted.Message = platformv1alpha1.ComponentPhaseFailed, aerr.Error()
+				return adopted, aerr
+			}
+			return adopted, nil
+		}
+	}
+	rel, err := r.Helm.Deploy(comp.Name, targetNS, chart, values)
+	if err != nil {
+		st.Phase, st.Message = platformv1alpha1.ComponentPhaseFailed, err.Error()
+		return st, err
+	}
+
+	st.Phase = platformv1alpha1.ComponentPhaseReady
+	st.Message = rel.Info.Description
+	ts := metav1.Time{Time: rel.Info.FirstDeployed.Time}
+	st.LastDeployed = &ts
+	if rel.Info != nil {
+		st.Revision = rel.Version
+	}
+	return st, nil
+}
+
 func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stack, reason string, err error) error {
 	stack.Status.Phase = "Failed"
 	meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
@@ -716,7 +757,6 @@ func (r *StackReconciler) upsertStackRelease(ctx context.Context, stack *platfor
 		sr.Status.Phase = st.Phase
 		sr.Status.Revision = st.Revision
 		sr.Status.Message = st.Message
-		sr.Status.Images = st.Images
 		if st.Phase == platformv1alpha1.ComponentPhaseReady {
 			now := metav1.Now()
 			sr.Status.LastDeployedAt = &now
