@@ -34,9 +34,17 @@ type Client struct {
 }
 
 // NewWithAddr builds a Client with an explicit address and token (used by
-// the portal for address overrides, e.g. local port-forwards).
+// the portal for address overrides, e.g. local port-forwards or an API
+// server proxy base address).
 func NewWithAddr(addr, token string) *Client {
 	return &Client{addr: addr, token: token, http: &http.Client{Timeout: 10 * time.Second}}
+}
+
+// WithHTTPClient replaces the HTTP client (portal: an authenticated client
+// for Kubernetes API server proxy requests).
+func (c *Client) WithHTTPClient(hc *http.Client) *Client {
+	c.http = hc
+	return c
 }
 
 // Token returns the current token (never expose it through APIs).

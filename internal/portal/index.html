@@ -1878,9 +1878,8 @@ async function loadVault(ns) {
       setBadge('badge-secrets', 1, true);
       healthEl.textContent = '— unreachable';
       rows.innerHTML = `<tr><td colspan="4" class="muted">${esc(health.error)}<br>
-        Running the portal locally? Vault lives in-cluster — port-forward it and point the portal at it:<br>
-        <code>kubectl port-forward -n ${esc(ns)} svc/vault 8200:8200</code> then restart with
-        <code>-vault-addr-template http://localhost:8200</code></td></tr>`;
+        The portal routes Vault calls through the Kubernetes API server automatically —
+        check your kubeconfig context and RBAC (services/proxy on the Vault namespace).</td></tr>`;
       return;
     }
     if (health.sealed) {
