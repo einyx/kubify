@@ -76,7 +76,9 @@ func TestToolsList(t *testing.T) {
 	resp := call(t, s, "tools/list", map[string]interface{}{})
 	b, _ := json.Marshal(resp.Result)
 	var r struct {
-		Tools []struct{ Name string `json:"name"` } `json:"tools"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
 	}
 	_ = json.Unmarshal(b, &r)
 	names := make(map[string]bool)
