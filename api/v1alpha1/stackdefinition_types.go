@@ -26,9 +26,17 @@ type StackComponentSpec struct {
 	// +optional
 	Values apiextensionsv1.JSON `json:"values,omitempty"`
 
-	// DependsOn lists component names that must be Ready before this one.
+	// DependsOn lists component names that must deploy before this one
+	// (gate type "Deployed": only requires the dependency's Helm release to
+	// exist). Ordering is enforced topologically.
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// DependsOnReady lists component names whose workloads must be Running
+	// and Ready before this component is deployed. Use for migration jobs
+	// and app charts that need a reachable database. Implies dependsOn.
+	// +optional
+	DependsOnReady []string `json:"dependsOnReady,omitempty"`
 
 	// Scope is Namespaced (default) or Cluster. Cluster components are
 	// installed once for the whole cluster (vault-operator, spark-operator)

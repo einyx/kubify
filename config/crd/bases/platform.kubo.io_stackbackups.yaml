@@ -1,0 +1,275 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: stackbackups.platform.kubo.io
+spec:
+  group: platform.kubo.io
+  names:
+    kind: StackBackup
+    listKind: StackBackupList
+    plural: stackbackups
+    shortNames:
+    - sbk
+    singular: stackbackup
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.sourceNamespace
+      name: Source
+      type: string
+    - jsonPath: .spec.targetNamespace
+      name: Target
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          StackBackup transfers Postgres + S3 state from one Stack namespace to another.
+          It spawns a one-shot Job in the source namespace that pg_dump|psql's the DB
+          across and mc mirrors S3 buckets. Idempotent on the target (full overwrite).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              StackBackupSpec copies Postgres databases and storage-engine S3 buckets
+              from a source Stack namespace into a target Stack namespace.
+            properties:
+              image:
+                description: |-
+                  Image is the container image used for the backup job. Must have
+                  pg_dump, psql, and mc (minio-client) available. Defaults to a
+                  reasonable debian-based image bundling both.
+                type: string
+              include:
+                description: Include selects what to transfer. Defaults to [database,
+                  s3].
+                items:
+                  enum:
+                  - database
+                  - s3
+                  type: string
+                type: array
+              postgres:
+                description: Postgres overrides defaults for the DB copy step.
+                properties:
+                  database:
+                    description: Database, defaults to "foundation".
+                    type: string
+                  host:
+                    description: Host is the Postgres service name inside each namespace.
+                    type: string
+                  port:
+                    description: Port, defaults to 5432.
+                    format: int32
+                    type: integer
+                  sourcePasswordSecret:
+                    description: SourcePasswordSecret is the Secret in SourceNamespace
+                      holding the password.
+                    properties:
+                      key:
+                        description: |-
+                          Key inside the Secret. Interpretation depends on the field that
+                          references it (single-value for passwords; see docs for S3 which
+                          expects "access-key" and "secret-key" inside the Secret).
+                        type: string
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  targetPasswordSecret:
+                    description: TargetPasswordSecret is the Secret in TargetNamespace
+                      holding the password.
+                    properties:
+                      key:
+                        description: |-
+                          Key inside the Secret. Interpretation depends on the field that
+                          references it (single-value for passwords; see docs for S3 which
+                          expects "access-key" and "secret-key" inside the Secret).
+                        type: string
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  user:
+                    description: User, defaults to "foundation".
+                    type: string
+                type: object
+              s3:
+                description: S3 overrides defaults for the storage-engine copy step.
+                properties:
+                  buckets:
+                    description: Buckets lists buckets to mirror. Empty = mirror all
+                      buckets.
+                    items:
+                      type: string
+                    type: array
+                  endpoint:
+                    description: |-
+                      Endpoint is the storage-engine service URL inside each namespace.
+                      Defaults to http://storage-engine:8080.
+                    type: string
+                  sourceCredentialsSecret:
+                    description: |-
+                      SourceCredentialsSecret in SourceNamespace. Must contain keys
+                      "access-key" and "secret-key" (or override via AccessKeyKey/SecretKeyKey).
+                    properties:
+                      key:
+                        description: |-
+                          Key inside the Secret. Interpretation depends on the field that
+                          references it (single-value for passwords; see docs for S3 which
+                          expects "access-key" and "secret-key" inside the Secret).
+                        type: string
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  targetCredentialsSecret:
+                    description: TargetCredentialsSecret in TargetNamespace. Same
+                      shape.
+                    properties:
+                      key:
+                        description: |-
+                          Key inside the Secret. Interpretation depends on the field that
+                          references it (single-value for passwords; see docs for S3 which
+                          expects "access-key" and "secret-key" inside the Secret).
+                        type: string
+                      name:
+                        minLength: 1
+                        type: string
+                    required:
+                    - name
+                    type: object
+                type: object
+              sourceNamespace:
+                description: SourceNamespace is the namespace of the source Stack
+                  (e.g. foundation-a).
+                minLength: 1
+                type: string
+              targetNamespace:
+                description: TargetNamespace is the namespace of the destination Stack
+                  (e.g. foundation-b).
+                minLength: 1
+                type: string
+            required:
+            - sourceNamespace
+            - targetNamespace
+            type: object
+          status:
+            description: StackBackupStatus is the observed state of StackBackup.
+            properties:
+              completedAt:
+                description: CompletedAt is when the Job finished (success or failure).
+                format: date-time
+                type: string
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              jobName:
+                description: JobName is the Job created in SourceNamespace to perform
+                  the copy.
+                type: string
+              message:
+                description: Message is a human-readable status description or last
+                  error.
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the generation last reconciled.
+                format: int64
+                type: integer
+              phase:
+                description: 'Phase: Pending | Running | Succeeded | Failed'
+                type: string
+              startedAt:
+                description: StartedAt is when the Job began.
+                format: date-time
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

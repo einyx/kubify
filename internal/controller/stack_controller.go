@@ -294,6 +294,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		st.Phase = platformv1alpha1.ComponentPhaseReady
 		st.Revision = rel.Version
 		st.Message = rel.Info.Description
+		st.Images = extractImages(rel.Manifest)
 		statuses = append(statuses, st)
 		r.upsertStackRelease(ctx, &stack, st)
 	}
@@ -406,6 +407,24 @@ func (r *StackReconciler) deployDirect(
 		}
 		processed[name] = true
 
+		// Gate on dependsOnReady: the dependency's workloads must be Running
+		// and Ready before this component is deployed (e.g. migrations before
+		// a reachable postgres). Plain dependsOn ordering is enforced by
+		// topoOrder.
+		waiting := ""
+		for _, dep := range comp.DependsOnReady {
+			if ok, why := r.componentReady(ctx, stack.Namespace, dep); !ok {
+				waiting = fmt.Sprintf("waiting for dependency %q to be Ready: %s", dep, why)
+				break
+			}
+		}
+		if waiting != "" {
+			st.Phase = platformv1alpha1.ComponentPhasePending
+			st.Message = waiting
+			statuses = append(statuses, st)
+			continue
+		}
+
 		pullSecret := ""
 		if comp.ChartPullSecretRef != nil && comp.ChartPullSecretRef.Name != "" {
 			pullSecret = comp.ChartPullSecretRef.Name
@@ -456,6 +475,7 @@ func (r *StackReconciler) deployDirect(
 		if rel.Info != nil {
 			st.Revision = rel.Version
 		}
+		st.Images = extractImages(rel.Manifest)
 		statuses = append(statuses, st)
 	}
 
@@ -469,6 +489,34 @@ func (r *StackReconciler) deployDirect(
 	return statuses, firstErr
 }
 
+// componentReady reports whether the workloads of a component release are
+// Running and Ready. It matches pods by the standard Helm instance label;
+// components with no pods (e.g. pure CRD charts) count as Ready once the
+// release exists and its other workloads (deployments/statefulsets) are
+// available.
+func (r *StackReconciler) componentReady(ctx context.Context, ns, name string) (bool, string) {
+	var pods corev1.PodList
+	if err := r.List(ctx, &pods, client.InNamespace(ns),
+		client.MatchingLabels{"app.kubernetes.io/instance": name}); err != nil {
+		return false, err.Error()
+	}
+	if len(pods.Items) == 0 {
+		return false, "no pods found yet"
+	}
+	for _, p := range pods.Items {
+		if p.Status.Phase != corev1.PodRunning {
+			return false, fmt.Sprintf("pod %s is %s", p.Name, p.Status.Phase)
+		}
+		for _, c := range p.Status.ContainerStatuses {
+			if !c.Ready {
+				return false, fmt.Sprintf("pod %s container %s not Ready", p.Name, c.Name)
+			}
+		}
+	}
+	return true, ""
+}
+
+// fail marks the Stack Failed with the given reason.
 func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stack, reason string, err error) error {
 	stack.Status.Phase = "Failed"
 	meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
@@ -668,6 +716,7 @@ func (r *StackReconciler) upsertStackRelease(ctx context.Context, stack *platfor
 		sr.Status.Phase = st.Phase
 		sr.Status.Revision = st.Revision
 		sr.Status.Message = st.Message
+		sr.Status.Images = st.Images
 		if st.Phase == platformv1alpha1.ComponentPhaseReady {
 			now := metav1.Now()
 			sr.Status.LastDeployedAt = &now
