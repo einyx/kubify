@@ -34,7 +34,7 @@ spec:
       openAPIV3Schema:
         description: |-
           Stack deploys a named StackDefinition into its own namespace. The
-          abstraction is product-agnostic: foundation, dai, foundation-ai or any
+          abstraction is product-agnostic: product-a, product-b, product-c or any
           future product is just a StackDefinition.
         properties:
           apiVersion:
@@ -59,7 +59,7 @@ spec:
             properties:
               bundle:
                 description: |-
-                  Bundle pulls one OCI artifact (for example oci://ghcr.io/org/foundation-bundle:tag)
+                  Bundle pulls one OCI artifact (for example oci://ghcr.io/org/product-bundle:tag)
                   and installs Helm charts from its charts.tgz layer. Usable alone, or with
                   StackRef/Inline to select which charts to install. Charts missing from the
                   bundle keep their ChartRef.
@@ -83,7 +83,7 @@ spec:
                   url:
                     description: |-
                       URL is an OCI reference, including the tag or digest.
-                      Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+                      Example: oci://ghcr.io/example/product-bundle:0.0.8
                     minLength: 1
                     type: string
                 required:
@@ -128,7 +128,7 @@ spec:
                     url:
                       description: |-
                         URL is an OCI reference, including the tag or digest.
-                        Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+                        Example: oci://ghcr.io/example/product-bundle:0.0.8
                       minLength: 1
                       type: string
                   required:
@@ -369,7 +369,7 @@ spec:
                   SeedVault mirrors keys from a plain k8s Secret into the per-tenant
                   Vault KV store on every reconcile. Secret values never appear in the
                   Stack spec — the source Secret holds them (create it out-of-band, e.g.
-                  `kubectl create secret generic foundation-seeds --from-env-file=.env`).
+                  `kubectl create secret generic product-seeds --from-env-file=.env`).
                 properties:
                   entries:
                     description: Entries map Vault KV paths to the source Secret keys

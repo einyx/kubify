@@ -39,7 +39,7 @@ kubectl kustomize config/default | \
   sed "s|image: controller:latest|image: ${KUBO_IMG}|; s|image: example.com/fop-init:[^ \"']*|image: ${KUBO_IMG}|" | \
   kubectl apply -f -
 kubectl -n kubo-system create secret generic ghcr --from-file=.dockerconfigjson="$HOME/.docker/config.json" 2>/dev/null || \
-  kubectl -n kubo-system apply -f "$STATE/secrets-foundation/ghcr.json"
+  kubectl -n kubo-system apply -f "$STATE/secrets-stack/ghcr.json"
 kubectl -n kubo-system patch deploy kubo-controller-manager --type=strategic -p '{
   "spec":{"template":{"spec":{
     "imagePullSecrets":[{"name":"ghcr"}],
@@ -48,7 +48,7 @@ kubectl -n kubo-system patch deploy kubo-controller-manager --type=strategic -p 
 kubectl -n kubo-system rollout status deploy/kubo-controller-manager --timeout=300s
 
 echo "== restoring tenant secrets =="
-for ns in foundation foundation-b; do
+for ns in stack stack-b; do
   kubectl create namespace "$ns" --dry-run=client -o yaml | kubectl apply -f -
   for f in "$STATE/secrets-$ns"/*.json; do
     python3 -c "
@@ -61,7 +61,7 @@ print(json.dumps(s))" | kubectl apply -f -
 done
 
 echo "== applying StackDefinition + Stacks =="
-for f in stackdefinition stack-foundation stack-foundation-b; do
+for f in stackdefinition stack-stack stack-stack-b; do
   python3 -c "
 import json
 d=json.load(open('$STATE/$f.json'))

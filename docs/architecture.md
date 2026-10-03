@@ -3,7 +3,7 @@
 ```mermaid
 flowchart TD
     subgraph Website["meshx-website (SaaS portal)"]
-        WEB["Customer signs up\nor deploys Foundation"]
+        WEB["Customer signs up\nor deploys a stack"]
     end
 
     subgraph K8s["Kubernetes Cluster (AKS)"]
@@ -12,20 +12,20 @@ flowchart TD
             CRDS["Stack CRD\nStackDefinition CRD"]
         end
 
-        subgraph TenantNS["foundation-a namespace (tenant)"]
-            STACK["Stack CR\n(foundation-a)"]
+        subgraph TenantNS["stack-a namespace (tenant)"]
+            STACK["Stack CR\n(stack-a)"]
             HELM["Helm releases\n(backend, frontend,\nprocessor, ai, …)"]
             SECRETS["Propagated secrets\n(from kubo-system)"]
             VS["Istio VirtualService\n(extraHttp routes)"]
         end
 
         subgraph KuboSys["kubo-system secrets"]
-            PULL["acr-pull-secret\nfoundation-a-secrets"]
+            PULL["acr-pull-secret\nstack-a-secrets"]
         end
     end
 
     subgraph OCI["OCI Registries (ghcr.io)"]
-        FBUNDLE["foundation-bundle\n(backend, frontend,\nscheduler, processor…)"]
+        FBUNDLE["product-bundle\n(backend, frontend,\nscheduler, processor…)"]
         DAIBUNDLE["dai-bundle\n(dai-backend,\ndai-frontend)"]
     end
 

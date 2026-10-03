@@ -34,7 +34,7 @@ type StackSpec struct {
 	// +optional
 	Inline *StackDefinitionSpec `json:"inline,omitempty"`
 
-	// Bundle pulls one OCI artifact (for example oci://ghcr.io/org/foundation-bundle:tag)
+	// Bundle pulls one OCI artifact (for example oci://ghcr.io/org/product-bundle:tag)
 	// and installs Helm charts from its charts.tgz layer. Usable alone, or with
 	// StackRef/Inline to select which charts to install. Charts missing from the
 	// bundle keep their ChartRef.
@@ -86,7 +86,7 @@ type StackSpec struct {
 	// SeedVault mirrors keys from a plain k8s Secret into the per-tenant
 	// Vault KV store on every reconcile. Secret values never appear in the
 	// Stack spec — the source Secret holds them (create it out-of-band, e.g.
-	// `kubectl create secret generic foundation-seeds --from-env-file=.env`).
+	// `kubectl create secret generic product-seeds --from-env-file=.env`).
 	// +optional
 	SeedVault *VaultSeed `json:"seedVault,omitempty"`
 
@@ -212,7 +212,7 @@ type ClusterOperators struct {
 // BundleSource is an OCI artifact that carries the stack's charts.
 type BundleSource struct {
 	// URL is an OCI reference, including the tag or digest.
-	// Example: oci://ghcr.io/meshxdata/foundation-bundle:0.0.8
+	// Example: oci://ghcr.io/org/product-bundle:0.0.8
 	// +kubebuilder:validation:MinLength=1
 	URL string `json:"url"`
 
@@ -284,7 +284,7 @@ type StackStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Stack deploys a named StackDefinition into its own namespace. The
-// abstraction is product-agnostic: foundation, dai, foundation-ai or any
+// abstraction is product-agnostic: product-a, product-b, product-c or any
 // future product is just a StackDefinition.
 type Stack struct {
 	metav1.TypeMeta   `json:",inline"`

@@ -36,7 +36,7 @@ make bundle
 ### Deploy a Stack
 
 ```sh
-kubectl apply -f config/samples/stack_foundation_bundle.yaml
+kubectl apply -f config/samples/stack_product_bundle.yaml
 ```
 
 ## License

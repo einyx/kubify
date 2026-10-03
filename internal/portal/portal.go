@@ -5,6 +5,7 @@ package portal
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,7 +14,9 @@ import (
 
 	"github.com/einyx/kubo/api/v1alpha1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	kubescheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -64,6 +67,7 @@ type StackSummary struct {
 	Name       string `json:"name"`
 	Mode       string `json:"mode"`
 	Phase      string `json:"phase"`
+	Paused     bool   `json:"paused,omitempty"`
 	Ready      int    `json:"ready"`
 	Total      int    `json:"total"`
 	Age        string `json:"age"`
@@ -87,6 +91,7 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 			Name:      s.Name,
 			Mode:      string(s.Spec.Mode),
 			Phase:     s.Status.Phase,
+			Paused:    s.Spec.Paused,
 			Age:       since(s.CreationTimestamp.Time),
 		}
 		if sum.Mode == "" {
@@ -112,11 +117,12 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 // StackDetail is the deep view of a single stack.
 type StackDetail struct {
 	StackSummary
-	Operators  map[string]bool `json:"operators,omitempty"`
-	Exclude    []string        `json:"exclude,omitempty"`
-	Bundle     string          `json:"bundle,omitempty"`
-	Conditions []ConditionView `json:"conditions,omitempty"`
-	Components []ComponentView `json:"components"`
+	Operators      map[string]bool `json:"operators,omitempty"`
+	Exclude        []string        `json:"exclude,omitempty"`
+	Bundle         string          `json:"bundle,omitempty"`
+	ValueOverrides []string        `json:"valueOverrides,omitempty"`
+	Conditions     []ConditionView `json:"conditions,omitempty"`
+	Components     []ComponentView `json:"components"`
 }
 
 // ConditionView is one status condition row.
@@ -147,12 +153,19 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 		StackSummary: StackSummary{
 			Namespace: ns, Name: name,
 			Mode: string(s.Spec.Mode), Phase: s.Status.Phase,
-			Age: since(s.CreationTimestamp.Time),
+			Paused: s.Spec.Paused,
+			Age:    since(s.CreationTimestamp.Time),
 		},
 		Operators:  map[string]bool{},
 		Exclude:    s.Spec.Exclude,
 		Components: make([]ComponentView, 0, len(s.Status.Components)),
 	}
+	overridden := make([]string, 0, len(s.Spec.ComponentValues))
+	for comp := range s.Spec.ComponentValues {
+		overridden = append(overridden, comp)
+	}
+	sort.Strings(overridden)
+	d.ValueOverrides = overridden
 	if s.Spec.Bundle != nil {
 		d.Bundle = s.Spec.Bundle.URL
 	}
@@ -252,7 +265,7 @@ type CreateRequest struct {
 // defaults (mode, exclude, operators). DryRun just returns YAML.
 func (p *Portal) CreateFromTemplate(ctx context.Context, req CreateRequest, dryRun bool) (string, error) {
 	if req.Template == "" {
-		req.Template = "foundation-full"
+		req.Template = "full"
 	}
 	tmpl, err := p.registry.Get(ctx, req.Template)
 	if err != nil {
@@ -362,6 +375,9 @@ type PatchRequest struct {
 	Bundle    *string         `json:"bundle,omitempty"`
 	Exclude   []string        `json:"exclude,omitempty"`
 	Operators map[string]bool `json:"operators,omitempty"`
+	// ComponentValues patches per-component Helm value overrides. A nil
+	// value removes the component's override; non-nil replaces it.
+	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
 }
 
 // PatchStackSpec applies partial spec updates (mode, bundle, exclude,
@@ -409,10 +425,123 @@ func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchR
 		}
 		applyOperators(op, req.Operators)
 	}
+	if req.ComponentValues != nil {
+		if s.Spec.ComponentValues == nil {
+			s.Spec.ComponentValues = map[string]apiextensionsv1.JSON{}
+		}
+		for comp, raw := range req.ComponentValues {
+			if raw == nil {
+				delete(s.Spec.ComponentValues, comp)
+				continue
+			}
+			if !json.Valid(raw) {
+				return fmt.Errorf("componentValues[%q] is not valid JSON", comp)
+			}
+			var compact any
+			if err := json.Unmarshal(raw, &compact); err != nil {
+				return fmt.Errorf("componentValues[%q]: %w", comp, err)
+			}
+			norm, err := json.Marshal(compact)
+			if err != nil {
+				return fmt.Errorf("componentValues[%q]: %w", comp, err)
+			}
+			s.Spec.ComponentValues[comp] = apiextensionsv1.JSON{Raw: norm}
+		}
+		if len(s.Spec.ComponentValues) == 0 {
+			s.Spec.ComponentValues = nil
+		}
+	}
 	if err := p.client.Patch(ctx, &s, patch); err != nil {
 		return fmt.Errorf("patch stack: %w", err)
 	}
 	return nil
+}
+
+// BackupRequest is the POST /api/backups payload.
+type BackupRequest struct {
+	SourceNamespace string   `json:"sourceNamespace"`
+	TargetNamespace string   `json:"targetNamespace"`
+	Include         []string `json:"include,omitempty"`
+}
+
+// BackupView is one row in the backups list.
+type BackupView struct {
+	Namespace string   `json:"namespace"`
+	Name      string   `json:"name"`
+	Source    string   `json:"source"`
+	Target    string   `json:"target"`
+	Include   []string `json:"include,omitempty"`
+	Phase     string   `json:"phase"`
+	Message   string   `json:"message,omitempty"`
+	Age       string   `json:"age"`
+}
+
+// CreateStackBackup creates a StackBackup CR in the source namespace; the
+// backup controller spawns the copy Job.
+func (p *Portal) CreateStackBackup(ctx context.Context, req BackupRequest) (*BackupView, error) {
+	if !validTenant(req.SourceNamespace) || !validTenant(req.TargetNamespace) {
+		return nil, fmt.Errorf("source and target must be lowercase RFC-1123 namespace names")
+	}
+	if req.SourceNamespace == req.TargetNamespace {
+		return nil, fmt.Errorf("source and target namespace must differ")
+	}
+	for _, inc := range req.Include {
+		if inc != "database" && inc != "s3" {
+			return nil, fmt.Errorf("invalid include %q (want database or s3)", inc)
+		}
+	}
+	bk := &v1alpha1.StackBackup{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace:    req.SourceNamespace,
+			GenerateName: "sbk-",
+		},
+		Spec: v1alpha1.StackBackupSpec{
+			SourceNamespace: req.SourceNamespace,
+			TargetNamespace: req.TargetNamespace,
+			Include:         req.Include,
+		},
+	}
+	if err := p.client.Create(ctx, bk); err != nil {
+		return nil, fmt.Errorf("create stackbackup: %w", err)
+	}
+	return &BackupView{
+		Namespace: bk.Namespace,
+		Name:      bk.Name,
+		Source:    req.SourceNamespace,
+		Target:    req.TargetNamespace,
+		Include:   req.Include,
+		Phase:     "Pending",
+		Age:       "0s",
+	}, nil
+}
+
+// ListStackBackups returns every StackBackup, newest first.
+func (p *Portal) ListStackBackups(ctx context.Context) ([]BackupView, error) {
+	var list v1alpha1.StackBackupList
+	if err := p.client.List(ctx, &list); err != nil {
+		return nil, fmt.Errorf("portal: list backups: %w", err)
+	}
+	sort.Slice(list.Items, func(i, j int) bool {
+		return list.Items[i].CreationTimestamp.Time.After(list.Items[j].CreationTimestamp.Time)
+	})
+	out := make([]BackupView, 0, len(list.Items))
+	for _, bk := range list.Items {
+		phase := bk.Status.Phase
+		if phase == "" {
+			phase = "Pending"
+		}
+		out = append(out, BackupView{
+			Namespace: bk.Namespace,
+			Name:      bk.Name,
+			Source:    bk.Spec.SourceNamespace,
+			Target:    bk.Spec.TargetNamespace,
+			Include:   bk.Spec.Include,
+			Phase:     phase,
+			Message:   truncate(bk.Status.Message, 200),
+			Age:       since(bk.CreationTimestamp.Time),
+		})
+	}
+	return out, nil
 }
 
 // EventView is one row in the namespace activity feed.
@@ -458,6 +587,22 @@ func (p *Portal) ListStackEvents(ctx context.Context, ns string) ([]EventView, e
 		})
 	}
 	return out, nil
+}
+
+// SetStackPaused patches spec.paused. Paused stops reconciliation without
+// deleting deployed components.
+func (p *Portal) SetStackPaused(ctx context.Context, ns, name string, paused bool) error {
+	var s v1alpha1.Stack
+	key := types.NamespacedName{Namespace: ns, Name: name}
+	if err := p.client.Get(ctx, key, &s); err != nil {
+		return err
+	}
+	patch := client.MergeFrom(s.DeepCopy())
+	s.Spec.Paused = paused
+	if err := p.client.Patch(ctx, &s, patch); err != nil {
+		return fmt.Errorf("set paused: %w", err)
+	}
+	return nil
 }
 
 // applyOperators sets only the toggles present in the request map.

@@ -1,5 +1,5 @@
 // Command portal serves the kubo operator portal: a light web UI to inspect
-// Stack resources and create new stacks from the foundation demo template.
+// Stack resources and create new stacks from tenant templates.
 package main
 
 import (

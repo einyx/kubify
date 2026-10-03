@@ -34,21 +34,21 @@ defaults:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: foundation-{{.Tenant}}
+  name: acme-{{.Tenant}}
 ---
 apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
-  name: foundation
-  namespace: foundation-{{.Tenant}}
+  name: acme
+  namespace: acme-{{.Tenant}}
 spec:
   mode: Direct
   secretsRef:
-  - from: foundation-{{.Tenant}}-backend-auth0
+  - from: acme-{{.Tenant}}-backend-auth0
     to: backend-auth0
   inline:
     components: []
-    title: Foundation {{.Tenant}}
+    title: Acme {{.Tenant}}
 `
 
 func newFake(t *testing.T, objs ...client.Object) *Portal {
@@ -72,7 +72,7 @@ func newFake(t *testing.T, objs ...client.Object) *Portal {
 func testStack(ns string) *v1alpha1.Stack {
 	return &v1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "foundation",
+			Name:      "acme",
 			Namespace: ns,
 		},
 		Spec: v1alpha1.StackSpec{
@@ -84,37 +84,37 @@ func testStack(ns string) *v1alpha1.Stack {
 
 func TestReconcileStack(t *testing.T) {
 	ctx := context.Background()
-	p := newFake(t, testStack("foundation-demo"))
-	if err := p.ReconcileStack(ctx, "foundation-demo", "foundation"); err != nil {
+	p := newFake(t, testStack("acme-demo"))
+	if err := p.ReconcileStack(ctx, "acme-demo", "acme"); err != nil {
 		t.Fatal(err)
 	}
 	var s v1alpha1.Stack
-	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
 		t.Fatal(err)
 	}
 	if s.Annotations[reconcileAnnotation] == "" {
 		t.Fatal("reconcile-at annotation not set")
 	}
-	if err := p.ReconcileStack(ctx, "foundation-demo", "nope"); err == nil {
+	if err := p.ReconcileStack(ctx, "acme-demo", "nope"); err == nil {
 		t.Fatal("expected error for missing stack")
 	}
 }
 
 func TestPatchStackSpec(t *testing.T) {
 	ctx := context.Background()
-	p := newFake(t, testStack("foundation-demo"))
+	p := newFake(t, testStack("acme-demo"))
 
 	flux := "Flux"
 	clearBundle := ""
 	bundle := "oci://ghcr.io/org/bundle:v2"
-	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{
 		Mode: flux, Bundle: &bundle, Exclude: []string{"kafka", "spark"},
 		Operators: map[string]bool{"vault": true, "istio": false},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var s v1alpha1.Stack
-	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
 		t.Fatal(err)
 	}
 	if s.Spec.Mode != v1alpha1.DeploymentModeFlux {
@@ -131,10 +131,10 @@ func TestPatchStackSpec(t *testing.T) {
 	}
 
 	// Clearing the bundle URL drops the BundleSource entirely.
-	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Bundle: &clearBundle}); err != nil {
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{Bundle: &clearBundle}); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "foundation-demo", Name: "foundation"}, &s); err != nil {
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
 		t.Fatal(err)
 	}
 	if s.Spec.Bundle != nil {
@@ -142,11 +142,11 @@ func TestPatchStackSpec(t *testing.T) {
 	}
 
 	// Invalid mode and invalid bundle URL are rejected without patching.
-	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Mode: "bogus"}); err == nil {
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{Mode: "bogus"}); err == nil {
 		t.Fatal("expected invalid mode error")
 	}
 	bad := "ghcr.io/no-scheme"
-	if err := p.PatchStackSpec(ctx, "foundation-demo", "foundation", PatchRequest{Bundle: &bad}); err == nil {
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{Bundle: &bad}); err == nil {
 		t.Fatal("expected invalid bundle error")
 	}
 }
@@ -157,13 +157,13 @@ func TestListStackEvents(t *testing.T) {
 	newer := metav1.NewTime(time.Now())
 	events := []client.Object{
 		&corev1.Event{
-			ObjectMeta:     metav1.ObjectMeta{Namespace: "foundation-demo", Name: "e1"},
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "acme-demo", Name: "e1"},
 			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "web-0"},
 			Reason:         "Pulled", Type: corev1.EventTypeNormal, Count: 2,
 			LastTimestamp: older, Message: "Pull complete",
 		},
 		&corev1.Event{
-			ObjectMeta:     metav1.ObjectMeta{Namespace: "foundation-demo", Name: "e2"},
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "acme-demo", Name: "e2"},
 			InvolvedObject: corev1.ObjectReference{Kind: "HelmRelease", Name: "vault"},
 			Reason:         "InstallFailed", Type: corev1.EventTypeWarning, Count: 1,
 			LastTimestamp: newer, Message: "helm install failed",
@@ -175,7 +175,7 @@ func TestListStackEvents(t *testing.T) {
 		},
 	}
 	p := newFake(t, events...)
-	got, err := p.ListStackEvents(ctx, "foundation-demo")
+	got, err := p.ListStackEvents(ctx, "acme-demo")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +187,118 @@ func TestListStackEvents(t *testing.T) {
 	}
 	if got[1].Reason != "Pulled" || got[1].Count != 2 {
 		t.Fatalf("second event wrong: %+v", got[1])
+	}
+}
+
+func TestSetStackPaused(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t, testStack("acme-demo"))
+	if err := p.SetStackPaused(ctx, "acme-demo", "acme", true); err != nil {
+		t.Fatal(err)
+	}
+	var s v1alpha1.Stack
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Spec.Paused {
+		t.Fatal("stack not paused")
+	}
+	if err := p.SetStackPaused(ctx, "acme-demo", "acme", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Spec.Paused {
+		t.Fatal("stack still paused")
+	}
+}
+
+func TestPatchComponentValues(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t, testStack("acme-demo"))
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{
+		ComponentValues: map[string]json.RawMessage{
+			"backend": json.RawMessage(`{"replicas":2,"image":{"tag":"v2"}}`),
+			"worker":  json.RawMessage(`{"concurrency":8}`),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var s v1alpha1.Stack
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Spec.ComponentValues) != 2 {
+		t.Fatalf("got %d overrides", len(s.Spec.ComponentValues))
+	}
+	var replicas int
+	if err := json.Unmarshal(s.Spec.ComponentValues["backend"].Raw, &struct {
+		Replicas *int `json:"replicas"`
+	}{Replicas: &replicas}); err != nil || replicas != 2 {
+		t.Fatalf("backend values = %s", s.Spec.ComponentValues["backend"].Raw)
+	}
+
+	// Replacing one key keeps the other; null removes.
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{
+		ComponentValues: map[string]json.RawMessage{
+			"backend": json.RawMessage(`{"replicas":3}`),
+			"worker":  nil,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "acme-demo", Name: "acme"}, &s); err != nil {
+		t.Fatal(err)
+	}
+	if string(s.Spec.ComponentValues["backend"].Raw) != `{"replicas":3}` {
+		t.Fatalf("backend = %s", s.Spec.ComponentValues["backend"].Raw)
+	}
+	if _, ok := s.Spec.ComponentValues["worker"]; ok {
+		t.Fatal("worker override not removed")
+	}
+
+	// Invalid JSON is rejected.
+	if err := p.PatchStackSpec(ctx, "acme-demo", "acme", PatchRequest{
+		ComponentValues: map[string]json.RawMessage{"backend": json.RawMessage(`{oops}`)},
+	}); err == nil {
+		t.Fatal("expected invalid JSON error")
+	}
+}
+
+func TestStackBackups(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t, testStack("acme-demo"))
+
+	bk, err := p.CreateStackBackup(ctx, BackupRequest{
+		SourceNamespace: "acme-demo",
+		TargetNamespace: "stack-b",
+		Include:         []string{"database"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bk.Namespace != "acme-demo" || bk.Phase != "Pending" {
+		t.Fatalf("unexpected backup view: %+v", bk)
+	}
+
+	list, err := p.ListStackBackups(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Source != "acme-demo" || list[0].Target != "stack-b" {
+		t.Fatalf("list = %+v", list)
+	}
+
+	// Validation.
+	for _, req := range []BackupRequest{
+		{SourceNamespace: "acme-demo", TargetNamespace: "acme-demo"},
+		{SourceNamespace: "Bad_NS", TargetNamespace: "stack-b"},
+		{SourceNamespace: "acme-demo", TargetNamespace: "stack-b", Include: []string{"nope"}},
+	} {
+		if _, err := p.CreateStackBackup(ctx, req); err == nil {
+			t.Fatalf("expected error for %+v", req)
+		}
 	}
 }
 
@@ -257,19 +369,19 @@ func TestRenderTemplateSubstitutesTenant(t *testing.T) {
 	if !ok {
 		t.Fatalf("obj[0] is %T, want Namespace", objs[0])
 	}
-	if ns.Name != "foundation-demo-b" {
+	if ns.Name != "acme-demo-b" {
 		t.Fatalf("namespace: %q", ns.Name)
 	}
 	stack, ok := objs[1].(*v1alpha1.Stack)
 	if !ok {
 		t.Fatalf("obj[1] is %T, want Stack", objs[1])
 	}
-	if stack.Namespace != "foundation-demo-b" {
+	if stack.Namespace != "acme-demo-b" {
 		t.Fatalf("stack namespace: %q", stack.Namespace)
 	}
 	found := false
 	for _, ref := range stack.Spec.SecretsRef {
-		if ref.From == "foundation-demo-b-backend-auth0" {
+		if ref.From == "acme-demo-b-backend-auth0" {
 			found = true
 		}
 	}
@@ -303,7 +415,7 @@ func TestCreateFromTemplateParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "name: foundation-demo-b") {
+	if !strings.Contains(out, "name: acme-demo-b") {
 		t.Fatal("dry run did not return rendered YAML")
 	}
 	if stacks, _ := p.ListStacks(context.Background()); len(stacks) != 0 {
@@ -320,12 +432,12 @@ func TestCreateFromTemplateParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stacks) != 1 || stacks[0].Namespace != "foundation-demo-b" || stacks[0].Mode != "Flux" {
+	if len(stacks) != 1 || stacks[0].Namespace != "acme-demo-b" || stacks[0].Mode != "Flux" {
 		t.Fatalf("unexpected stacks: %+v", stacks)
 	}
 	var s v1alpha1.Stack
 	if err := p.client.Get(context.Background(),
-		client.ObjectKey{Namespace: "foundation-demo-b", Name: "foundation"}, &s); err != nil {
+		client.ObjectKey{Namespace: "acme-demo-b", Name: "acme"}, &s); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.Spec.Exclude) != 1 || s.Spec.Exclude[0] != "kafka" {
@@ -345,7 +457,7 @@ func TestCreateFromTemplateParams(t *testing.T) {
 func TestListAndGetStacks(t *testing.T) {
 	stack := &v1alpha1.Stack{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "foundation", Namespace: "foundation-a",
+			Name: "acme", Namespace: "stack-a",
 			CreationTimestamp: metav1.Now(),
 		},
 		Spec: v1alpha1.StackSpec{
@@ -381,7 +493,7 @@ func TestListAndGetStacks(t *testing.T) {
 		t.Fatalf("failure not surfaced: %q", s.FailureMsg)
 	}
 
-	d, err := p.GetStack(context.Background(), "foundation-a", "foundation")
+	d, err := p.GetStack(context.Background(), "stack-a", "acme")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,12 +507,12 @@ func TestListAndGetStacks(t *testing.T) {
 		t.Fatalf("conditions not surfaced: %+v", d.Conditions)
 	}
 
-	if _, err := p.GetStack(context.Background(), "foundation-a", "nope"); err == nil {
+	if _, err := p.GetStack(context.Background(), "stack-a", "nope"); err == nil {
 		t.Fatal("missing stack should 404")
 	}
 
 	// Live YAML endpoint.
-	y, err := p.GetStackYAML(context.Background(), "foundation-a", "foundation")
+	y, err := p.GetStackYAML(context.Background(), "stack-a", "acme")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,23 +522,23 @@ func TestListAndGetStacks(t *testing.T) {
 }
 
 func TestDeleteStack(t *testing.T) {
-	stack := &v1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Name: "foundation", Namespace: "foundation-x"}}
+	stack := &v1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Name: "acme", Namespace: "stack-x"}}
 	p := newFake(t, stack)
 	ctx := context.Background()
 
 	// Wrong confirm is refused.
-	if err := p.DeleteStack(ctx, "foundation-x", "foundation", "wrong", false); err == nil {
+	if err := p.DeleteStack(ctx, "stack-x", "acme", "wrong", false); err == nil {
 		t.Fatal("delete with wrong confirm accepted")
 	}
-	if _, err := p.GetStack(ctx, "foundation-x", "foundation"); err != nil {
+	if _, err := p.GetStack(ctx, "stack-x", "acme"); err != nil {
 		t.Fatal("stack deleted without valid confirm")
 	}
 
 	// Correct confirm deletes the Stack, namespace untouched by default.
-	if err := p.DeleteStack(ctx, "foundation-x", "foundation", "foundation-x", false); err != nil {
+	if err := p.DeleteStack(ctx, "stack-x", "acme", "stack-x", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.GetStack(ctx, "foundation-x", "foundation"); err == nil {
+	if _, err := p.GetStack(ctx, "stack-x", "acme"); err == nil {
 		t.Fatal("stack still present after delete")
 	}
 }
@@ -449,14 +561,14 @@ func TestHTTPMux(t *testing.T) {
 		!strings.Contains(rec.Body.String(), "empty") {
 		t.Fatalf("templates: %d %s", rec.Code, rec.Body.String())
 	}
-	if strings.Contains(rec.Body.String(), "foundation-{{.Tenant}}") {
+	if strings.Contains(rec.Body.String(), "acme-{{.Tenant}}") {
 		t.Fatal("template body leaked through registry API")
 	}
 
 	// Template preview is YAML with the tenant substituted.
 	rec = httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/template?template=test-fixture&tenant=web", nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "foundation-web") {
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "acme-web") {
 		t.Fatalf("template preview: %d %s", rec.Code, rec.Body.String())
 	}
 
@@ -474,19 +586,19 @@ func TestHTTPMux(t *testing.T) {
 		t.Fatalf("list after create: %s (%v)", rec.Body.String(), err)
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks/foundation-web/foundation", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks/acme-web/acme", nil))
 	if rec.Code != 200 {
 		t.Fatalf("detail: %d", rec.Code)
 	}
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks/foundation-web/foundation/yaml", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks/acme-web/acme/yaml", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "kind: Stack") {
 		t.Fatalf("yaml endpoint: %d %s", rec.Code, rec.Body.String())
 	}
 
 	// Delete with confirm via DELETE.
 	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "http://localhost/api/stacks/foundation-web/foundation?confirm=foundation-web", nil))
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "http://localhost/api/stacks/acme-web/acme?confirm=acme-web", nil))
 	if rec.Code != 200 {
 		t.Fatalf("delete: %d %s", rec.Code, rec.Body.String())
 	}

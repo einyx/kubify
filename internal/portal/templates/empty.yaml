@@ -7,18 +7,18 @@ defaults:
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: foundation-{{.Tenant}}
+  name: acme-{{.Tenant}}
   labels:
     app.kubernetes.io/managed-by: kubo-portal
 ---
 apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
-  name: foundation
-  namespace: foundation-{{.Tenant}}
+  name: acme
+  namespace: acme-{{.Tenant}}
 spec:
   mode: Direct
   inline:
     components: []
     description: Empty stack created from the portal 'empty' template
-    title: Foundation {{.Tenant}}
+    title: Acme {{.Tenant}}

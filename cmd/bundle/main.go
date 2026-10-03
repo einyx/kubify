@@ -1,4 +1,4 @@
-// Package main builds and pushes a foundation bundle (charts.tgz + bundle.json)
+// Package main builds and pushes a product bundle (charts.tgz + bundle.json)
 // as an OCI artifact. Usage: kubo-bundle --push <oci-ref> <chart-dir> [<chart-dir> ...]
 package main
 
@@ -29,7 +29,7 @@ import (
 )
 
 func main() {
-	push := flag.String("push", "", "OCI reference to push, e.g. ghcr.io/org/foundation-bundle:0.0.9")
+	push := flag.String("push", "", "OCI reference to push, e.g. ghcr.io/org/product-bundle:0.0.9")
 	outDir := flag.String("out", "", "write charts.tgz + bundle.json to this directory instead of pushing")
 	imagesFile := flag.String("images", "", "YAML/JSON file of curated image refs: {images: [{ref: ghcr.io/org/foo:1.0}, ...]}. Overrides chart-default scan.")
 	mirror := flag.String("mirror", "", "registry host to copy images to, e.g. myacr.azurecr.io/mirror. Images are copied and bundle.json refs are rewritten.")
@@ -190,7 +190,7 @@ func mirrorImages(ctx context.Context, images []imageRef, mirrorHost string) ([]
 	for _, img := range images {
 		src := img.Ref
 		// Build dest: mirrorHost + "/" + last two path components of src (repo:tag).
-		// e.g. ghcr.io/meshxdata/foo:1.0 → myacr.azurecr.io/mirror/foo:1.0
+		// e.g. ghcr.io/example/foo:1.0 → myacr.azurecr.io/mirror/foo:1.0
 		dst := mirrorDest(mirrorHost, src)
 		fmt.Printf("copying %s → %s\n", src, dst)
 		if err := crane.Copy(src, dst, crane.WithContext(ctx)); err != nil {
@@ -236,7 +236,7 @@ func pushOCI(ctx context.Context, ref string, chartsTGZ, bundleJSON []byte) erro
 		MediaType:   ocispec.MediaTypeImageManifest,
 		Config:      configDesc,
 		Layers:      []ocispec.Descriptor{chartsDesc, bundleDesc},
-		Annotations: map[string]string{"org.opencontainers.image.title": "foundation-bundle"},
+		Annotations: map[string]string{"org.opencontainers.image.title": "product-bundle"},
 	}
 	manifestJSON, _ := json.Marshal(manifest)
 	manifestDesc := ocispec.Descriptor{

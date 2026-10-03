@@ -9,11 +9,11 @@ import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 // StackBackupSpec copies Postgres databases and storage-engine S3 buckets
 // from a source Stack namespace into a target Stack namespace.
 type StackBackupSpec struct {
-	// SourceNamespace is the namespace of the source Stack (e.g. foundation-a).
+	// SourceNamespace is the namespace of the source Stack (e.g. stack-a).
 	// +kubebuilder:validation:MinLength=1
 	SourceNamespace string `json:"sourceNamespace"`
 
-	// TargetNamespace is the namespace of the destination Stack (e.g. foundation-b).
+	// TargetNamespace is the namespace of the destination Stack (e.g. stack-b).
 	// +kubebuilder:validation:MinLength=1
 	TargetNamespace string `json:"targetNamespace"`
 
@@ -38,7 +38,7 @@ type StackBackupSpec struct {
 }
 
 // PostgresBackup configures the DB copy step. Any field left empty uses
-// the Foundation convention (service postgres-postgresql, db/user "foundation",
+// the deployment convention (service postgres-postgresql, database/user per spec,
 // password from secret postgres-postgresql key postgres-password).
 type PostgresBackup struct {
 	// Host is the Postgres service name inside each namespace.
@@ -47,10 +47,10 @@ type PostgresBackup struct {
 	// Port, defaults to 5432.
 	// +optional
 	Port int32 `json:"port,omitempty"`
-	// Database, defaults to "foundation".
+	// Database is required (set it in spec.postgres.database).
 	// +optional
 	Database string `json:"database,omitempty"`
-	// User, defaults to "foundation".
+	// User is required (set it in spec.postgres.user).
 	// +optional
 	User string `json:"user,omitempty"`
 	// SourcePasswordSecret is the Secret in SourceNamespace holding the password.

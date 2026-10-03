@@ -86,7 +86,17 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, r.Update(ctx, &stack)
 		}
 	} else {
-		return ctrl.Result{}, r.finalize(ctx, &stack)
+		if err := r.finalize(ctx, &stack); err != nil {
+			// Deletion is blocked (e.g. a stale helm lock). Surface it and
+			// retry at a fixed pace; the finalizer stays until clean.
+			meta.SetStatusCondition(&stack.Status.Conditions, metav1.Condition{
+				Type: "Deleting", Status: metav1.ConditionFalse, Reason: "UninstallPending",
+				Message: err.Error(), ObservedGeneration: stack.Generation,
+			})
+			_ = r.Status().Update(ctx, &stack)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+		return ctrl.Result{}, nil
 	}
 
 	secretsReady, err := r.ensureSecrets(ctx, &stack)
@@ -121,7 +131,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		} else {
 			// ponytail: add-only merge — extra bundles fill missing keys, never overwrite
 			// main bundle charts. This prevents dai-bundle's "backend" chart from
-			// shadowing the foundation bundle's "backend" chart.
+			// shadowing a bundle chart named "backend".
 			for k, v := range ec {
 				if _, exists := bundleCharts[k]; !exists {
 					bundleCharts[k] = v
@@ -586,16 +596,26 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 			}
 		}
 	default:
+		// Isolate per-component uninstall failures: one stuck release (helm
+		// lock, pending state) must not stop the others from being removed.
+		var firstErr error
+		var failed []string
 		for _, comp := range stack.Status.Components {
 			if isClusterOperator(comp.Name) {
 				continue // handled below via releaseOperators (refcounted)
 			}
 			if err := r.uninstallComponent(ctx, stack, comp); err != nil {
-				return err
+				failed = append(failed, comp.Name)
+				if firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
-		if err := r.releaseOperators(ctx, stack); err != nil {
-			return err
+		if err := r.releaseOperators(ctx, stack); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		if firstErr != nil {
+			return fmt.Errorf("uninstall pending (%s): %w", strings.Join(failed, ","), firstErr)
 		}
 	}
 	controllerutil.RemoveFinalizer(stack, stackFinalizer)

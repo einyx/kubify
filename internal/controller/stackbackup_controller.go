@@ -28,15 +28,13 @@ const (
 	stackBackupSA    = "kubo-stackbackup"
 	defaultPGImage   = "postgres:16-alpine" // ponytail: has pg_dump/psql; script curls mc at runtime so no custom image needed
 	defaultPGHost    = "postgres-postgresql"
-	defaultPGDB      = "foundation"
-	defaultPGUser    = "foundation"
 	defaultPGSecret  = "postgres-postgresql"
 	defaultPGPwdKey  = "postgres-password"
 	defaultS3URL     = "http://storage-engine:8080"
 	defaultS3Secret  = "storage-engine"
-	// Foundation convention: the storage-engine chart stores only the secret
-	// access key (chart key auth-credential); the access key ID is the tenant
-	// identity, which equals the namespace name (foundation-<tenant>).
+	// Storage-engine convention: the chart stores only the secret access key
+	// (key auth-credential); the access key ID is the tenant identity, which
+	// equals the namespace name.
 	defaultS3SkKey = "auth-credential"
 )
 
@@ -63,6 +61,19 @@ func (r *StackBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	if bk.Status.Phase == "Succeeded" || bk.Status.Phase == "Failed" {
 		return ctrl.Result{}, nil
+	}
+
+	// Database copy needs explicit credentials context; there is no generic
+	// default database/user that works across products.
+	include := bk.Spec.Include
+	if len(include) == 0 {
+		include = []string{"database", "s3"}
+	}
+	if contains(include, "database") {
+		pg := bk.Spec.Postgres
+		if pg == nil || pg.Database == "" || pg.User == "" {
+			return r.fail(ctx, &bk, "spec.postgres.database and spec.postgres.user are required for database backups")
+		}
 	}
 
 	jobName := bk.Status.JobName
@@ -148,8 +159,8 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 	if pg.Port != 0 {
 		port = pg.Port
 	}
-	db := firstNonEmpty(pg.Database, defaultPGDB)
-	user := firstNonEmpty(pg.User, defaultPGUser)
+	db := pg.Database
+	user := pg.User
 	srcPgSec, srcPgKey := secretRef(pg.SourcePasswordSecret, defaultPGSecret, defaultPGPwdKey)
 	dstPgSec, dstPgKey := secretRef(pg.TargetPasswordSecret, defaultPGSecret, defaultPGPwdKey)
 
