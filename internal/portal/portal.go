@@ -89,6 +89,8 @@ type StackSummary struct {
 	Total      int    `json:"total"`
 	Age        string `json:"age"`
 	FailureMsg string `json:"failureMsg,omitempty"`
+	// Failing lists the names of components not currently Ready.
+	Failing []string `json:"failing,omitempty"`
 }
 
 // AgentfwEnabled reports whether the agentfw archive integration is active.
@@ -189,7 +191,9 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 			sum.Total++
 			if c.Phase == v1alpha1.ComponentPhaseReady {
 				sum.Ready++
+				continue
 			}
+			sum.Failing = append(sum.Failing, c.Name)
 			if c.Phase == v1alpha1.ComponentPhaseFailed && sum.FailureMsg == "" {
 				sum.FailureMsg = fmt.Sprintf("%s: %s", c.Name, truncate(c.Message, 160))
 			}
@@ -221,10 +225,13 @@ type ConditionView struct {
 
 // ComponentView is one component row.
 type ComponentView struct {
-	Name     string `json:"name"`
-	Phase    string `json:"phase"`
-	Revision int    `json:"revision,omitempty"`
-	Message  string `json:"message,omitempty"`
+	Name           string                    `json:"name"`
+	Phase          string                    `json:"phase"`
+	Revision       int                       `json:"revision,omitempty"`
+	Message        string                    `json:"message,omitempty"`
+	Images         []v1alpha1.ComponentImage `json:"images,omitempty"`
+	DependsOn      []string                  `json:"dependsOn,omitempty"`
+	DependsOnReady []string                  `json:"dependsOnReady,omitempty"`
 }
 
 // GetStack returns the component-level status of one stack.
@@ -251,6 +258,7 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 	}
 	sort.Strings(overridden)
 	d.ValueOverrides = overridden
+	components := stackComponents(ctx, p.client, &s)
 	if s.Spec.Bundle != nil {
 		d.Bundle = s.Spec.Bundle.URL
 	}
@@ -279,12 +287,50 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 		d.Total++
 		if c.Phase == v1alpha1.ComponentPhaseReady {
 			d.Ready++
+		} else {
+			d.Failing = append(d.Failing, c.Name)
 		}
-		d.Components = append(d.Components, ComponentView{
-			Name: c.Name, Phase: string(c.Phase), Revision: c.Revision, Message: truncate(c.Message, 300),
-		})
+		cv := ComponentView{
+			Name:     c.Name,
+			Phase:    string(c.Phase),
+			Revision: c.Revision,
+			Message:  truncate(c.Message, 2000),
+			Images:   c.Images,
+		}
+		// Dependency info lives on the component spec, not the status.
+		if comp := findComponent(components, c.Name); comp != nil {
+			cv.DependsOn, cv.DependsOnReady = comp.DependsOn, comp.DependsOnReady
+		}
+		d.Components = append(d.Components, cv)
 	}
 	return d, nil
+}
+
+// stackComponents resolves the component specs behind a Stack: inline
+// components when self-contained, otherwise the referenced (cluster-scoped)
+// StackDefinition. Missing definitions yield nil — statuses still render
+// without dependency info.
+func stackComponents(ctx context.Context, c client.Client, s *v1alpha1.Stack) []v1alpha1.StackComponentSpec {
+	if s.Spec.Inline != nil {
+		return s.Spec.Inline.Components
+	}
+	if s.Spec.StackRef == "" {
+		return nil
+	}
+	var def v1alpha1.StackDefinition
+	if err := c.Get(ctx, types.NamespacedName{Name: s.Spec.StackRef}, &def); err != nil {
+		return nil
+	}
+	return def.Spec.Components
+}
+
+func findComponent(comps []v1alpha1.StackComponentSpec, name string) *v1alpha1.StackComponentSpec {
+	for i := range comps {
+		if comps[i].Name == name {
+			return &comps[i]
+		}
+	}
+	return nil
 }
 
 // SetTemplateDir overrides the local templates dir (must be called before
