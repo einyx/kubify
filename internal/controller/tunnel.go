@@ -45,11 +45,20 @@ func (r *StackReconciler) ensureTunnel(ctx context.Context, stack *platformv1alp
 	}
 
 	t := stack.Spec.Tunnel
-	if t.TokenSecret.Name == "" {
+	token := t.TokenSecret
+	if token == nil {
+		// Convention: the token is seeded via VaultSeed into
+		// "<stack>-tunnel-token", key "token".
+		token = &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: stack.Name + "-tunnel-token"},
+			Key:                  "token",
+		}
+	}
+	if token.Name == "" {
 		return fmt.Errorf("tunnel.tokenSecret.name is required")
 	}
-	if t.TokenSecret.Key == "" {
-		t.TokenSecret.Key = "token"
+	if token.Key == "" {
+		token.Key = "token"
 	}
 
 	labels := map[string]string{
@@ -72,13 +81,13 @@ func (r *StackReconciler) ensureTunnel(ctx context.Context, stack *platformv1alp
 		dep.Annotations = map[string]string{
 			"platform.kubo.io/tunnel-hostname": t.Hostname,
 		}
-		dep.Spec = tunnelDeploymentSpec(t, name, labels)
+		dep.Spec = tunnelDeploymentSpec(token, name, labels)
 		return controllerutil.SetControllerReference(stack, dep, r.Scheme)
 	})
 	return err
 }
 
-func tunnelDeploymentSpec(t *platformv1alpha1.StackTunnel, name string, labels map[string]string) appsv1.DeploymentSpec {
+func tunnelDeploymentSpec(token *corev1.SecretKeySelector, name string, labels map[string]string) appsv1.DeploymentSpec {
 	replicas := int32(1)
 	return appsv1.DeploymentSpec{
 		Replicas: &replicas,
@@ -93,8 +102,8 @@ func tunnelDeploymentSpec(t *platformv1alpha1.StackTunnel, name string, labels m
 					Env: []corev1.EnvVar{{
 						Name: "TUNNEL_TOKEN",
 						ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: t.TokenSecret.Name},
-							Key:                  t.TokenSecret.Key,
+							LocalObjectReference: corev1.LocalObjectReference{Name: token.Name},
+							Key:                  token.Key,
 						}},
 					}},
 					SecurityContext: &corev1.SecurityContext{

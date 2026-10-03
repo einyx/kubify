@@ -610,10 +610,10 @@ spec:
                     type: string
                   tokenSecret:
                     description: |-
-                      TokenSecret references a Secret in the Stack namespace holding the
-                      cloudflared tunnel token. Provision it via VaultSeed (static) or
-                      out-of-band; rotate by updating the Secret and restarting. Key
-                      defaults to "token".
+                      TokenSecret overrides where the tunnel token comes from. By
+                      convention the token lives in the "<stack>-tunnel-token" Secret, key
+                      "token", provisioned via VaultSeed (static, copyFrom canonical) —
+                      like every other tenant credential. Only set this to deviate.
                     properties:
                       key:
                         description: The key of the secret to select from.  Must be
@@ -638,7 +638,6 @@ spec:
                     x-kubernetes-map-type: atomic
                 required:
                 - hostname
-                - tokenSecret
                 type: object
               values:
                 description: |-
