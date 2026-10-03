@@ -328,7 +328,7 @@ func (h *HelmEngine) Uninstall(name, namespace string) error {
 	// last deployed revision so the uninstall can proceed.
 	if rel, gerr := getRelease(cfg, name); gerr == nil && rel != nil &&
 		strings.HasPrefix(string(rel.Info.Status), "pending-") {
-		if derr := cfg.Releases.Delete(rel); derr != nil {
+		if _, derr := cfg.Releases.Delete(rel.Name, rel.Version); derr != nil {
 			return fmt.Errorf("clear pending release %s: %w", name, derr)
 		}
 	}
