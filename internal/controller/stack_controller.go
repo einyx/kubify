@@ -581,6 +581,36 @@ func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stac
 	return err
 }
 
+// adoptTenantSecret recreates a missing kubo-system source secret from the
+// tenant copy, when the source name is tenant-prefixed ("<ns>-<secret>").
+// Shared (non-prefixed) secrets are refused: tenants must not be able to
+// seed cluster-shared material such as registry pull credentials.
+func (r *StackReconciler) adoptTenantSecret(ctx context.Context, namespace, sourceName string) bool {
+	const srcNS = "kubo-system"
+	prefix := namespace + "-"
+	if !strings.HasPrefix(sourceName, prefix) {
+		return false
+	}
+	tenantName := strings.TrimPrefix(sourceName, prefix)
+	var copy corev1.Secret
+	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: tenantName}, &copy); err != nil {
+		return false
+	}
+	src := corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        sourceName,
+			Namespace:   srcNS,
+			Annotations: map[string]string{"platform.kubo.io/adopted-from": namespace + "/" + tenantName},
+		},
+		Type: copy.Type,
+		Data: copy.Data,
+	}
+	if err := r.Create(ctx, &src); err != nil {
+		return false
+	}
+	return true
+}
+
 func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.Stack) error {
 	if !controllerutil.ContainsFinalizer(stack, stackFinalizer) {
 		return nil
@@ -642,6 +672,7 @@ func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platfor
 // ensureSecrets copies secrets from kubo-system into the Stack's namespace:
 //   - chart/bundle pull secrets referenced in the spec
 //   - explicit tenant secrets listed in spec.secretsRef
+//
 // ensureSecrets returns (allReady, error). allReady is false when any source
 // secret was missing — the caller should requeue rather than proceed.
 func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack) (bool, error) {
@@ -683,6 +714,15 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 		var src corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: m.from}, &src); err != nil {
 			if errors.IsNotFound(err) {
+				// Self-heal: a cluster wipe of kubo-system must not be fatal.
+				// Tenant namespaces hold a full copy of their own secrets, so
+				// tenant-prefixed sources are adopted back from there. Shared
+				// secrets (pull creds etc.) are never adopted from a tenant —
+				// they must be provided externally (kubo-seed import).
+				if adopted := r.adoptTenantSecret(ctx, stack.Namespace, m.from); adopted {
+					log.Info("adopted tenant secret back into kubo-system", "secret", m.from)
+					continue
+				}
 				log.Info("secret not found in kubo-system, will retry", "secret", m.from)
 				allReady = false
 				continue
