@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 
 	"github.com/einyx/kubo/internal/portal"
 )
@@ -14,6 +15,8 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:9090", "listen address (loopback by default)")
 	templatesDir := flag.String("templates", portal.DefaultTemplatesDir, "local templates dir")
+	agentfwURL := flag.String("agentfw", os.Getenv("AGENTFW_URL"),
+		"agentfw admin base URL to surface the session archive under /agentfw/ (empty = disabled)")
 	allowRemote := flag.Bool("allow-remote", false,
 		"bind non-loopback addresses — the portal has NO authentication; "+
 			"only do this behind an authenticating proxy or NetworkPolicy")
@@ -28,6 +31,12 @@ func main() {
 		log.Fatalf("portal: %v", err)
 	}
 	p.SetTemplateDir(*templatesDir)
+	if err := p.SetAgentfwURL(*agentfwURL); err != nil {
+		log.Fatalf("portal: %v", err)
+	}
+	if p.AgentfwEnabled() {
+		log.Printf("portal: agentfw archive at /agentfw/ (upstream %s)", *agentfwURL)
+	}
 	log.Printf("kubo portal listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, p.Mux()); err != nil {
 		log.Fatalf("portal: %v", err)

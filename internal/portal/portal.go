@@ -3,10 +3,15 @@
 package portal
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -38,9 +43,11 @@ const DefaultTemplatesDir = defaultTemplatesDir
 
 // Portal is the operator portal server.
 type Portal struct {
-	client   client.Client
-	registry *Registry
-	metrics  *Metrics
+	client      client.Client
+	registry    *Registry
+	metrics     *Metrics
+	agentfwURL  string
+	agentfwProxy http.Handler
 }
 
 // New builds a Portal using the provided client and the default template
@@ -76,8 +83,76 @@ type StackSummary struct {
 	FailureMsg string `json:"failureMsg,omitempty"`
 }
 
+// AgentfwEnabled reports whether the agentfw archive integration is active.
+func (p *Portal) AgentfwEnabled() bool { return p.agentfwProxy != nil }
+
 // GetIndexHTML returns the embedded single-page UI.
 func (p *Portal) GetIndexHTML() string { return indexHTML }
+
+// SetAgentfwURL configures the portal to surface the agentfw view archive
+// (agentsview-style session browser) under /agentfw/, proxied to the
+// agentfw admin endpoint. Empty string disables the integration.
+func (p *Portal) SetAgentfwURL(raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		p.agentfwURL, p.agentfwProxy = "", nil
+		return nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("portal: invalid agentfw url %q: %w", raw, err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("portal: agentfw url must be http(s), got %q", raw)
+	}
+	target := &url.URL{Scheme: u.Scheme, Host: u.Host}
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.Out.Host = target.Host
+			// Strip the portal mount prefix; the viewer serves at root.
+			pr.Out.URL.Path = strings.TrimPrefix(pr.In.URL.Path, "/agentfw")
+			if pr.Out.URL.Path == "" {
+				pr.Out.URL.Path = "/"
+			}
+		},
+		// The upstream viewer serves its SPA at root with no base path
+		// configured, so inject the portal mount prefix into the HTML —
+		// mirroring agentsview's --base-path proxy integration.
+		ModifyResponse: func(resp *http.Response) error {
+			if !strings.Contains(resp.Header.Get("Content-Type"), "text/html") || resp.StatusCode != http.StatusOK {
+				return nil
+			}
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+			if err != nil {
+				return err
+			}
+			injected := bytes.Replace(body, []byte("<script>"),
+				[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
+			resp.Body = io.NopCloser(bytes.NewReader(injected))
+			resp.Header.Del("Content-Length")
+			resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
+			return nil
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "portal: agentfw unreachable — is the proxy running with its admin port exposed?",
+				http.StatusBadGateway)
+		},
+	}
+	p.agentfwURL = raw
+	p.agentfwProxy = proxy
+	return nil
+}
+
+// agentfwNav returns the nav snippet for the agentfw view, or "" when the
+// integration is not configured.
+func (p *Portal) agentfwNav() string {
+	if p.agentfwProxy == nil {
+		return ""
+	}
+	return `<a class="btn" href="/agentfw/" title="agentfw session archive">Agent traffic <span class="btn-icon">◉</span></a>`
+}
 
 // ListStacks returns every Stack in the cluster, oldest first.
 func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {

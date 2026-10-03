@@ -55,8 +55,16 @@ func (p *Portal) Mux() http.Handler {
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Write([]byte(p.GetIndexHTML()))
+		w.Write([]byte(strings.Replace(p.GetIndexHTML(), "<!-- agentfw-nav -->", p.agentfwNav(), 1)))
 	})
+	// agentfw view archive (agentsview-style session browser), proxied to
+	// the agentfw admin port when configured via SetAgentfwURL.
+	if p.agentfwProxy != nil {
+		handle("GET /agentfw", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/agentfw/", http.StatusPermanentRedirect)
+		})
+		handle("GET /agentfw/", p.agentfwProxy.ServeHTTP)
+	}
 	handle("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
