@@ -614,7 +614,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: watcher
-        chartVersion: 2.7.3
+        chartVersion: 2.7.4
         repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - backend
