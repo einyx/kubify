@@ -78,13 +78,12 @@ func (r *StackReconciler) ensureControlPlaneVault(ctx context.Context) (*vaultCl
 	return vc, true
 }
 
-// controlPlaneVaultSpec: single-node raft vault, Azure Key Vault auto-unseal
-// (unseal keys live in Azure — nothing trackable in-cluster can be lost).
+// controlPlaneVaultSpec: single-node raft vault, unsealed via a k8s secret
+// in the kubo-vault namespace (bank-vaults generates the keys at init).
+// kubo-vault is deliberately NOT kubo-system: it survives kubo-system
+// wipes, which is the failure mode this vault defends against.
 func controlPlaneVaultSpec() map[string]interface{} {
 	spec := vaultCRSpec(cpVaultNS)
-	spec["unsealConfig"] = map[string]interface{}{
-		"azure": map[string]interface{}{"keyVaultName": cpAzureKV},
-	}
 	return spec
 }
 
