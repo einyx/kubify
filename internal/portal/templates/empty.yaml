@@ -1,0 +1,24 @@
+id: empty
+name: Empty stack
+description: Namespace and a minimal Stack skeleton — bring your own components.
+defaults:
+  mode: Direct
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: product-{{.Tenant}}
+  labels:
+    app.kubernetes.io/managed-by: kubo-portal
+---
+apiVersion: platform.kubo.io/v1alpha1
+kind: Stack
+metadata:
+  name: product
+  namespace: product-{{.Tenant}}
+spec:
+  mode: Direct
+  inline:
+    components: []
+    description: Empty stack created from the portal 'empty' template
+    title: Product {{.Tenant}}
