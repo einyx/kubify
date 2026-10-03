@@ -3,6 +3,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -53,6 +54,7 @@ spec:
 
 func newFake(t *testing.T, objs ...client.Object) *Portal {
 	t.Helper()
+	resetRateLimits()
 	sch := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(sch); err != nil {
 		t.Fatal(err)
@@ -175,7 +177,7 @@ func TestListStackEvents(t *testing.T) {
 		},
 	}
 	p := newFake(t, events...)
-	got, err := p.ListStackEvents(ctx, "acme-demo")
+	got, err := p.ListStackEvents(ctx, "acme-demo", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +189,15 @@ func TestListStackEvents(t *testing.T) {
 	}
 	if got[1].Reason != "Pulled" || got[1].Count != 2 {
 		t.Fatalf("second event wrong: %+v", got[1])
+	}
+
+	// A positive limit trims the result.
+	limited, err := p.ListStackEvents(ctx, "acme-demo", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(limited) != 1 || limited[0].Reason != "InstallFailed" {
+		t.Fatalf("limit=1 got %+v", limited)
 	}
 }
 
@@ -299,6 +310,148 @@ func TestStackBackups(t *testing.T) {
 		if _, err := p.CreateStackBackup(ctx, req); err == nil {
 			t.Fatalf("expected error for %+v", req)
 		}
+	}
+}
+
+func TestHealthAndETag(t *testing.T) {
+	p := newFake(t, testStack("acme-demo"))
+	h := p.Mux()
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/healthz", nil))
+	if rec.Code != 200 {
+		t.Fatalf("healthz: %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/readyz", nil))
+	if rec.Code != 200 {
+		t.Fatalf("readyz: %d", rec.Code)
+	}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/metrics", nil))
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "kubo_portal_requests_total") {
+		t.Fatalf("metrics: %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks", nil))
+	if rec.Code != 200 {
+		t.Fatalf("stacks: %d", rec.Code)
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("missing ETag")
+	}
+	req := httptest.NewRequest("GET", "http://localhost/api/stacks", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match: %d, want 304", rec.Code)
+	}
+}
+
+func TestRateLimitMutations(t *testing.T) {
+	p := newFake(t)
+	h := p.Mux()
+	// Burst is 20; the 21st rapid mutation gets a 429.
+	for i := 0; i < 20; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("DELETE", "http://localhost/api/stacks/ns/name?confirm=wrong", nil))
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatalf("request %d rate limited too early", i)
+		}
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("DELETE", "http://localhost/api/stacks/ns/name?confirm=wrong", nil))
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d", rec.Code)
+	}
+	// GETs are never limited.
+	for i := 0; i < 25; i++ {
+		rec = httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest("GET", "http://localhost/api/stacks", nil))
+		if rec.Code == http.StatusTooManyRequests {
+			t.Fatal("GET was rate limited")
+		}
+	}
+}
+
+func TestBackupRetryAndDelete(t *testing.T) {
+	ctx := context.Background()
+	p := newFake(t)
+	bk, err := p.CreateStackBackup(ctx, BackupRequest{
+		SourceNamespace: "acme-demo", TargetNamespace: "stack-b",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	retry, err := p.RetryStackBackup(ctx, bk.Namespace, bk.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Name == bk.Name || retry.Target != "stack-b" {
+		t.Fatalf("retry view: %+v", retry)
+	}
+	list, err := p.ListStackBackups(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 2 {
+		t.Fatalf("want 2 backups, got %d", len(list))
+	}
+	if err := p.DeleteStackBackup(ctx, bk.Namespace, bk.Name); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.DeleteStackBackup(ctx, bk.Namespace, "nope"); err == nil {
+		t.Fatal("expected not-found error")
+	}
+	list, _ = p.ListStackBackups(ctx)
+	if len(list) != 1 {
+		t.Fatalf("want 1 backup after delete, got %d", len(list))
+	}
+}
+
+func TestTemplateValidation(t *testing.T) {
+	dir := t.TempDir()
+	bad := map[string]string{
+		// Bad id.
+		"bad-id.yaml": "id: NOT_VALID\n---\nkind: Namespace\n",
+		// Missing body docs.
+		"no-body.yaml": "id: no-body\n---\nkind: Foo\n",
+		// Broken template syntax.
+		"broken.yaml": "id: broken\n---\nkind: Namespace\n{{ .Nope\n",
+		// Invalid default mode.
+		"bad-mode.yaml": "id: bad-mode\ndefaults:\n  mode: Bogus\n---\nkind: Namespace\n",
+	}
+	for name, content := range bad {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	good := "id: good-one\nname: Good\n---\nkind: Namespace\n---\nkind: Stack\n"
+	if err := os.WriteFile(filepath.Join(dir, "good.yaml"), []byte(good), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := newFake(t)
+	p.SetTemplateDir(dir)
+	all, err := p.registry.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]string{}
+	for _, tm := range all {
+		ids[tm.ID] = tm.Source
+	}
+	// Bad templates are skipped, not fatal; the good one survives with a source.
+	if _, ok := ids["good-one"]; !ok {
+		t.Fatalf("good template missing: %v", ids)
+	}
+	if ids["good-one"] != "local" {
+		t.Fatalf("source = %q", ids["good-one"])
+	}
+	if _, ok := ids["bad-id"]; ok {
+		t.Fatal("bad-id template not skipped")
 	}
 }
 

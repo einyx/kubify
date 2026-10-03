@@ -903,9 +903,23 @@ const api = async (path, opts) => {
 let currentDetail = null; // {ns, name}
 let currentData = null;   // last StackDetail for prefilling the edit dialog
 
+let stacksETag = null;
+let lastStacks = [];
+
 async function refresh() {
+  let stacks;
   try {
-    const stacks = await api('/api/stacks');
+    const headers = stacksETag ? { 'If-None-Match': stacksETag } : {};
+    const r = await fetch('/api/stacks', { headers });
+    if (r.status === 304) {
+      stacks = lastStacks; // unchanged — skip re-render
+    } else if (!r.ok) {
+      throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    } else {
+      stacksETag = r.headers.get('ETag');
+      stacks = await r.json();
+      lastStacks = stacks;
+    }
     const tb = document.getElementById('rows');
     const t = new Date();
     document.getElementById('updated').textContent =
@@ -1168,7 +1182,12 @@ async function loadBackups(ns) {
 
 function renderBackups(ns) {
   const mine = allBackups.filter(b => b.source === ns);
-  document.getElementById('backup-rows').innerHTML = mine.map(b => `
+  document.getElementById('backup-rows').innerHTML = mine.map(b => {
+    const done = b.phase === 'Succeeded' || b.phase === 'Failed';
+    const acts = [];
+    if (done) acts.push(`<button class="btn secondary" style="padding:3px 10px;font-size:11px" onclick="retryBackup('${esc(b.namespace)}','${esc(b.name)}')">Retry</button>`);
+    acts.push(`<button class="btn secondary" style="padding:3px 10px;font-size:11px;color:var(--err)" onclick="deleteBackup('${esc(b.namespace)}','${esc(b.name)}')">Delete</button>`);
+    return `
     <tr>
       <td class="cell-name" style="font-family:'SF Mono','Fira Code',monospace;font-size:11px">${esc(b.name)}</td>
       <td class="cell-ns">${esc(b.target)}</td>
@@ -1176,9 +1195,28 @@ function renderBackups(ns) {
       <td><span class="phase ${b.phase === 'Succeeded' ? 'Ready' : b.phase === 'Failed' ? 'Failed' : 'Progressing'}">${esc(b.phase)}</span>
         ${b.message ? `<div class="failmsg">${esc(b.message)}</div>` : ''}</td>
       <td class="cell-mode">${esc(b.age)}</td>
-      <td></td>
-    </tr>`).join('')
+      <td style="text-align:right;white-space:nowrap">${acts.join(' ')}</td>
+    </tr>`;
+  }).join('')
     || '<tr class="empty-row"><td colspan="6">No backups yet.</td></tr>';
+}
+
+async function retryBackup(ns, name) {
+  try {
+    const bk = await api(`/api/backups/${ns}/${name}/retry`, { method: 'POST' });
+    toast(`Retry created: ${bk.name}`, true);
+    loadBackups(ns);
+  } catch (e) { toast(e.message, false); }
+}
+
+async function deleteBackup(ns, name) {
+  if (!confirm(`Delete backup record ${name}? Its copy job is garbage-collected.`)) return;
+  try {
+    await fetch(`/api/backups/${ns}/${name}`, { method: 'DELETE' })
+      .then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(`Backup ${name} deleted`, true);
+    loadBackups(ns);
+  } catch (e) { toast(e.message, false); }
 }
 
 async function openBackup() {
@@ -1300,7 +1338,8 @@ async function loadTemplates() {
       `<option value="${esc(t.id)}">${esc(t.name || t.id)}</option>`).join('');
     const syncDesc = () => {
       const t = templates.find(t => t.id === sel.value);
-      document.getElementById('template-desc').textContent = t ? (t.description || '') : '';
+      document.getElementById('template-desc').textContent =
+        t ? (t.description || '') + (t.source ? ` — source: ${t.source}` : '') : '';
     };
     sel.onchange = syncDesc;
     syncDesc();

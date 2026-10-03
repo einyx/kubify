@@ -169,8 +169,10 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 		s3 = &platformv1alpha1.S3Backup{}
 	}
 	s3Endpoint := firstNonEmpty(s3.Endpoint, defaultS3URL)
-	srcS3Sec, _ := secretRef(s3.SourceCredentialsSecret, defaultS3Secret, "")
-	dstS3Sec, _ := secretRef(s3.TargetCredentialsSecret, defaultS3Secret, "")
+	srcS3Sec, srcS3Key := secretRef(s3.SourceCredentialsSecret, defaultS3Secret, "")
+	dstS3Sec, dstS3Key := secretRef(s3.TargetCredentialsSecret, defaultS3Secret, "")
+	srcS3Key = firstNonEmpty(srcS3Key, defaultS3SkKey)
+	dstS3Key = firstNonEmpty(dstS3Key, defaultS3SkKey)
 
 	include := bk.Spec.Include
 	if len(include) == 0 {
@@ -251,8 +253,8 @@ echo "done."
 							// Access key ID = tenant identity = namespace name.
 							corev1.EnvVar{Name: "SRC_S3_AK", Value: bk.Spec.SourceNamespace},
 							corev1.EnvVar{Name: "DST_S3_AK", Value: bk.Spec.TargetNamespace},
-							envFromSecret("SRC_S3_SK", srcS3Sec, defaultS3SkKey),
-							envFromSecret("DST_S3_SK", dstS3Sec, defaultS3SkKey),
+							envFromSecret("SRC_S3_SK", srcS3Sec, srcS3Key),
+							envFromSecret("DST_S3_SK", dstS3Sec, dstS3Key),
 						},
 					}},
 				},

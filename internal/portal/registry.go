@@ -4,10 +4,12 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"text/template"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -40,6 +42,7 @@ type Template struct {
 	ID          string                `json:"id"`
 	Name        string                `json:"name"`
 	Description string                `json:"description"`
+	Source      string                `json:"source,omitempty"` // builtin|local|configmap
 	Defaults    TemplateMeta_Defaults `json:"defaults"`
 }
 
@@ -151,7 +154,7 @@ func loadEmbedTemplates() (map[string]Template, error) {
 		if err != nil {
 			return nil, fmt.Errorf("builtin %s: %w", e.Name(), err)
 		}
-		out[t.Meta.ID] = t
+		out[t.Meta.ID] = applySource(t, "builtin")
 	}
 	return out, nil
 }
@@ -175,9 +178,12 @@ func loadDirTemplates(dir string) (map[string]Template, error) {
 		}
 		t, err := parseTemplate(data)
 		if err != nil {
-			return nil, fmt.Errorf("local %s: %w", e.Name(), err)
+			// Local templates are operator-authored; a broken file must not
+			// take down the whole registry — skip it and say so (audit).
+			log.Printf("portal: skipping local template %s: %v", e.Name(), err)
+			continue
 		}
-		out[t.Meta.ID] = t
+		out[t.Meta.ID] = applySource(t, "local")
 	}
 	return out, nil
 }
@@ -198,15 +204,23 @@ func loadConfigMapTemplates(ctx context.Context, c client.Client) (map[string]Te
 	for key, value := range cm.Data {
 		t, err := parseTemplate([]byte(value))
 		if err != nil {
-			return nil, fmt.Errorf("configmap key %s: %w", key, err)
+			log.Printf("portal: skipping configmap template key %s: %v", key, err)
+			continue
 		}
-		out[t.Meta.ID] = t
+		out[t.Meta.ID] = applySource(t, "configmap")
 	}
 	return out, nil
 }
 
-// parseTemplate splits the metadata doc from the manifest body.
+// parseTemplate splits the metadata doc from the manifest body and validates
+// the result: id must be an RFC-1123 label, mode must be a known deployment
+// mode, and the body must carry the Namespace + Stack docs the renderer
+// expects and parse as a text/template. Excludes a full render smoke-test —
+// that happens at create time.
 func parseTemplate(data []byte) (Template, error) {
+	if len(data) > 256<<10 {
+		return Template{}, fmt.Errorf("template exceeds 256 KiB")
+	}
 	docs := strings.SplitN(string(data), "\n---", 2)
 	if len(docs) != 2 {
 		return Template{}, fmt.Errorf("expected metadata doc, '---', then body")
@@ -215,13 +229,31 @@ func parseTemplate(data []byte) (Template, error) {
 	if err := yaml.Unmarshal([]byte(docs[0]), &t.Meta); err != nil {
 		return Template{}, fmt.Errorf("metadata: %w", err)
 	}
-	if t.Meta.ID == "" {
-		return Template{}, fmt.Errorf("metadata missing id")
+	if !validTenant(t.Meta.ID) {
+		return Template{}, fmt.Errorf("metadata id %q must be a lowercase RFC-1123 label", t.Meta.ID)
+	}
+	switch t.Meta.Defaults.Mode {
+	case "", "Direct", "Flux":
+	default:
+		return Template{}, fmt.Errorf("defaults.mode %q (want Direct or Flux)", t.Meta.Defaults.Mode)
 	}
 	t.Body = strings.TrimSpace(docs[1])
+	if !strings.Contains(t.Body, "kind: Namespace") || !strings.Contains(t.Body, "kind: Stack") {
+		return Template{}, fmt.Errorf("body must contain Namespace and Stack documents")
+	}
+	if _, err := template.New("validate").Parse(t.Body); err != nil {
+		return Template{}, fmt.Errorf("body template: %w", err)
+	}
 	t.ID, t.Name, t.Description = t.Meta.ID, t.Meta.Name, t.Meta.Description
 	t.Defaults.Mode = t.Meta.Defaults.Mode
 	t.Defaults.Exclude = t.Meta.Defaults.Exclude
 	t.Defaults.Operators = t.Meta.Defaults.Operators
 	return t, nil
+}
+
+// applySource stamps the template's source and logs skipped templates from
+// optional sources instead of failing the whole registry.
+func applySource(t Template, source string) Template {
+	t.Source = source
+	return t
 }
