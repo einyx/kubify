@@ -78,7 +78,7 @@ spec:
                 description: Postgres overrides defaults for the DB copy step.
                 properties:
                   database:
-                    description: Database, defaults to "product".
+                    description: Database is required (set spec.postgres.database).
                     type: string
                   host:
                     description: Host is the Postgres service name inside each namespace.
@@ -120,7 +120,7 @@ spec:
                     - name
                     type: object
                   user:
-                    description: User, defaults to "product".
+                    description: User is required (set spec.postgres.user).
                     type: string
                 type: object
               s3:
@@ -139,8 +139,9 @@ spec:
                     type: string
                   sourceCredentialsSecret:
                     description: |-
-                      SourceCredentialsSecret in SourceNamespace. Must contain keys
-                      "access-key" and "secret-key" (or override via AccessKeyKey/SecretKeyKey).
+                      SourceCredentialsSecret in SourceNamespace. Defaults to secret
+                      "storage-engine" key "auth-credential" (the secret access key); the
+                      access key ID defaults to the namespace name (tenant identity).
                     properties:
                       key:
                         description: |-
@@ -173,12 +174,12 @@ spec:
                 type: object
               sourceNamespace:
                 description: SourceNamespace is the namespace of the source Stack
-                  (e.g. product-a).
+                  (e.g. stack-a).
                 minLength: 1
                 type: string
               targetNamespace:
                 description: TargetNamespace is the namespace of the destination Stack
-                  (e.g. product-b).
+                  (e.g. stack-b).
                 minLength: 1
                 type: string
             required:

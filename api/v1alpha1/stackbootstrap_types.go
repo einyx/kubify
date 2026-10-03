@@ -15,19 +15,19 @@ import (
 // bootstrap logic itself lives entirely in the image, so any product/script
 // can bootstrap itself without touching the controller.
 //
-// Example: run the product-bootstrap product against this namespace:
+// Example: run a product bootstrap Job against this namespace:
 //
 //	apiVersion: platform.kubo.io/v1alpha1
 //	kind: StackBootstrap
 //	metadata:
-//	  name: product
+//	  name: acme
 //	spec:
-//	  image: ghcr.io/einyx/product-bootstrap:latest
+//	  image: ghcr.io/org/product-bootstrap:latest
 //	  params:
-//	    STACK_NAME: product
+//	    STACK_NAME: acme
 //	    TENANT: acme
 //	  secrets:
-//	  - name: product-acme-ai-secrets
+//	  - name: acme-acme-ai-secrets
 type StackBootstrapSpec struct {
 	// Image is the bootstrap product container image. It must be runnable
 	// with no orchestration from the controller (the script owns its logic).

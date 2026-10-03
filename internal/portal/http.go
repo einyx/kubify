@@ -17,6 +17,9 @@ import (
 //	POST /api/stacks/{ns}/{name}/reconcile  trigger a controller reconcile
 //	PATCH /api/stacks/{ns}/{name}  partial spec update (mode/bundle/exclude/operators)
 //	GET  /api/stacks/{ns}/events  recent namespace events
+//	POST /api/stacks/{ns}/{name}/pause  {"paused":true|false}
+//	GET  /api/backups          all StackBackups (newest first)
+//	POST /api/backups          {"sourceNamespace","targetNamespace","include"} → create
 //	DELETE /api/stacks/{ns}/{name}?confirm=<ns>&purge=true
 //	GET  /api/templates           template registry (metadata only)
 //	GET  /api/template            rendered YAML preview (template + tenant)
@@ -95,6 +98,39 @@ func (p *Portal) Mux() http.Handler {
 	mux.HandleFunc("GET /api/stacks/{namespace}/events", func(w http.ResponseWriter, r *http.Request) {
 		events, err := p.ListStackEvents(r.Context(), r.PathValue("namespace"))
 		respond(w, r, events, err)
+	})
+	mux.HandleFunc("POST /api/stacks/{namespace}/{name}/pause", func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Paused bool `json:"paused"`
+		}
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		if err := p.SetStackPaused(r.Context(), r.PathValue("namespace"), r.PathValue("name"), req.Paused); err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]bool{"paused": req.Paused}, nil)
+	})
+	mux.HandleFunc("GET /api/backups", func(w http.ResponseWriter, r *http.Request) {
+		backups, err := p.ListStackBackups(r.Context())
+		respond(w, r, backups, err)
+	})
+	mux.HandleFunc("POST /api/backups", func(w http.ResponseWriter, r *http.Request) {
+		var req BackupRequest
+		body := http.MaxBytesReader(w, r.Body, 1<<20)
+		if err := json.NewDecoder(body).Decode(&req); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		bk, err := p.CreateStackBackup(r.Context(), req)
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, bk, nil)
 	})
 	mux.HandleFunc("DELETE /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()

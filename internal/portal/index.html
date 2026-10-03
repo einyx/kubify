@@ -6,7 +6,7 @@
 <title>kubo · operator portal</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
     --bg:       #050505;
@@ -150,7 +150,7 @@
     font-size: 16px; font-weight: 400; line-height: 1;
     transition: transform 400ms cubic-bezier(0.32,0.72,0,1);
   }
-  .btn:hover .btn-icon { transform: rotate(90deg); }
+  .btn:hover .btn-icon { transform: rotate(90deg) scale(1.08) translate(1px, -1px); }
 
   .btn.secondary {
     background: rgba(255,255,255,0.05);
@@ -179,6 +179,11 @@
   @media (max-width: 768px) {
     nav { margin: 10px 12px 0; border-radius: 16px; }
     main { padding: 24px 16px 60px; }
+    .page-header h2 { font-size: 26px; }
+    .stat { grid-column: span 4; }
+    .stat.total { grid-column: span 12; }
+    .detail-head { flex-wrap: wrap; }
+    .detail-head > div:last-child { margin-left: 0 !important; width: 100%; flex-wrap: wrap; }
   }
 
   /* ── Page header ── */
@@ -213,9 +218,10 @@
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
   .page-header h2 {
-    font-size: 22px;
+    font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+    font-size: 34px;
     font-weight: 700;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.04em;
     color: var(--text);
   }
 
@@ -374,20 +380,32 @@
   }
   .back-btn:hover { background: rgba(255,255,255,0.08); color: var(--text); }
 
-  .detail-title { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; }
+  .detail-title {
+    font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+    font-size: 24px; font-weight: 700; letter-spacing: -0.03em;
+  }
   .detail-sub { font-size: 12px; color: var(--muted2); margin-top: 3px; }
 
   /* ── Dialog ── */
   dialog {
-    background: var(--panel);
     color: var(--text);
-    border: 1px solid var(--border-hi);
-    border-radius: 20px;
+    border: 1px solid transparent;
+    border-radius: 24px;
     padding: 0;
     width: 480px;
     max-width: calc(100vw - 32px);
-    box-shadow: 0 32px 80px rgba(0,0,0,0.8), 0 0 0 1px rgba(255,255,255,0.05) inset;
+    background:
+      linear-gradient(var(--panel), var(--panel)) padding-box,
+      linear-gradient(135deg, rgba(255,255,255,0.16), rgba(255,255,255,0.03)) border-box;
+    box-shadow: 0 32px 80px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.06);
     overflow: hidden;
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  dialog[open] {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition: opacity 400ms cubic-bezier(0.32,0.72,0,1), transform 500ms cubic-bezier(0.32,0.72,0,1);
   }
   dialog::backdrop { background: rgba(0,0,0,0.75); backdrop-filter: blur(4px); }
 
@@ -455,14 +473,33 @@
     margin-top: 12px;
   }
 
-  /* ── Admin: stats / toolbar / spec chips ── */
-  .stat-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
-  .stat {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: 12px; padding: 10px 18px; min-width: 92px;
+  /* ── Admin: stats bento / toolbar / spec chips ── */
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: 10px;
+    margin-bottom: 14px;
   }
-  .stat-num { font-size: 20px; font-weight: 700; }
-  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .stat {
+    padding: 1.5px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, rgba(255,255,255,0.09), rgba(255,255,255,0.02));
+    grid-column: span 2;
+  }
+  .stat-inner {
+    border-radius: calc(14px - 1.5px);
+    background: var(--panel);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06);
+    padding: 14px 18px;
+  }
+  .stat.total { grid-column: span 4; }
+  .stat-num {
+    font-family: 'Space Grotesk', 'Plus Jakarta Sans', sans-serif;
+    font-size: 30px; font-weight: 700; letter-spacing: -0.03em;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat.total .stat-num { font-size: 40px; }
+  .stat-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; margin-top: 2px; }
   .stat.ready    .stat-num { color: var(--ok); }
   .stat.progressing .stat-num { color: var(--warn); }
   .stat.failed   .stat-num { color: var(--err); }
@@ -483,8 +520,8 @@
   }
   .spec-key { color: var(--accent); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .05em; margin-right: 4px; }
   .section-title {
-    font-size: 12px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: .06em; padding: 12px 16px 0;
+    font-size: 10px; color: var(--accent2); text-transform: uppercase;
+    letter-spacing: .18em; font-weight: 600; padding: 16px 16px 4px;
   }
   .detail-head .btn.secondary { color: var(--err); border-color: rgba(248,81,73,.4); }
 
@@ -496,19 +533,29 @@
     z-index: 200;
     display: none;
     align-items: center;
-    gap: 8px;
-    background: var(--surface);
-    border: 1px solid var(--border-hi);
-    border-radius: 12px;
-    padding: 12px 16px;
+    gap: 10px;
+    padding: 6px;
+    border-radius: 16px;
+    border: 1px solid transparent;
+    background:
+      linear-gradient(var(--surface), var(--surface)) padding-box,
+      linear-gradient(135deg, rgba(255,255,255,0.14), rgba(255,255,255,0.03)) border-box;
     font-size: 13px;
     font-weight: 500;
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     animation: slideUp 400ms cubic-bezier(0.32,0.72,0,1);
   }
-  #toast.ok  { color: var(--ok); }
-  #toast.err { color: var(--err); }
-  #toast-icon { font-size: 16px; }
+  #toast-inner {
+    display: flex; align-items: center; gap: 10px;
+    padding: 6px 16px 6px 6px;
+  }
+  #toast-icon {
+    width: 28px; height: 28px; border-radius: 9999px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; flex-shrink: 0;
+  }
+  #toast.ok  #toast-icon { background: rgba(62,207,142,.12); color: var(--ok); border: 1px solid rgba(62,207,142,.25); }
+  #toast.err #toast-icon { background: rgba(245,83,83,.12);  color: var(--err); border: 1px solid rgba(245,83,83,.25); }
 
   @keyframes slideUp {
     from { transform: translateY(12px); opacity: 0; }
@@ -589,10 +636,17 @@
         <div class="detail-sub" id="detail-sub"></div>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn secondary" id="pause-btn" onclick="togglePause()">Pause</button>
         <button class="btn secondary" onclick="doReconcile()">Reconcile</button>
         <button class="btn secondary" onclick="openEdit()">Edit spec…</button>
+        <button class="btn secondary" onclick="openBackup()">Backup…</button>
         <button class="btn secondary" id="delete-btn" onclick="askDelete()" style="color:var(--err)">Delete…</button>
       </div>
+    </div>
+    <div id="paused-note" style="display:none;margin:-8px 0 16px">
+      <span class="phase Progressing" style="color:var(--warn);border-color:rgba(245,166,35,.3)">
+        Paused — reconciliation is stopped; deployed components keep running
+      </span>
     </div>
     <div class="detail-spec card-outer" style="animation-delay:60ms">
       <div class="card-inner" id="spec-chips"></div>
@@ -621,6 +675,18 @@
         </table>
       </div>
     </div>
+    <div class="card-outer" style="animation-delay:120ms">
+      <div class="card-inner">
+        <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+          Values overrides
+          <button class="btn secondary" style="padding:3px 10px;font-size:11px;margin:8px" onclick="openValues()">Add override…</button>
+        </div>
+        <table>
+          <thead><tr><th>Component</th><th style="text-align:right">Action</th></tr></thead>
+          <tbody id="values-rows"></tbody>
+        </table>
+      </div>
+    </div>
     <div class="card-outer" style="animation-delay:180ms">
       <div class="card-inner">
         <div class="section-title">Recent events</div>
@@ -631,6 +697,15 @@
       </div>
     </div>
     <div class="card-outer" style="animation-delay:220ms">
+      <div class="card-inner">
+        <div class="section-title">Backups from this stack</div>
+        <table>
+          <thead><tr><th>Name</th><th>Target</th><th>Include</th><th>Phase</th><th>Age</th><th>Message</th></tr></thead>
+          <tbody id="backup-rows"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:260ms">
       <div class="card-inner">
         <div class="section-title">Live manifest</div>
         <pre id="stack-yaml" style="max-height:420px">loading…</pre>
@@ -653,7 +728,7 @@
       <div class="muted" id="template-desc" style="font-size:11px;margin-top:6px;min-height:14px"></div>
     </div>
     <div class="field">
-      <label for="tenant">Tenant slug <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(namespace: product-&lt;slug&gt;)</span></label>
+      <label for="tenant">Tenant slug <span style="color:var(--muted);text-transform:none;font-size:11px;font-weight:400">(namespace: acme-&lt;slug&gt;)</span></label>
       <input id="tenant" placeholder="e.g. demo-b" autocomplete="off">
     </div>
     <div class="field">
@@ -742,9 +817,80 @@
   </div>
 </dialog>
 
+<!-- Values override dialog -->
+<dialog id="values">
+  <div class="dialog-header">
+    <h2 id="values-title">Component values override</h2>
+    <p>Sets Helm values for one component (spec.componentValues). Invalid JSON is
+       rejected before patching. Leave empty to remove the override.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="values-component">Component</label>
+      <input id="values-component" placeholder="e.g. backend" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="values-json">Values (JSON)</label>
+      <textarea id="values-json" rows="8" style="
+        width:100%;background:rgba(0,0,0,0.4);color:var(--muted2);
+        border:1px solid var(--border-hi);border-radius:10px;padding:12px;
+        font-family:'SF Mono','Fira Code',monospace;font-size:12px;line-height:1.6;
+        resize:vertical;outline:none" placeholder='{ "replicas": 2 }'></textarea>
+    </div>
+    <div class="field-error" id="values-error"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="values-btn" onclick="saveValues()">
+      Apply values
+      <span class="btn-icon" style="font-size:13px">↗</span>
+    </button>
+  </div>
+</dialog>
+
+<!-- Backup dialog -->
+<dialog id="backup">
+  <div class="dialog-header">
+    <h2>New backup</h2>
+    <p>Creates a StackBackup — copies Postgres databases and storage-engine
+       buckets from this stack's namespace into the target.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label>Source namespace</label>
+      <input id="backup-source" disabled>
+    </div>
+    <div class="field">
+      <label for="backup-target">Target namespace</label>
+      <select id="backup-target"></select>
+    </div>
+    <div class="field">
+      <label>Include</label>
+      <div style="display:flex;gap:8px">
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;text-transform:none;font-weight:500;font-size:12px">
+          <input type="checkbox" id="backup-db" checked style="width:auto"> database
+        </label>
+        <label style="display:flex;gap:6px;align-items:center;cursor:pointer;text-transform:none;font-weight:500;font-size:12px">
+          <input type="checkbox" id="backup-s3" checked style="width:auto"> s3
+        </label>
+      </div>
+    </div>
+    <div class="field-error" id="backup-error"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="backup-btn" onclick="createBackup()">
+      Create backup
+      <span class="btn-icon" style="font-size:13px">↗</span>
+    </button>
+  </div>
+</dialog>
+
 <div id="toast">
-  <span id="toast-icon"></span>
-  <span id="toast-msg"></span>
+  <div id="toast-inner">
+    <span id="toast-icon"></span>
+    <span id="toast-msg"></span>
+  </div>
 </div>
 
 <script>
@@ -805,12 +951,24 @@ function renderStats(stacks) {
   const counts = {};
   for (const s of stacks) counts[s.phase] = (counts[s.phase] || 0) + 1;
   const order = ['Ready', 'Progressing', 'Failed', 'Pending'];
-  document.getElementById('stats').innerHTML = order.map(p => `
+  const ready = stacks.reduce((n, s) => n + (s.phase === 'Ready' ? 1 : 0), 0);
+  const ratio = stacks.length ? Math.round(ready / stacks.length * 100) : 0;
+  document.getElementById('stats').innerHTML = `
+    <div class="stat total">
+      <div class="stat-inner">
+        <div class="stat-num">${stacks.length}</div>
+        <div class="stat-label">Stacks · ${ratio}% ready</div>
+        <div class="bar-track" style="margin-top:10px">
+          <div class="bar-fill" style="width:${ratio}%"></div>
+        </div>
+      </div>
+    </div>` + order.map(p => `
     <div class="stat ${p.toLowerCase()}">
-      <div class="stat-num">${counts[p] || 0}</div>
-      <div class="stat-label">${p}</div>
-    </div>`).join('') + `
-    <div class="stat total"><div class="stat-num">${stacks.length}</div><div class="stat-label">Total</div></div>`;
+      <div class="stat-inner">
+        <div class="stat-num">${counts[p] || 0}</div>
+        <div class="stat-label">${p}</div>
+      </div>
+    </div>`).join('');
 }
 
 async function showDetail(ns, name) {
@@ -843,6 +1001,9 @@ async function fetchDetail(ns, name) {
       || '<tr class="empty-row"><td colspan="4">No component status yet.</td></tr>';
     renderSpec(d);
     loadEvents(ns);
+    syncPaused(d);
+    renderValues(d);
+    loadBackups(ns);
     document.getElementById('cond-rows').innerHTML = (d.conditions || []).map(c => `
       <tr>
         <td class="cell-name">${esc(c.type)}</td>
@@ -919,6 +1080,145 @@ async function loadEvents(ns) {
       </tr>`).join('')
       || '<tr class="empty-row"><td colspan="6">No recent events.</td></tr>';
   } catch (e) { /* events are best-effort */ }
+}
+
+function syncPaused(d) {
+  document.getElementById('paused-note').style.display = d.paused ? 'block' : 'none';
+  const btn = document.getElementById('pause-btn');
+  btn.textContent = d.paused ? 'Resume' : 'Pause';
+}
+
+async function togglePause() {
+  if (!currentDetail || !currentData) return;
+  const { ns, name } = currentDetail;
+  const paused = !currentData.paused;
+  try {
+    await fetch(`/api/stacks/${ns}/${name}/pause`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paused }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(paused ? `Stack ${ns}/${name} paused` : `Stack ${ns}/${name} resumed`, true);
+    fetchDetail(ns, name);
+  } catch (e) { toast(e.message, false); }
+}
+
+function renderValues(d) {
+  const rows = (d.valueOverrides || []).map(comp => `
+    <tr>
+      <td class="cell-name">${esc(comp)}</td>
+      <td style="text-align:right">
+        <button class="btn secondary" style="padding:3px 10px;font-size:11px" onclick="openValues('${esc(comp)}')">Edit</button>
+      </td>
+    </tr>`).join('');
+  document.getElementById('values-rows').innerHTML =
+    rows || '<tr class="empty-row"><td colspan="2">No per-component overrides.</td></tr>';
+}
+
+async function openValues(comp = '') {
+  document.getElementById('values-title').textContent = comp
+    ? `Values override — ${comp}` : 'Component values override';
+  document.getElementById('values-component').value = comp;
+  document.getElementById('values-component').disabled = !!comp;
+  // The textarea starts empty; what you submit replaces the override wholesale
+  // (submitting empty JSON removes it).
+  document.getElementById('values-json').value = '';
+  document.getElementById('values-error').textContent = '';
+  document.getElementById('values').showModal();
+}
+
+async function saveValues() {
+  if (!currentDetail) return;
+  const { ns, name } = currentDetail;
+  const err = document.getElementById('values-error');
+  err.textContent = '';
+  const comp = document.getElementById('values-component').value.trim();
+  if (!comp) { err.textContent = 'Component name is required.'; return; }
+  const text = document.getElementById('values-json').value.trim();
+  let raw = null;
+  if (text) {
+    try {
+      raw = JSON.parse(text);
+    } catch (e) { err.textContent = 'Invalid JSON: ' + e.message; return; }
+  }
+  const body = { componentValues: { [comp]: raw } };
+  const btn = document.getElementById('values-btn');
+  btn.disabled = true;
+  try {
+    await fetch(`/api/stacks/${ns}/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(raw === null ? `Override for ${comp} removed` : `Values for ${comp} applied`, true);
+    document.getElementById('values').close();
+    fetchDetail(ns, name);
+  } catch (e) { err.textContent = e.message; }
+  btn.disabled = false;
+}
+
+let allBackups = [];
+
+async function loadBackups(ns) {
+  try {
+    allBackups = await api('/api/backups');
+    renderBackups(ns);
+  } catch (e) { /* best-effort */ }
+}
+
+function renderBackups(ns) {
+  const mine = allBackups.filter(b => b.source === ns);
+  document.getElementById('backup-rows').innerHTML = mine.map(b => `
+    <tr>
+      <td class="cell-name" style="font-family:'SF Mono','Fira Code',monospace;font-size:11px">${esc(b.name)}</td>
+      <td class="cell-ns">${esc(b.target)}</td>
+      <td class="cell-mode">${esc((b.include || ['database', 's3']).join(', '))}</td>
+      <td><span class="phase ${b.phase === 'Succeeded' ? 'Ready' : b.phase === 'Failed' ? 'Failed' : 'Progressing'}">${esc(b.phase)}</span>
+        ${b.message ? `<div class="failmsg">${esc(b.message)}</div>` : ''}</td>
+      <td class="cell-mode">${esc(b.age)}</td>
+      <td></td>
+    </tr>`).join('')
+    || '<tr class="empty-row"><td colspan="6">No backups yet.</td></tr>';
+}
+
+async function openBackup() {
+  if (!currentDetail) return;
+  document.getElementById('backup-source').value = currentDetail.ns;
+  try {
+    const stacks = await api('/api/stacks');
+    const targets = [...new Set(stacks.map(s => s.namespace))].filter(n => n !== currentDetail.ns);
+    document.getElementById('backup-target').innerHTML = targets.map(n =>
+      `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  } catch (e) { /* leave whatever is there */ }
+  document.getElementById('backup-error').textContent = '';
+  document.getElementById('backup').showModal();
+}
+
+async function createBackup() {
+  if (!currentDetail) return;
+  const err = document.getElementById('backup-error');
+  err.textContent = '';
+  const include = [];
+  if (document.getElementById('backup-db').checked) include.push('database');
+  if (document.getElementById('backup-s3').checked) include.push('s3');
+  if (!include.length) { err.textContent = 'Pick at least one of database / s3.'; return; }
+  const btn = document.getElementById('backup-btn');
+  btn.disabled = true;
+  try {
+    const bk = await api('/api/backups', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sourceNamespace: currentDetail.ns,
+        targetNamespace: document.getElementById('backup-target').value,
+        include,
+      }),
+    });
+    toast(`Backup ${bk.name} created — the controller will run the copy job`, true);
+    document.getElementById('backup').close();
+    await loadBackups(currentDetail.ns);
+  } catch (e) { err.textContent = e.message; }
+  btn.disabled = false;
 }
 
 async function doReconcile() {

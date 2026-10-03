@@ -48,7 +48,6 @@ var reservedNamespaces = map[string]bool{
 	"kubo-system": true, "operators": true, "istio-system": true,
 	"istio-ingress": true, "cert-manager": true, "flux-system": true,
 	"vault-system": true, "spark-operator": true, "vault-operator": true,
-	"product": true, "dai": true,
 }
 
 func validate(obj runtime.Object) (admission.Warnings, error) {

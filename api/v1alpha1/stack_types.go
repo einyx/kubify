@@ -212,7 +212,7 @@ type ClusterOperators struct {
 // BundleSource is an OCI artifact that carries the stack's charts.
 type BundleSource struct {
 	// URL is an OCI reference, including the tag or digest.
-	// Example: oci://ghcr.io/einyx/product-bundle:0.0.8
+	// Example: oci://ghcr.io/org/product-bundle:0.0.8
 	// +kubebuilder:validation:MinLength=1
 	URL string `json:"url"`
 
@@ -284,7 +284,7 @@ type StackStatus struct {
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // Stack deploys a named StackDefinition into its own namespace. The
-// abstraction is product-agnostic: product, dai, product-ai or any
+// abstraction is product-agnostic: product-a, product-b, product-c or any
 // future product is just a StackDefinition.
 type Stack struct {
 	metav1.TypeMeta   `json:",inline"`

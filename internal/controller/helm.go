@@ -321,6 +321,18 @@ func (h *HelmEngine) Uninstall(name, namespace string) error {
 	if err != nil {
 		return err
 	}
+
+	// A release stuck in pending-install/upgrade/rollback (crashed upgrade,
+	// interrupted reconcile) makes helm refuse every action with "another
+	// operation is in progress". Dropping the pending record reverts to the
+	// last deployed revision so the uninstall can proceed.
+	if rel, gerr := getRelease(cfg, name); gerr == nil && rel != nil &&
+		strings.HasPrefix(string(rel.Info.Status), "pending-") {
+		if derr := cfg.Releases.Delete(rel); derr != nil {
+			return fmt.Errorf("clear pending release %s: %w", name, derr)
+		}
+	}
+
 	un := action.NewUninstall(cfg)
 	un.IgnoreNotFound = true
 	un.Wait = true
