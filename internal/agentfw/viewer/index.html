@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentfw · view</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1c2129; --border: #2d333b;
+    --text: #e6edf3; --dim: #8b949e; --accent: #58a6ff; --green: #3fb950;
+    --red: #f85149; --yellow: #d29922; --purple: #bc8cff; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  a { color: var(--accent); text-decoration: none; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 10; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header h1 span { color: var(--accent); }
+  header .live { font-size: 11px; color: var(--green); }
+  header .live.off { color: var(--red); }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button { background: none; border: 1px solid transparent; color: var(--dim); padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  nav button.active { color: var(--text); background: var(--panel2); border-color: var(--border); }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 20px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .card .label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); }
+  .card .value { font-size: 24px; font-weight: 600; font-family: var(--mono); margin-top: 4px; }
+  .card .sub { font-size: 11px; color: var(--dim); margin-top: 2px; }
+  .card.red .value { color: var(--red); }
+  .card.green .value { color: var(--green); }
+  .card.purple .value { color: var(--purple); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 20px; overflow: hidden; }
+  .panel h2 { font-size: 13px; font-weight: 600; padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--dim); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--dim); padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: var(--panel2); }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .dim { color: var(--dim); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+  .badge.allow { background: rgba(63,185,80,.15); color: var(--green); }
+  .badge.redact { background: rgba(210,153,34,.15); color: var(--yellow); }
+  .badge.block { background: rgba(248,81,73,.15); color: var(--red); }
+  .badge.kind { background: rgba(88,166,255,.12); color: var(--accent); margin-right: 4px; }
+  .toolbar { display: flex; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; align-items: center; }
+  .toolbar input, .toolbar select { background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 10px; font-size: 13px; }
+  .toolbar input { flex: 1; min-width: 200px; font-family: var(--mono); }
+  .toolbar input:focus { outline: 1px solid var(--accent); }
+  .bar-row { display: flex; align-items: center; gap: 10px; padding: 6px 14px; }
+  .bar-row .name { width: 220px; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar-row .bar { height: 10px; border-radius: 5px; background: var(--accent); min-width: 2px; }
+  .bar-row .num { font-family: var(--mono); font-size: 12px; color: var(--dim); margin-left: auto; white-space: nowrap; }
+  pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; padding: 14px; max-height: 420px; overflow: auto; }
+  .detail-actions { padding: 10px 14px; display: flex; gap: 8px; }
+  .detail-actions button { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 5px 12px; cursor: pointer; font-size: 12px; }
+  .detail-actions button.on { border-color: var(--accent); color: var(--accent); }
+  .back { cursor: pointer; }
+  .empty { padding: 24px; text-align: center; color: var(--dim); }
+  .pager { display: flex; gap: 8px; padding: 10px 14px; justify-content: flex-end; }
+  .pager button { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 12px; }
+  .pager button:disabled { opacity: .4; cursor: default; }
+  kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span>◉</span> agentfw <span style="color:var(--dim);font-weight:400">view</span></h1>
+  <span class="live" id="live">● live</span>
+  <nav>
+    <button data-tab="dashboard" class="active">Dashboard</button>
+    <button data-tab="sessions">Sessions</button>
+    <button data-tab="requests">Requests</button>
+    <button data-tab="usage">Usage</button>
+  </nav>
+</header>
+<main id="app"></main>
+
+<script>
+const $ = sel => document.querySelector(sel);
+const app = $('#app');
+const state = { tab: 'dashboard', q: '', action: '', session: '', page: 0, timer: null };
+const fmtInt = n => (n ?? 0).toLocaleString('en-US');
+const fmtCost = µ => { const d = (µ ?? 0) / 1e6; if (d === 0) return '$0'; if (d < 0.01) return '$' + d.toFixed(4); if (d < 1) return '$' + d.toFixed(2); return '$' + d.toFixed(2); };
+const fmtTime = t => new Date(t * 1000).toLocaleTimeString();
+const fmtDay = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+const esc = s => (s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const shortURL = u => { try { const x = new URL(u); return x.host + x.pathname; } catch { return u; } };
+
+async function api(path) {
+  const r = await fetch(path);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function nav(tab) {
+  state.tab = tab; state.page = 0;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  render();
+}
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => nav(b.dataset.tab));
+document.addEventListener('keydown', e => {
+  if (e.key === '/' && document.activeElement.tagName !== 'INPUT') { e.preventDefault(); nav('requests'); setTimeout(() => $('#q')?.focus(), 50); }
+});
+
+async function render() {
+  try {
+    ({ dashboard: renderDashboard, sessions: renderSessions, requests: renderRequests, usage: renderUsage })[state.tab]();
+    $('#live').textContent = '● live'; $('#live').classList.remove('off');
+  } catch (e) {
+    $('#live').textContent = '○ offline'; $('#live').classList.add('off');
+  }
+}
+
+/* ---------- dashboard ---------- */
+async function renderDashboard() {
+  const s = await api('/api/v1/stats');
+  const kinds = Object.entries(s.findings_by_kind || {}).map(([k, n]) => `<span class="badge kind">${esc(k)} ${n}</span>`).join(' ') || '<span class="dim">none</span>';
+  app.innerHTML = `
+    <div class="cards">
+      <div class="card"><div class="label">Requests</div><div class="value">${fmtInt(s.total_requests)}</div><div class="sub">${fmtInt(s.total_sessions)} sessions</div></div>
+      <div class="card red"><div class="label">Blocked</div><div class="value">${fmtInt(s.blocked)}</div><div class="sub">${fmtInt(s.redacted)} redacted</div></div>
+      <div class="card purple"><div class="label">Input tokens</div><div class="value">${fmtInt(s.input_tokens)}</div><div class="sub">${fmtInt(s.output_tokens)} out</div></div>
+      <div class="card green"><div class="label">Spend</div><div class="value">${fmtCost(s.cost_micro)}</div><div class="sub">estimated</div></div>
+    </div>
+    <div class="panel"><h2>Findings by kind</h2><div style="padding:10px 14px">${kinds}</div></div>
+    <div class="panel"><h2>Top models by spend</h2><div id="models"></div></div>
+    <div class="panel"><h2>Recent blocks</h2>${tableHTML(s.recent_blocked || [], true)}</div>`;
+  const max = Math.max(1, ...(s.top_models || []).map(m => m.cost_micro));
+  $('#models').innerHTML = (s.top_models || []).map(m => `
+    <div class="bar-row"><div class="name">${esc(m.model)}</div>
+      <div style="flex:1"><div class="bar" style="width:${Math.max(1, m.cost_micro / max * 100)}%"></div></div>
+      <div class="num">${fmtInt(m.input_tokens)} in / ${fmtInt(m.output_tokens)} out · ${fmtCost(m.cost_micro)}</div></div>`).join('') || '<div class="empty">No priced model calls yet</div>';
+}
+
+/* ---------- sessions ---------- */
+async function renderSessions() {
+  const { sessions } = await api('/api/v1/sessions?limit=200');
+  app.innerHTML = `<div class="panel"><h2>Sessions</h2>${sessions.length ? `
+    <table><thead><tr><th>Session</th><th>Requests</th><th>Blocked</th><th>Findings</th><th>Tokens</th><th>Cost</th><th>Models</th><th>Last active</th></tr></thead>
+    <tbody>${sessions.map(s => `
+      <tr class="clickable" onclick="state.session='${esc(s.session_id)}';state.page=0;nav('requests')">
+        <td class="mono">${esc(s.session_id)}</td>
+        <td class="mono">${fmtInt(s.requests)}</td>
+        <td class="mono">${s.blocked ? `<span class="badge block">${s.blocked}</span>` : '<span class="dim">0</span>'}</td>
+        <td class="mono">${s.findings ? `<span class="badge redact">${s.findings}</span>` : '<span class="dim">0</span>'}</td>
+        <td class="mono">${fmtInt(s.input_tokens)} / ${fmtInt(s.output_tokens)}</td>
+        <td class="mono">${fmtCost(s.cost_micro)}</td>
+        <td class="mono dim">${esc((s.models || []).slice(0, 2).join(', '))}</td>
+        <td class="mono dim">${fmtDay(s.last_seen)}</td>
+      </tr>`).join('')}</tbody></table>` : '<div class="empty">No sessions recorded yet</div>'}</div>`;
+}
+
+/* ---------- requests ---------- */
+async function renderRequests() {
+  const params = new URLSearchParams({ q: state.q, action: state.action, session: state.session, limit: 100, offset: state.page * 100 });
+  const { requests, total } = await api('/api/v1/requests?' + params);
+  app.innerHTML = `
+    <div class="panel">
+      <div class="toolbar">
+        <input id="q" placeholder="Search bodies and URLs  ( / to focus )" value="${esc(state.q)}">
+        <select id="action">
+          <option value="">all actions</option>
+          ${['allow', 'redact', 'block'].map(a => `<option value="${a}" ${state.action === a ? 'selected' : ''}>${a}</option>`).join('')}
+        </select>
+        ${state.session ? `<span class="badge kind">session: ${esc(state.session)} <span style="cursor:pointer" onclick="state.session='';render()">✕</span></span>` : ''}
+      </div>
+      ${requests.length ? tableHTML(requests, false) : '<div class="empty">No matching requests</div>'}
+      <div class="pager">
+        <span class="dim" style="margin-right:auto;font-size:12px;padding:4px 0">${fmtInt(total)} total</span>
+        <button ${state.page === 0 ? 'disabled' : ''} onclick="state.page--;render()">‹ Prev</button>
+        <button ${(state.page + 1) * 100 >= total ? 'disabled' : ''} onclick="state.page++;render()">Next ›</button>
+      </div>
+    </div>`;
+  $('#q').oninput = debounce(e => { state.q = e.target.value; state.page = 0; refreshList(); }, 300);
+  $('#action').onchange = e => { state.action = e.target.value; state.page = 0; refreshList(); };
+}
+
+async function refreshList() {
+  const params = new URLSearchParams({ q: state.q, action: state.action, session: state.session, limit: 100, offset: state.page * 100 });
+  const { requests, total } = await api('/api/v1/requests?' + params);
+  const panel = app.querySelector('.panel');
+  panel.querySelector('table')?.remove();
+  panel.querySelector('.empty')?.remove();
+  const pager = panel.querySelector('.pager');
+  pager.previousElementSibling?.remove?.();
+  if (requests.length) { pager.insertAdjacentHTML('beforebegin', tableHTML(requests, false)); wireRows(); }
+  pager.querySelector('span').textContent = `${fmtInt(total)} total`;
+}
+
+function tableHTML(recs, compact) {
+  return `<table><thead><tr><th>Time</th><th>Session</th><th>Target</th><th>Model</th><th>Action</th><th>Findings</th><th>Tokens</th><th>Cost</th></tr></thead>
+  <tbody>${recs.map(r => `
+    <tr class="clickable" data-id="${r.id}">
+      <td class="mono dim">${fmtTime(r.time)}</td>
+      <td class="mono dim" title="${esc(r.session_id)}">${esc(r.session_id.length > 18 ? r.session_id.slice(0, 18) + '…' : r.session_id)}</td>
+      <td class="mono">${esc(shortURL(r.url))}${compact ? '' : ` <span class="dim">${r.status ? r.status : ''}</span>`}</td>
+      <td class="mono dim">${esc(r.model || '—')}</td>
+      <td><span class="badge ${r.action}">${r.action}</span></td>
+      <td class="mono">${r.findings ? r.findings.length : ''}</td>
+      <td class="mono dim">${r.usage ? fmtInt(r.usage.input_tokens) + '/' + fmtInt(r.usage.output_tokens) : '—'}</td>
+      <td class="mono">${r.usage ? fmtCost(r.usage.cost_micro) : '—'}</td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+function wireRows() {
+  document.querySelectorAll('tr.clickable[data-id]').forEach(tr => tr.onclick = () => openDetail(tr.dataset.id));
+}
+
+/* ---------- detail ---------- */
+async function openDetail(id) {
+  const r = await api('/api/v1/requests/' + id);
+  const show = { req: true, resp: true };
+  app.innerHTML = `
+    <div class="panel">
+      <h2><span class="back" onclick="render()">‹ back</span> · request #${r.id} <span class="badge ${r.action}">${r.action}</span></h2>
+      <table>
+        <tr><th>Session</th><td class="mono">${esc(r.session_id)}</td></tr>
+        <tr><th>Time</th><td class="mono">${new Date(r.time * 1000).toLocaleString()} · ${r.duration_ms}ms</td></tr>
+        <tr><th>Target</th><td class="mono">${esc(r.method)} ${esc(r.url)} → ${r.status || '—'}</td></tr>
+        <tr><th>Model</th><td class="mono">${esc(r.model || '—')}</td></tr>
+        ${r.usage ? `<tr><th>Usage</th><td class="mono">${fmtInt(r.usage.input_tokens)} in / ${fmtInt(r.usage.output_tokens)} out · <b>${fmtCost(r.usage.cost_micro)}</b></td></tr>` : ''}
+        ${r.findings?.length ? `<tr><th>Findings</th><td>${r.findings.map(f => `<span class="badge kind">${esc(f.kind)}:${esc(f.pattern)}</span> <span class="mono dim">${esc(f.excerpt)}</span>`).join('<br>')}</td></tr>` : ''}
+      </table>
+      <div class="detail-actions">
+        <button id="b-req" class="on">Request body (${fmtInt(r.req_bytes)} B)</button>
+        <button id="b-resp" class="on">Response body (${fmtInt(r.resp_bytes)} B)</button>
+      </div>
+      <pre id="p-req" class="mono">${esc(pretty(r.req_body))}</pre>
+      <pre id="p-resp" class="mono">${esc(pretty(r.resp_body))}</pre>
+    </div>`;
+  $('#b-req').onclick = () => { show.req = !show.req; $('#b-req').classList.toggle('on', show.req); $('#p-req').style.display = show.req ? '' : 'none'; };
+  $('#b-resp').onclick = () => { show.resp = !show.resp; $('#b-resp').classList.toggle('on', show.resp); $('#p-resp').style.display = show.resp ? '' : 'none'; };
+}
+
+function pretty(s) {
+  if (!s) return '(empty)';
+  try { return JSON.stringify(JSON.parse(s), null, 2); } catch { return s; }
+}
+
+/* ---------- usage ---------- */
+async function renderUsage() {
+  const u = await api('/api/v1/usage');
+  const max = Math.max(1, ...(u.models || []).map(m => m.cost_micro));
+  app.innerHTML = `
+    <div class="cards">
+      <div class="card purple"><div class="label">Input tokens</div><div class="value">${fmtInt(u.input_tokens)}</div></div>
+      <div class="card purple"><div class="label">Output tokens</div><div class="value">${fmtInt(u.output_tokens)}</div></div>
+      <div class="card green"><div class="label">Total spend</div><div class="value">${fmtCost(u.cost_micro)}</div><div class="sub">microdollar accounting</div></div>
+    </div>
+    <div class="panel"><h2>Spend by model</h2>
+      ${(u.models || []).map(m => `
+        <div class="bar-row"><div class="name">${esc(m.model)}</div>
+          <div style="flex:1"><div class="bar" style="width:${Math.max(1, m.cost_micro / max * 100)}%"></div></div>
+          <div class="num">${fmtInt(m.requests)} reqs · ${fmtInt(m.input_tokens)}/${fmtInt(m.output_tokens)} tok · ${fmtCost(m.cost_micro)}</div></div>`).join('') || '<div class="empty">No usage recorded yet</div>'}
+    </div>`;
+}
+
+/* ---------- utils ---------- */
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+render();
+state.timer = setInterval(() => { if (state.tab === 'dashboard' || state.tab === 'usage') render(); }, 5000);
+</script>
+</body>
+</html>

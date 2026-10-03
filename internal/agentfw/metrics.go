@@ -43,10 +43,13 @@ func MetricsHandler() http.Handler {
 	return promhttp.Handler()
 }
 
-// adminMux mounts the kill-switch API and /metrics on one admin listener.
-func adminMux(ks *KillSwitch) http.Handler {
+// adminMux mounts the kill-switch API, /metrics, and the viewer (archive
+// UI + API) on one admin listener. The viewer mux's "/" route is the
+// least-specific pattern, so /kill and /metrics keep precedence.
+func adminMux(ks *KillSwitch, viewer *Viewer) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/kill", ks.AdminHandler())
 	mux.Handle("/metrics", MetricsHandler())
+	mux.Handle("/", viewer.Handler())
 	return mux
 }

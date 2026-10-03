@@ -39,7 +39,8 @@ func (px *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (px *Proxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := px.scanner.InspectRequest(r); err != nil {
+	r, err := px.scanner.InspectRequest(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
@@ -181,7 +182,8 @@ func (px *Proxy) tunnelMITM(w http.ResponseWriter, r *http.Request) {
 		req.URL.Host = r.Host
 		req.RequestURI = ""
 
-		if err := px.scanner.InspectRequest(req); err != nil {
+		req, err = px.scanner.InspectRequest(req)
+		if err != nil {
 			writeErr(tlsConn, http.StatusForbidden, err.Error())
 			return
 		}

@@ -39,6 +39,12 @@ type Policy struct {
 	// MITMBypass lists SNI hostname suffixes to tunnel opaquely
 	// (cert-pinned APIs, sensitive endpoints). Matched as suffix.
 	MITMBypass []string `json:"mitmBypass,omitempty"`
+	// ViewDisabled turns off the persistent request archive + view UI.
+	// On by default; set true for ephemeral/air-gapped deployments.
+	ViewDisabled bool `json:"viewDisabled,omitempty"`
+	// ViewDBPath is the SQLite archive location. Default
+	// /var/lib/agentfw/view.db; override with AGENTFW_VIEW_DB or here.
+	ViewDBPath string `json:"viewDBPath,omitempty"`
 }
 
 func DefaultPolicy() Policy {

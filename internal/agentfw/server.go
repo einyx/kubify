@@ -45,8 +45,30 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 	rl := NewRateLimiter(policy.RequestsPerMinute, policy.DataBudgetMB)
 	sessions := NewSessionStore()
 
+	// Viewer archive: persistent agentsview-style record of every call.
+	viewer := NewViewer()
+	var archive *Archive
+	if !policy.ViewDisabled {
+		path := policy.ViewDBPath
+		if path == "" {
+			path = os.Getenv("AGENTFW_VIEW_DB")
+		}
+		if path == "" {
+			path = "/var/lib/agentfw/view.db"
+		}
+		a, err := OpenArchive(path)
+		if err != nil {
+			log.Printf("agentfw: viewer archive disabled (%v)", err)
+		} else {
+			archive = a
+			viewer.SetArchive(a)
+			defer a.Close() //nolint:errcheck
+			log.Printf("agentfw: view UI at admin port (db: %s)", path)
+		}
+	}
+
 	newScanner := func(p Policy) *Scanner {
-		return &Scanner{Policy: p, Auditor: auditor, KillSwitch: ks, Sessions: sessions}
+		return &Scanner{Policy: p, Auditor: auditor, KillSwitch: ks, Sessions: sessions, Archive: archive}
 	}
 
 	var core http.Handler
@@ -83,7 +105,7 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 
 	adminSrv := &http.Server{
 		Addr:        adminAddr,
-		Handler:     adminMux(ks),
+		Handler:     adminMux(ks, viewer),
 		ReadTimeout: 5 * time.Second,
 	}
 

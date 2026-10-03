@@ -30,7 +30,9 @@ func NewReverseProxy(upstream string, p Policy, a *Auditor) (*ReverseProxy, erro
 			// preserve path — agent calls /v1/chat/completions, we forward as-is
 		},
 		ModifyResponse: func(resp *http.Response) error {
-			return s.InspectResponse(resp)
+			// Read rv.scanner (not the constructor-local s) so scanners
+			// wired later — e.g. with an Archive in Serve — are honored.
+			return rv.scanner.InspectResponse(resp)
 		},
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, fmt.Sprintf("agentfw upstream: %v", err), http.StatusBadGateway)
@@ -40,7 +42,8 @@ func NewReverseProxy(upstream string, p Policy, a *Auditor) (*ReverseProxy, erro
 }
 
 func (rv *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := rv.scanner.InspectRequest(r); err != nil {
+	r, err := rv.scanner.InspectRequest(r)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusForbidden)
 		return
 	}
