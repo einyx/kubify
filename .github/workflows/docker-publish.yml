@@ -8,7 +8,10 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  # Pinned (not github.repository): the repo rename kubo -> kubify would
+  # otherwise create a NEW package the ACR cache rule and the clusters don't
+  # know about. Revisit once the package is re-linked in the GitHub UI.
+  IMAGE_NAME: einyx/kubo
 
 jobs:
   build-and-push:

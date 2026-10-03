@@ -144,6 +144,11 @@ func (vc *vaultClient) post(ctx context.Context, path string, body []byte) (*htt
 }
 
 func (vc *vaultClient) ensureKV(ctx context.Context) error {
+	return vc.ensureKVNamed(ctx, "secret")
+}
+
+// ensureKVNamed enables a KV v2 mount at the given path if absent.
+func (vc *vaultClient) ensureKVNamed(ctx context.Context, mount string) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, vc.addr+"/v1/sys/mounts", nil)
 	req.Header.Set("X-Vault-Token", vc.token)
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
@@ -159,10 +164,11 @@ func (vc *vaultClient) ensureKV(ctx context.Context) error {
 	if err := json.NewDecoder(resp.Body).Decode(&mounts); err != nil {
 		return err
 	}
-	if m, ok := mounts.Data["secret/"]; ok && m.Type == "kv" {
+	if m, ok := mounts.Data[mount+"/"]; ok && m.Type == "kv" {
 		return nil
 	}
-	resp2, err := vc.post(ctx, "/v1/sys/mounts/secret", []byte(`{"type":"kv","options":{"version":"2"}}`))
+	payload := fmt.Sprintf(`{"type":"kv","options":{"version":"2"}}`)
+	resp2, err := vc.post(ctx, "/v1/sys/mounts/"+mount, []byte(payload))
 	if err != nil {
 		return err
 	}

@@ -100,7 +100,12 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
-	secretsReady, err := r.ensureSecrets(ctx, &stack)
+	// Control-plane vault: kubo's own secret store (Azure auto-unseal, so it
+	// survives kubo-system wipes). Not ready on first pass? Proceed without
+	// it and retry next reconcile.
+	cpVault, _ := r.ensureControlPlaneVault(ctx)
+
+	secretsReady, err := r.ensureSecrets(ctx, &stack, cpVault)
 	if err != nil {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", err)
 	}
@@ -331,8 +336,10 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Re-run secret propagation after Helm deploys: charts may create secrets
 	// with empty values (e.g. dai-frontend) that overwrite the operator's copy.
-	// A second pass ensures operator-propagated data always wins.
-	if _, serr := r.ensureSecrets(ctx, &stack); serr != nil {
+	// A second pass ensures operator-propagated data always wins. The
+	// control-plane vault may not be ready in this pass — acceptable, the
+	// primary pass already mirrored what it could.
+	if _, serr := r.ensureSecrets(ctx, &stack, cpVault); serr != nil {
 		return ctrl.Result{RequeueAfter: 30 * time.Second}, r.fail(ctx, &stack, "SecretSyncFailed", serr)
 	}
 
@@ -670,7 +677,7 @@ func (r *StackReconciler) uninstallComponent(ctx context.Context, stack *platfor
 //
 // ensureSecrets returns (allReady, error). allReady is false when any source
 // secret was missing — the caller should requeue rather than proceed.
-func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack) (bool, error) {
+func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1alpha1.Stack, cpVault *vaultClient) (bool, error) {
 	log := logf.FromContext(ctx)
 	const srcNS = "kubo-system"
 
@@ -709,12 +716,24 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 		var src corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: srcNS, Name: m.from}, &src); err != nil {
 			if errors.IsNotFound(err) {
-				// Self-heal: a cluster wipe of kubo-system must not be fatal.
+				// Resolution order when the kubo-system source is missing:
+				// 1. control-plane vault (durable, survives cluster wipes)
+				// 2. tenant copy (self-heal adoption, mapping's `to` name)
+				// 3. external provisioning (requeue until provided)
+				if cpVault != nil {
+					if restored := vaultRestore(ctx, cpVault, m.from); restored {
+						if cerr := r.Create(ctx, restored); cerr != nil && !errors.IsAlreadyExists(cerr) {
+							return false, fmt.Errorf("restore %s from control-plane vault: %w", m.from, cerr)
+						}
+						log.Info("restored secret from control-plane vault", "secret", m.from)
+						continue
+					}
+				}
 				// Tenant namespaces hold a full copy of their own secrets, so
 				// tenant-mapped sources are adopted back from there (the
 				// mapping's `to` is the tenant-side name). Shared secrets
 				// (pull creds etc.) are never adopted from a tenant — they
-				// must be provided externally (kubo-seed import).
+				// must come from the vault or external provisioning.
 				if adopted := r.adoptTenantSecret(ctx, stack.Namespace, m.from, m.to); adopted {
 					log.Info("adopted tenant secret back into kubo-system", "secret", m.from)
 					continue
@@ -724,6 +743,14 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 				continue
 			}
 			return false, err
+		}
+		// Mirror every resolved source into the control-plane vault so it
+		// becomes (and stays) the durable copy. Best-effort: a vault hiccup
+		// must never stall secret resolution.
+		if cpVault != nil {
+			if mErr := vaultMirror(ctx, cpVault, m.from, &src); mErr != nil {
+				log.Error(mErr, "control-plane vault mirror failed", "secret", m.from)
+			}
 		}
 		dst := corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{

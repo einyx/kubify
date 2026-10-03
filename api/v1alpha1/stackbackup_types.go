@@ -144,4 +144,3 @@ type StackBackupList struct {
 func init() {
 	SchemeBuilder.Register(&StackBackup{}, &StackBackupList{})
 }
-
