@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -220,6 +221,47 @@ func dockerAuthFor(restCfg *rest.Config, ns, secretName, repoURL string) (user, 
 }
 
 // Deploy installs or upgrades the release and returns the resulting release.
+// sensitiveKeyRe matches keys (at any depth) whose values are likely
+// credentials: passwords, secrets, tokens, API keys, credentials, auth data.
+var sensitiveKeyRe = regexp.MustCompile(`(?i)(password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|authorization|auth)`)
+
+// redactValues returns a deep copy of values with every leaf under a
+// sensitive-looking key replaced by "[REDACTED]". Helm deploy errors embed the
+// rendered values, and those errors end up in Stack status conditions, which
+// are readable by anyone with get access to the Stack — so credentials must
+// never appear verbatim.
+func redactValues(values map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(values))
+	// Helm env entries look like {name: MX_API_KEY, value: "..."}: the
+	// sensitive hint lives in the sibling "name" key, not in the key holding
+	// the payload.
+	name, hasName := values["name"].(string)
+	envLike := hasName && sensitiveKeyRe.MatchString(name)
+	for k, v := range values {
+		if sensitiveKeyRe.MatchString(k) || (envLike && (k == "value" || k == "valueFrom")) {
+			out[k] = "[REDACTED]"
+			continue
+		}
+		out[k] = redactAny(v)
+	}
+	return out
+}
+
+func redactAny(v interface{}) interface{} {
+	switch t := v.(type) {
+	case map[string]interface{}:
+		return redactValues(t)
+	case []interface{}:
+		out := make([]interface{}, len(t))
+		for i, e := range t {
+			out[i] = redactAny(e)
+		}
+		return out
+	default:
+		return v
+	}
+}
+
 func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	cfg, err := h.cfgFor(namespace)
 	if err != nil {
@@ -236,7 +278,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	// values. Merged defaults must not leak them back in.
 	delete(values, "_internal_defaults_do_not_set")
 
-	valsJSON, _ := yaml.Marshal(values)
+	valsJSON, _ := yaml.Marshal(redactValues(values))
 
 	// A failed release blocks upgrades; uninstall so the next reconcile does
 	// a clean install with the current values.
@@ -265,6 +307,19 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		return rel, nil
 	}
 
+	// Skip the upgrade when nothing would change: rendering the chart with
+	// the target values must produce the exact manifest of the deployed
+	// release (and the chart version must match). This keeps the ~reconcile
+	// cadence from generating a new Helm revision every pass. If the dry-run
+	// render itself fails, fall through to a real upgrade rather than
+	// guessing that the release is up to date.
+	if existing.Chart != nil && existing.Chart.Metadata != nil &&
+		existing.Chart.Metadata.Version == chartVersion(ch) {
+		if rendered, rerr := renderManifest(cfg, compName, namespace, ch, values); rerr == nil && rendered == existing.Manifest {
+			return existing, nil
+		}
+	}
+
 	up := action.NewUpgrade(cfg)
 	up.Namespace = namespace
 	up.Wait = false
@@ -277,6 +332,23 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		return nil, fmt.Errorf("helm upgrade %s: %w (values: %s)", compName, err, valsJSON)
 	}
 	return rel, nil
+}
+
+// renderManifest dry-run renders the chart with the given values client-side
+// and returns the resulting manifest, without touching the cluster.
+func renderManifest(cfg *action.Configuration, compName, namespace string, ch *chart.Chart, values map[string]interface{}) (string, error) {
+	up := action.NewUpgrade(cfg)
+	up.Namespace = namespace
+	up.DryRun = true
+	up.DryRunOption = "client"
+	up.Wait = false
+	up.SkipSchemaValidation = true
+	up.Version = chartVersion(ch)
+	rel, err := up.Run(compName, ch, values)
+	if err != nil {
+		return "", err
+	}
+	return rel.Manifest, nil
 }
 
 // ReleaseStatus returns the current deploy status of a release.
