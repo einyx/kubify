@@ -3,11 +3,21 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -79,6 +89,19 @@ func (r *StackReconciler) seedTenantVault(ctx context.Context, stack *platformv1
 	ns := stack.Namespace
 	seed := stack.Spec.SeedVault
 
+	// Bootstrap first: create any missing kubo-system Secrets (generated
+	// per-tenant credentials + copied static shared credentials) so ensure
+	// -secrets propagation has real data for a fresh tenant.
+	if len(seed.Static)+len(seed.Generated) > 0 {
+		if err := r.ensureVaultSeedSecrets(ctx, seed); err != nil {
+			return fmt.Errorf("bootstrap secrets: %w", err)
+		}
+	}
+
+	if seed.SourceSecret == "" || len(seed.Entries) == 0 {
+		return nil // nothing to mirror into Vault this pass
+	}
+
 	var src corev1.Secret
 	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: seed.SourceSecret}, &src); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -131,6 +154,191 @@ func (r *StackReconciler) seedTenantVault(ctx context.Context, stack *platformv1
 type vaultClient struct {
 	addr  string
 	token string
+}
+
+// ensureVaultSeedSecrets creates missing kubo-system Secrets at first
+// bootstrap: Static entries copy shared credentials from canonical Secrets,
+// Generated entries create fresh random per-tenant values. Existing Secrets
+// are never overwritten; Generated merges only still-missing keys.
+func (r *StackReconciler) ensureVaultSeedSecrets(ctx context.Context, seed *platformv1alpha1.VaultSeed) error {
+	const srcNS = "kubo-system"
+	for _, list := range [][]platformv1alpha1.VaultSeedSecret{seed.Static, seed.Generated} {
+		for _, bs := range list {
+			var existing corev1.Secret
+			err := r.Get(ctx, types.NamespacedName{Namespace: srcNS, Name: bs.Name}, &existing)
+			if err != nil && !apierrors.IsNotFound(err) {
+				return err
+			}
+			exists := err == nil
+
+			data := map[string][]byte{}
+			if exists {
+				// Merge mode (Generated into an existing Secret): keep
+				// existing values, fill only what's missing.
+				for k, v := range existing.Data {
+					data[k] = v
+				}
+			} else if bs.Type != "" {
+				existing.Type = bs.Type
+			}
+
+			for k, v := range bs.Literal {
+				if _, ok := data[k]; !ok {
+					data[k] = []byte(v)
+				}
+			}
+			if bs.CopyFrom != nil {
+				var src corev1.Secret
+				if err := r.Get(ctx, types.NamespacedName{Namespace: srcNS, Name: bs.CopyFrom.Name}, &src); err != nil {
+					if apierrors.IsNotFound(err) {
+						return fmt.Errorf("bootstrap copyFrom source %s not found", bs.CopyFrom.Name)
+					}
+					return err
+				}
+				for dst, srck := range bs.CopyFrom.Keys {
+					if _, ok := data[dst]; !ok {
+						v, ok := src.Data[srck]
+						if !ok {
+							return fmt.Errorf("bootstrap copyFrom %s missing key %s", bs.CopyFrom.Name, srck)
+						}
+						data[dst] = v
+					}
+				}
+			}
+			for k, g := range bs.Generate {
+				if _, ok := data[k]; ok && exists {
+					continue // never overwrite an existing value
+				}
+				v, err := generateValue(g)
+				if err != nil {
+					return fmt.Errorf("generate %s/%s: %w", bs.Name, k, err)
+				}
+				if g.Kind == "tls" {
+					// tls produces two keys out of one entry; skip the
+					// complementary key if it is also declared.
+					if k == "tls.key" {
+						delete(data, "tls.crt")
+					} else {
+						delete(data, "tls.key")
+					}
+					data["tls.key"] = []byte(v.key)
+					data["tls.crt"] = []byte(v.cert)
+					continue
+				}
+				data[k] = []byte(v.data)
+			}
+
+			desired := corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      bs.Name,
+					Namespace: srcNS,
+					Labels:    map[string]string{"app.kubernetes.io/managed-by": "kubo"},
+				},
+				Type: bs.Type,
+				Data: data,
+				// type defaults to Opaque when not set on new secrets
+			}
+			if desired.Type == "" {
+				desired.Type = corev1.SecretTypeOpaque
+			}
+			if exists {
+				existing.Data = desired.Data
+				if uerr := r.Update(ctx, &existing); uerr != nil {
+					return fmt.Errorf("update %s: %w", bs.Name, uerr)
+				}
+			} else if cerr := r.Create(ctx, &desired); cerr != nil && !apierrors.IsAlreadyExists(cerr) {
+				return fmt.Errorf("create %s: %w", bs.Name, cerr)
+			}
+		}
+	}
+	return nil
+}
+
+type generatedValue struct {
+	data string
+	key  string
+	cert string
+}
+
+// generateValue produces one random value per kind.
+func generateValue(g platformv1alpha1.GeneratedKey) (generatedValue, error) {
+	switch g.Kind {
+	case "hex":
+		n := g.Length
+		if n == 0 {
+			n = 32
+		}
+		b := make([]byte, (n+1)/2)
+		if _, err := rand.Read(b); err != nil {
+			return generatedValue{}, err
+		}
+		s := hex.EncodeToString(b)
+		return generatedValue{data: s[:n]}, nil
+	case "base64":
+		n := g.Length
+		if n == 0 {
+			n = 32
+		}
+		b := make([]byte, n)
+		if _, err := rand.Read(b); err != nil {
+			return generatedValue{}, err
+		}
+		return generatedValue{data: base64.StdEncoding.EncodeToString(b)}, nil
+	case "uuid":
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return generatedValue{}, err
+		}
+		b[6] = (b[6] & 0x0f) | 0x40 // version 4
+		b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+		s := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+		return generatedValue{data: s}, nil
+	case "bcrypt":
+		pw := make([]byte, 24)
+		if _, err := rand.Read(pw); err != nil {
+			return generatedValue{}, err
+		}
+		hash, err := bcrypt.GenerateFromPassword(pw, bcrypt.DefaultCost)
+		if err != nil {
+			return generatedValue{}, err
+		}
+		return generatedValue{data: string(hash)}, nil
+	case "tls":
+		key, crt, err := generateSelfSignedCert()
+		if err != nil {
+			return generatedValue{}, err
+		}
+		return generatedValue{key: key, cert: crt}, nil
+	default:
+		return generatedValue{}, fmt.Errorf("unknown generate kind %q", g.Kind)
+	}
+}
+
+// generateSelfSignedCert returns PEM-encoded RSA key and certificate.
+func generateSelfSignedCert() (keyPEM, crtPEM string, err error) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return "", "", err
+	}
+	tmpl := x509.Certificate{
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               pkix.Name{CommonName: "kubo-tenant"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().AddDate(10, 0, 0),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		BasicConstraintsValid: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		return "", "", err
+	}
+	keyBuf, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", "", err
+	}
+	keyPEM = string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyBuf}))
+	crtPEM = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	return keyPEM, crtPEM, nil
 }
 
 func (vc *vaultClient) post(ctx context.Context, path string, body []byte) (*http.Response, error) {

@@ -25,7 +25,7 @@ func testBootstrap() *platformv1alpha1.StackBootstrap {
 				"run.sh":   "echo hi",
 				"init.sql": "SELECT 1;",
 			},
-			Secrets: []platformv1alpha1.BootstrapSecret{{Name: "ai-secrets"}},
+			Secrets: []platformv1alpha1.BootstrapSecretMount{{Name: "ai-secrets"}},
 			Timeout: &metav1.Duration{Duration: d},
 		},
 	}

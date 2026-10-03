@@ -721,7 +721,8 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 				// 2. tenant copy (self-heal adoption, mapping's `to` name)
 				// 3. external provisioning (requeue until provided)
 				if cpVault != nil {
-					if restored := vaultRestore(ctx, cpVault, m.from); restored {
+					restored, ok := vaultRestore(ctx, cpVault, m.from)
+					if ok {
 						if cerr := r.Create(ctx, restored); cerr != nil && !errors.IsAlreadyExists(cerr) {
 							return false, fmt.Errorf("restore %s from control-plane vault: %w", m.from, cerr)
 						}
