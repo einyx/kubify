@@ -83,7 +83,7 @@ spec:
                   url:
                     description: |-
                       URL is an OCI reference, including the tag or digest.
-                      Example: oci://ghcr.io/example/product-bundle:0.0.8
+                      Example: oci://ghcr.io/org/product-bundle:0.0.8
                     minLength: 1
                     type: string
                 required:
@@ -128,7 +128,7 @@ spec:
                     url:
                       description: |-
                         URL is an OCI reference, including the tag or digest.
-                        Example: oci://ghcr.io/example/product-bundle:0.0.8
+                        Example: oci://ghcr.io/org/product-bundle:0.0.8
                       minLength: 1
                       type: string
                   required:
@@ -394,16 +394,200 @@ spec:
                       - keys
                       - path
                       type: object
-                    minItems: 1
+                    type: array
+                  generated:
+                    description: |-
+                      Generated creates fresh RANDOM per-tenant credentials (Trino JWT/S3
+                      keys, DB passwords, session secrets). Every tenant gets its own values.
+                      Created only if the target Secret does not exist; for Secrets that
+                      already exist (e.g. created by Static), only keys that are still
+                      missing are added — existing values are never overwritten.
+                    items:
+                      description: VaultSeedSecret describes one kubo-system Secret
+                        kubo creates at bootstrap.
+                      properties:
+                        copyFrom:
+                          description: |-
+                            CopyFrom copies keys from an existing kubo-system Secret (the
+                            canonical source of shared credentials such as Auth0 clients).
+                          properties:
+                            keys:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                Keys maps this Secret's key → source Secret key. When empty, ALL
+                                source keys are copied and the source Secret's type is preserved.
+                              type: object
+                            name:
+                              description: Name of the source Secret.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the source Secret. Defaults to kubo-system. Use
+                                acr-cache-system for canonical registry credentials.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        generate:
+                          additionalProperties:
+                            description: GeneratedKey describes a random value to
+                              generate for a Secret key.
+                            properties:
+                              kind:
+                                description: |-
+                                  Kind of value to generate:
+                                    hex    — Length random hex characters (default 32).
+                                    base64 — Length random bytes, base64-encoded (default 32).
+                                    uuid   — random UUID v4.
+                                    bcrypt — random password, bcrypt-hashed; writes only the hash (for
+                                             Trino password.db style files).
+                                    tls    — self-signed RSA key pair; produces tls.key and tls.crt keys
+                                             (Length ignored). Only valid with Secret type
+                                             kubernetes.io/tls.
+                                enum:
+                                - hex
+                                - base64
+                                - uuid
+                                - bcrypt
+                                - tls
+                                type: string
+                              length:
+                                description: Length of the generated value (kind-dependent,
+                                  see Kind).
+                                minimum: 8
+                                type: integer
+                            required:
+                            - kind
+                            type: object
+                          description: |-
+                            Generate creates cryptographically random values for these keys
+                            (per-tenant credentials).
+                          type: object
+                        literal:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Literal key/values written verbatim (non-secret identifiers, domains,
+                            audiences).
+                          type: object
+                        name:
+                          description: Name of the kubo-system Secret, e.g. foundation-c-trino-s3-credentials.
+                          minLength: 1
+                          type: string
+                        type:
+                          default: Opaque
+                          description: |-
+                            Type of the Secret. Defaults to Opaque; use kubernetes.io/tls for
+                            generated key pairs.
+                          enum:
+                          - Opaque
+                          - kubernetes.io/tls
+                          type: string
+                      required:
+                      - name
+                      type: object
                     type: array
                   sourceSecret:
                     description: |-
                       SourceSecret is a Secret in the Stack namespace whose keys are copied
-                      into Vault. +kubebuilder:validation:MinLength=1
+                      into Vault. Required when Entries is set.
                     type: string
-                required:
-                - entries
-                - sourceSecret
+                  static:
+                    description: |-
+                      Static copies pre-generated SHARED credentials (Auth0 clients, vendor
+                      API keys) from canonical kubo-system Secrets into tenant Secrets.
+                      Auth0 clients cannot be generated — they exist in the Auth0 tenant and
+                      are shared across demo deployments. Created only if the target Secret
+                      does not exist; never overwritten.
+                    items:
+                      description: VaultSeedSecret describes one kubo-system Secret
+                        kubo creates at bootstrap.
+                      properties:
+                        copyFrom:
+                          description: |-
+                            CopyFrom copies keys from an existing kubo-system Secret (the
+                            canonical source of shared credentials such as Auth0 clients).
+                          properties:
+                            keys:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                Keys maps this Secret's key → source Secret key. When empty, ALL
+                                source keys are copied and the source Secret's type is preserved.
+                              type: object
+                            name:
+                              description: Name of the source Secret.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: |-
+                                Namespace of the source Secret. Defaults to kubo-system. Use
+                                acr-cache-system for canonical registry credentials.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        generate:
+                          additionalProperties:
+                            description: GeneratedKey describes a random value to
+                              generate for a Secret key.
+                            properties:
+                              kind:
+                                description: |-
+                                  Kind of value to generate:
+                                    hex    — Length random hex characters (default 32).
+                                    base64 — Length random bytes, base64-encoded (default 32).
+                                    uuid   — random UUID v4.
+                                    bcrypt — random password, bcrypt-hashed; writes only the hash (for
+                                             Trino password.db style files).
+                                    tls    — self-signed RSA key pair; produces tls.key and tls.crt keys
+                                             (Length ignored). Only valid with Secret type
+                                             kubernetes.io/tls.
+                                enum:
+                                - hex
+                                - base64
+                                - uuid
+                                - bcrypt
+                                - tls
+                                type: string
+                              length:
+                                description: Length of the generated value (kind-dependent,
+                                  see Kind).
+                                minimum: 8
+                                type: integer
+                            required:
+                            - kind
+                            type: object
+                          description: |-
+                            Generate creates cryptographically random values for these keys
+                            (per-tenant credentials).
+                          type: object
+                        literal:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Literal key/values written verbatim (non-secret identifiers, domains,
+                            audiences).
+                          type: object
+                        name:
+                          description: Name of the kubo-system Secret, e.g. foundation-c-trino-s3-credentials.
+                          minLength: 1
+                          type: string
+                        type:
+                          default: Opaque
+                          description: |-
+                            Type of the Secret. Defaults to Opaque; use kubernetes.io/tls for
+                            generated key pairs.
+                          enum:
+                          - Opaque
+                          - kubernetes.io/tls
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
                 type: object
               stackRef:
                 description: |-

@@ -24,20 +24,35 @@ const (
 	ingressHTTPSNodePort = 30443
 )
 
-func isClusterOperator(name string) bool {
-	switch name {
-	case "vault-operator", "vault-tenant", "spark-operator", "istiod", "istio-ingress", "kafka-operator", "kubegres", "cert-manager", "training-operator":
-		return true
-	default:
-		return false
-	}
+// platformOperators is kubo's registry of platform infrastructure managed
+// outside the per-component deploy loop, keyed by the spec.operators toggle
+// that enables each entry. This is PLATFORM knowledge (infrastructure), not
+// product knowledge: products are described entirely by templates, bundles
+// and component values. Components and charts carrying one of these names
+// are routed to the operators namespace / reconcileOperators instead of the
+// tenant release loop.
+var platformOperators = map[string]bool{
+	"vault-operator":    true,
+	"vault-tenant":      true,
+	"spark-operator":    true,
+	"istiod":            true,
+	"istio-ingress":     true,
+	"kafka-operator":    true,
+	"kubegres":          true,
+	"cert-manager":      true,
+	"training-operator": true,
+	"agentfw":           true,
+}
+
+func isPlatformOperator(name string) bool {
+	return platformOperators[name]
 }
 
 func isClusterComponent(comp platformv1alpha1.StackComponentSpec) bool {
 	if comp.Scope == platformv1alpha1.ComponentScopeCluster {
 		return true
 	}
-	return isClusterOperator(comp.Name) || isClusterOperator(comp.ChartRef.ChartName)
+	return isPlatformOperator(comp.Name) || isPlatformOperator(comp.ChartRef.ChartName)
 }
 
 // adoptClusterRelease reports an already-installed shared operator as Ready

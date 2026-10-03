@@ -78,7 +78,7 @@ spec:
                 description: Postgres overrides defaults for the DB copy step.
                 properties:
                   database:
-                    description: Database is required (set spec.postgres.database).
+                    description: Database is required (set it in spec.postgres.database).
                     type: string
                   host:
                     description: Host is the Postgres service name inside each namespace.
@@ -120,7 +120,7 @@ spec:
                     - name
                     type: object
                   user:
-                    description: User is required (set spec.postgres.user).
+                    description: User is required (set it in spec.postgres.user).
                     type: string
                 type: object
               s3:

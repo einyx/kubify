@@ -91,12 +91,12 @@ spec:
                             = latest available.
                           type: string
                         repoURL:
-                          description: RepoURL is the Helm repository URL.
-                          minLength: 1
+                          description: |-
+                            RepoURL is the Helm repository URL. Optional when the chart is
+                            resolved from a Bundle or ExtraBundles entry.
                           type: string
                       required:
                       - chartName
-                      - repoURL
                       type: object
                     dependsOn:
                       description: DependsOn lists component names that must be Ready

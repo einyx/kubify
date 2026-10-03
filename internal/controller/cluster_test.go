@@ -18,13 +18,13 @@ import (
 
 func TestIsClusterOperator(t *testing.T) {
 	for _, name := range []string{"vault-operator", "spark-operator", "istiod"} {
-		if !isClusterOperator(name) {
-			t.Errorf("isClusterOperator(%q) = false, want true", name)
+		if !isPlatformOperator(name) {
+			t.Errorf("isPlatformOperator(%q) = false, want true", name)
 		}
 	}
 	for _, name := range []string{"backend", "vault", "istio-cni", ""} {
-		if isClusterOperator(name) {
-			t.Errorf("isClusterOperator(%q) = true, want false", name)
+		if isPlatformOperator(name) {
+			t.Errorf("isPlatformOperator(%q) = true, want false", name)
 		}
 	}
 }
