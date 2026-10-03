@@ -582,16 +582,11 @@ func (r *StackReconciler) fail(ctx context.Context, stack *platformv1alpha1.Stac
 }
 
 // adoptTenantSecret recreates a missing kubo-system source secret from the
-// tenant copy, when the source name is tenant-prefixed ("<ns>-<secret>").
-// Shared (non-prefixed) secrets are refused: tenants must not be able to
-// seed cluster-shared material such as registry pull credentials.
-func (r *StackReconciler) adoptTenantSecret(ctx context.Context, namespace, sourceName string) bool {
+// tenant copy named by the mapping (namespace/tenantName). Shared,
+// non-mapped secrets are refused: tenants must not be able to seed
+// cluster-shared material such as registry pull credentials.
+func (r *StackReconciler) adoptTenantSecret(ctx context.Context, namespace, sourceName, tenantName string) bool {
 	const srcNS = "kubo-system"
-	prefix := namespace + "-"
-	if !strings.HasPrefix(sourceName, prefix) {
-		return false
-	}
-	tenantName := strings.TrimPrefix(sourceName, prefix)
 	var copy corev1.Secret
 	if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: tenantName}, &copy); err != nil {
 		return false
@@ -716,10 +711,11 @@ func (r *StackReconciler) ensureSecrets(ctx context.Context, stack *platformv1al
 			if errors.IsNotFound(err) {
 				// Self-heal: a cluster wipe of kubo-system must not be fatal.
 				// Tenant namespaces hold a full copy of their own secrets, so
-				// tenant-prefixed sources are adopted back from there. Shared
-				// secrets (pull creds etc.) are never adopted from a tenant —
-				// they must be provided externally (kubo-seed import).
-				if adopted := r.adoptTenantSecret(ctx, stack.Namespace, m.from); adopted {
+				// tenant-mapped sources are adopted back from there (the
+				// mapping's `to` is the tenant-side name). Shared secrets
+				// (pull creds etc.) are never adopted from a tenant — they
+				// must be provided externally (kubo-seed import).
+				if adopted := r.adoptTenantSecret(ctx, stack.Namespace, m.from, m.to); adopted {
 					log.Info("adopted tenant secret back into kubo-system", "secret", m.from)
 					continue
 				}

@@ -88,25 +88,24 @@ func AdoptStack(ctx context.Context, c client.Client, stack *platformv1alpha1.St
 		if !apierrors.IsNotFound(err) {
 			return res, err
 		}
-		prefix := stack.Namespace + "-"
-		if !strings.HasPrefix(m.from, prefix) {
-			res.Shared = append(res.Shared, m.from)
-			continue
-		}
+		// The mapping's `to` is the tenant-side copy name — adopt from there.
 		var copy corev1.Secret
-		tenantName := strings.TrimPrefix(m.from, prefix)
-		if err := c.Get(ctx, types.NamespacedName{Namespace: stack.Namespace, Name: tenantName}, &copy); err != nil {
+		if err := c.Get(ctx, types.NamespacedName{Namespace: stack.Namespace, Name: m.to}, &copy); err != nil {
 			if apierrors.IsNotFound(err) {
 				res.Missing = append(res.Missing, m.from)
 				continue
 			}
 			return res, err
 		}
+		if !strings.HasPrefix(m.from, stack.Namespace+"-") {
+			res.Shared = append(res.Shared, m.from)
+			continue
+		}
 		adopted := corev1.Secret{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        m.from,
 				Namespace:   srcNS,
-				Annotations: map[string]string{"platform.kubo.io/adopted-from": stack.Namespace + "/" + tenantName},
+				Annotations: map[string]string{"platform.kubo.io/adopted-from": stack.Namespace + "/" + m.to},
 			},
 			Type: copy.Type,
 			Data: copy.Data,
