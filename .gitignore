@@ -36,3 +36,4 @@ Makefile
 # agent skills installed locally (third-party, never committed)
 .agents/
 skills-lock.json
+portal
