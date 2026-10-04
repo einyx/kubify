@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/mcpserver"
 	"github.com/einyx/kubo/internal/portal"
 	corev1 "k8s.io/api/core/v1"
@@ -45,6 +46,7 @@ func main() {
 	sch := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(sch)
 	_ = corev1.AddToScheme(sch)
+	_ = platformv1alpha1.AddToScheme(sch)
 	restCfg, cfgErr := config.GetConfig()
 	if cfgErr == nil {
 		if k8sClient, err := client.New(restCfg, client.Options{Scheme: sch}); err == nil {
