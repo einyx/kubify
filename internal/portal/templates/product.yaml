@@ -1,216 +1,295 @@
-id: product
+id: product-full
 name: Product (full)
-description: 1:1 with the foundation-a reference stack - postgres, storage-engine, kafka, backend, frontend, watcher, opa, scheduler, processor, trino, AI, agentfw. URL convention https://<tenant>.meshx.foundation. Requires kubo-system secrets named <tenant>-* (auth0, ai-secrets, trino, hive, user-credentials, watcher-api-key, ghcr-pull-secret).
+description: Full product data mesh — backend, frontend, AI, trino, kafka, vault, dai. Requires kubo-system/product-<tenant>-* secrets.
 defaults:
+  seedVault:
+    # Product knowledge lives HERE, not in the controller: static entries
+    # copy shared credentials from canonical kubo-system sources; generated
+    # entries mint fresh per-tenant credentials. Nothing is sourced from
+    # another tenant.
+    static:
+      - name: product-{{.Tenant}}-backend-auth0
+        copyFrom:
+          name: kubo-shared-auth0-backend
+          keys:
+            MX_AUTH0_CLIENT_ID: MX_AUTH0_CLIENT_ID
+            MX_AUTH0_CLIENT_SECRET: MX_AUTH0_CLIENT_SECRET
+            MX_AUTH0_DOMAIN: MX_AUTH0_DOMAIN
+      - name: product-{{.Tenant}}-frontend-auth0
+        literal:
+          APP_BASE_URL: https://product-{{.Tenant}}.meshx.foundation
+          AUTH0_BASE_URL: https://product-{{.Tenant}}.meshx.foundation
+        copyFrom:
+          name: kubo-shared-auth0-frontend
+          keys:
+            AUTH0_CLIENT_ID: AUTH0_CLIENT_ID
+            AUTH0_CLIENT_SECRET: AUTH0_CLIENT_SECRET
+            AUTH0_DOMAIN: AUTH0_DOMAIN
+            AUTH0_AUDIENCE: AUTH0_AUDIENCE
+            AUTH0_ISSUER_BASE_URL: AUTH0_ISSUER_BASE_URL
+      - name: product-{{.Tenant}}-trino-auth0
+        copyFrom:
+          name: kubo-shared-auth0-trino
+          keys:
+            client_id: client_id
+            client_secret: client_secret
+      - name: product-{{.Tenant}}-ai-secrets
+        copyFrom:
+          name: kubo-shared-ai
+          keys:
+            MX_ANTHROPIC_API_KEY: MX_ANTHROPIC_API_KEY
+            MX_AUTH0_CLIENT_SECRET: MX_AUTH0_CLIENT_SECRET
+      - name: product-{{.Tenant}}-dai-backend
+        copyFrom:
+          name: kubo-shared-dai-backend
+      - name: product-{{.Tenant}}-dai-frontend
+        copyFrom:
+          name: kubo-shared-dai-frontend
+      - name: ghcr-pull-secret
+        copyFrom:
+          name: ghcr-pull-secret
+          namespace: acr-cache-system
+      - name: acr-pull-secret
+        copyFrom:
+          name: acr-pull-secret
+          namespace: acr-cache-system
+      - name: meshxregistry-helm-secret
+        copyFrom:
+          name: meshxregistry-helm-secret
+          namespace: acr-cache-system
+    generated:
+      - name: product-{{.Tenant}}-trino-jwt-signing-key
+        type: kubernetes.io/tls
+        generate:
+          tls.key: {kind: tls}
+      - name: product-{{.Tenant}}-trino-credentials
+        generate:
+          password.db: {kind: bcrypt}
+      - name: product-{{.Tenant}}-trino-s3-credentials
+        generate:
+          MINIO_ACCESS_KEY: {kind: hex, length: 16}
+          MINIO_SECRET_ACCESS_KEY: {kind: hex, length: 32}
+      - name: product-{{.Tenant}}-hive-metastore-minio-credentials
+        generate:
+          MINIO_ACCESS_KEY: {kind: hex, length: 16}
+          MINIO_SECRET_KEY: {kind: hex, length: 32}
+      - name: product-{{.Tenant}}-backend-auth0
+        # MX_POSTGRES_PASSWORD must match the postgres auth.password above —
+        # the backend sidecars read it via envFrom. Pin it; only the truly
+        # random keys stay generated.
+        literal:
+          MX_POSTGRES_PASSWORD: product
+      - name: product-{{.Tenant}}-backend-auth0
+        generate:
+          MX_SECRET_KEY: {kind: base64, length: 32}
+          MX_TRINO_JWT_SECRET_KEY: {kind: base64, length: 48}
+      - name: product-{{.Tenant}}-ai-secrets
+        copyFrom:
+          name: kubo-shared-ai
+          keys:
+            MX_ANTHROPIC_API_KEY: MX_ANTHROPIC_API_KEY
+            MX_AUTH0_CLIENT_SECRET: MX_AUTH0_CLIENT_SECRET
+        literal:
+          # Must match the postgres auth.password above.
+          MX_DB_PASSWORD: product
+          MX_DB_USER: product
+      - name: product-{{.Tenant}}-ai-secrets
+        generate:
+          MX_MCP_SERVICE_TOKEN: {kind: hex, length: 32}
+
   mode: Direct
 
 ---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: '{{.Tenant}}'
+  name: product-{{.Tenant}}
 ---
 apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
-  name: foundation
-  namespace: '{{.Tenant}}'
+  name: product
+  namespace: product-{{.Tenant}}
 spec:
+  # Secrets are pre-created in kubo-system with the "product-{{.Tenant}}-" prefix
+  # and propagated here by the kubo operator on every reconcile.
+  secretsRef:
+    - from: product-{{.Tenant}}-backend-auth0
+      to: backend-auth0
+    - from: product-{{.Tenant}}-frontend-auth0
+      to: product-frontend-auth0
+    - from: product-{{.Tenant}}-trino-jwt-signing-key
+      to: trino-jwt-signing-key
+    - from: product-{{.Tenant}}-trino-credentials
+      to: trino-credentials
+    - from: product-{{.Tenant}}-trino-auth0
+      to: trino-auth0
+    - from: product-{{.Tenant}}-trino-s3-credentials
+      to: trino-s3-credentials
+    - from: product-{{.Tenant}}-ai-secrets
+      to: product-ai-secrets
+    - from: product-{{.Tenant}}-hive-metastore-minio-credentials
+      to: hive-metastore-minio-credentials
+    - from: product-{{.Tenant}}-dai-backend
+      to: dai-backend
+    - from: product-{{.Tenant}}-dai-frontend
+      to: dai-frontend-auth0
   componentValues:
-    ai:
-      config:
-        env:
-          HTTPS_PROXY: http://agentfw:8080
-          HTTP_PROXY: http://agentfw:8080
-          MX_AUTH0_AUDIENCE: https://demo.meshx.foundation/
-          MX_AUTH0_CLIENT_ID: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
-          MX_AUTH0_DOMAIN: auth0-stg.meshx.app
-          MX_DB_HOST: postgres-postgresql
-          MX_DB_NAME: foundation
-          MX_DB_PORT: '5432'
-          MX_DB_USER: foundation
-          MX_DEFAULT_MODEL: claude-sonnet-4-6
-          MX_FOUNDATION_DATA_MCP_URL: http://backend:8765/mcp
-          MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.meshx.foundation/ai/oauth/mcp-callback
-          NO_PROXY: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
-          no_proxy: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
-      externalSecret:
-        enabled: false
-      extraEnvFrom:
-      - secretRef:
-          name: foundation-ai-secrets
-      image:
-        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/ai
-        tag: v0.0.2
-      imagePullSecrets:
-      - name: acr-pull-secret
-      readinessProbe:
-        httpGet:
-          path: /health
-          port: http
-        initialDelaySeconds: 10
-        periodSeconds: 15
-        timeoutSeconds: 5
     backend:
+      image:
+        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/backend
+        tag: v0.5.62
       config:
         auth0:
-          audience: https://demo.meshx.foundation/
+          audience: "https://demo.meshx.foundation/"
           client_id: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
           domain: auth0-stg.meshx.app
           enabled: true
         kafka:
           cluster_host: kafka:9092
-        mcp:
-          auth0Audience: https://demo.meshx.foundation/
-          enabled: true
-          publicUrl: https://{{.Tenant}}.meshx.foundation
-        postgres:
-          database: foundation
-          host: postgres-postgresql
-          port: 5432
         scheduler:
           host: scheduler
           port: 65434
-      dependencies:
-        foundationBackendConfigMap: ''
-        hiveMetastoreSecret: ''
+        watcher:
+          # fullnameOverride below is per-tenant so the ClusterRole does not
+          # collide across tenants; point the backend at the tenant's service.
+          host: watcher-{{.Tenant}}
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+        mcp:
+          enabled: true
+          publicUrl: https://product-{{.Tenant}}.meshx.foundation
+          auth0Audience: "https://demo.meshx.foundation/"
       env:
+      # Data-system connector image: use the ACR mirror path (the default is
+      # the raw ECR registry, which cluster nodes cannot pull from).
+      - name: MX_DOCKER_REPOSITORY
+        value: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/foundation-data
+      # The backend image defaults its postgres user to a legacy name — pin it
+      # to the auth.username this template provisions.
+      - name: MX_POSTGRES_USER
+        value: product
+      # backend-mcp entrypoint requirement: the backend's own API base
+      - name: MX_FOUNDATION_API_URL
+        value: http://localhost:65432
       - name: MX_AUTH0_CLIENT_ID
         value: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
       - name: MX_POSTGRES_PASSWORD
-        value: foundation
+        value: product
       - name: MX_SECRET_KEY
         value: dev-local-secret
       - name: MX_S3_ENDPOINT_LOCATION
         value: http://storage-engine:8080
       - name: MX_S3_ACCESS_KEY_ID
-        value: '{{.Tenant}}'
+        value: product-{{.Tenant}}
       - name: MX_S3_SECRET_ACCESS_KEY
         value: e95df32785232200f1934146dba4039ea6572113eebbe485
       - name: MX_S3_REGION_NAME
         value: us-east-1
       - name: MX_S3_PATH_STYLE_ACCESS
-        value: 'true'
+        value: "true"
       - name: MX_S3_SIGNATURE_VERSION
         value: s3v4
-      - name: MX_FOUNDATION_API_URL
+      - name: MX_PRODUCT_API_URL
         value: http://localhost:65432
       - name: MX_AUTH0_DOMAIN
         value: auth0-stg.meshx.app
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
         value: meshx-stg.eu.auth0.com
-      extraEnvFrom:
-      - secretRef:
-          name: backend-auth0
-      image:
-        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/backend
-        tag: v0.5.62
-      secret:
-        auth0:
-          enabled: false
       sidecar:
         mcp:
           enabled: true
-    dai-backend:
-      configMap:
-        data:
-          MX_AUTH0_AUDIENCE: https://demo.meshx.foundation/
-          MX_AUTH0_DOMAIN: auth0-stg.meshx.app
-          MX_AUTH0_ENABLED: 'true'
-          MX_AUTH0_ISSUER: https://auth0-stg.meshx.app/
-          MX_ENV: production
-          MX_LLM_PROVIDER_TYPE: anthropic
-          MX_MONGO_DATABASE: dai
-          MX_NATS_AUTO_CREATE_STREAM: 'true'
-          MX_NATS_URL: nats://nats:4222
-          MX_POSTGRES_DATABASE: foundation
-          MX_POSTGRES_HOST: postgres-postgresql
-          MX_POSTGRES_PORT: '5432'
-          MX_POSTGRES_SSLMODE: disable
-          MX_POSTGRES_USER: foundation
-          MX_RELEASE_TAG: v0.2.79
-      image:
-        repository: meshxregistry.azurecr.io/cached/ecr-meshx/dai/backend
-        tag: v0.2.79
-      imagePullSecrets:
-      - name: acr-pull-secret
-      migrations:
-        enabled: true
-      streamlit:
-        enabled: false
-    dai-frontend:
-      env:
-      - name: NEXT_PUBLIC_BASE_PATH
-        value: /dai
-      - name: AUTH0_ISSUER_BASE_URL
-        value: https://auth0-stg.meshx.app
-      - name: AUTH0_BASE_URL
-        value: https://{{.Tenant}}.meshx.foundation/dai
-      - name: API_URL
-        value: http://dai-backend:8000
       extraEnvFrom:
       - secretRef:
-          name: dai-frontend-auth0
-      image:
-        repository: meshxregistry.azurecr.io/foundation/dai-frontend
-        tag: basepath
-      imagePullSecrets:
-      - name: acr-pull-secret
-      livenessProbe:
-        httpGet:
-          path: /dai/ready
-      readinessProbe:
-        httpGet:
-          path: /dai/ready
-      startupProbe:
-        httpGet:
-          path: /dai/ready
-      virtualService:
-        enabled: false
+          name: backend-auth0
+
     frontend:
-      env:
-        api_proxy_prefix: api
-        api_url: ''
-        auth0:
-          audience: ''
-          baseurl: ''
-          client_id: ''
-          domain: ''
-          enabled: 'false'
-          issuer_baseurl: ''
-          secret: ''
-        foundation_env: ''
-        host: ''
-        internal_api_url: http://backend/
-        jwt_disabled: 'true'
-        sentry:
-          dsn: ''
-          enabled: 'false'
-          environment: ''
-          profiles_sample_rate: '0.1'
-          traces_sample_rate: '0.1'
-      externalSecret:
-        enabled: true
-        target:
-          name: foundation-frontend-auth0
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/frontend
         tag: v0.7.37
+      # Traffic goes through the Istio VirtualService; the chart's default
+      # Ingress has no hosts configured and is rejected as invalid.
       ingress:
         enabled: false
+      externalSecret:
+        enabled: true
+        target:
+          name: product-frontend-auth0
+      env:
+        internal_api_url: http://backend:8000/
+        auth0:
+          enabled: "true"
+          secret: ""
+          baseurl: ""
+          issuer_baseurl: ""
+          client_id: ""
+          audience: ""
+          domain: ""
       virtualService:
-        enabled: false
-        host: '{{.Tenant}}.meshx.foundation'
+        enabled: true
+        gateway: product/product-gateway
+        gatewayNamespace: product
+        host: product-{{.Tenant}}.meshx.foundation
+        additionalHosts:
+        - product-{{.Tenant}}.meshx.foundation
+        extraHttp:
+        - name: dai
+          match:
+          - uri:
+              prefix: /dai
+          route:
+          - destination:
+              host: dai-frontend
+              port:
+                number: 3000
+          timeout: 50s
+        - name: mcp
+          match:
+          - uri:
+              prefix: /mcp
+          route:
+          - destination:
+              host: backend
+              port:
+                number: 8765
+          timeout: 300s
+        - name: ai
+          match:
+          - uri:
+              prefix: /ai
+          route:
+          - destination:
+              host: ai-product-ai
+              port:
+                number: 8000
+          timeout: 300s
+        http:
+          cors:
+            allowHeaders:
+            - X-Account
+            - Content-Type
+            - Authorization
+            allowMethods:
+            - GET
+            - POST
+            - PUT
+            - DELETE
+            - OPTIONS
+            allowOrigins:
+            - exact: https://product-{{.Tenant}}.meshx.foundation
+          destination:
+            host: frontend
+            port: 80
+          matchPrefix: /
+          name: frontend
+          responseHeaders:
+            StrictTransportSecurity: max-age=31536000
+          timeout: 50s
+        name: frontend
+
     kafka:
-      controller:
-        heapOpts: -Xmx3g -Xms1g
-        resources:
-          limits:
-            cpu: '2'
-            memory: 4Gi
-          requests:
-            cpu: 500m
-            memory: 2Gi
       extraConfig: ''
       global:
         security:
@@ -220,171 +299,192 @@ spec:
       listeners:
         client:
           protocol: PLAINTEXT
+      controller:
+        resources:
+          limits:
+            cpu: "2"
+            memory: 4Gi
+          requests:
+            cpu: 500m
+            memory: 2Gi
+        heapOpts: "-Xmx3g -Xms1g"
+
     opa:
-      env:
-        API_BASE_URL: http://backend:65432
       image:
         registry: meshxregistry.azurecr.io
         repository: cached/ecr-meshx/foundation/opa
         tag: v0.5.62
+      env:
+        API_BASE_URL: http://backend:65432
+
     postgres:
       auth:
-        database: foundation
-        password: foundation
-        username: foundation
+        database: product
+        password: product
+        username: product
       global:
         security:
           allowInsecureImages: true
       image:
         repository: bitnamilegacy/postgresql
       primary:
-        extendedConfiguration: '# Sized for a 2Gi-limit dedicated instance
-
-          shared_buffers = 512MB
-
-          effective_cache_size = 1536MB
-
-          work_mem = 16MB
-
-          maintenance_work_mem = 256MB
-
-          max_connections = 200
-
-          # SSD-backed PVC: favour index/random scans
-
-          random_page_cost = 1.1
-
-          effective_io_concurrency = 256
-
-          # Checkpoints: spread I/O, larger WAL = fewer full-page writes
-
-          checkpoint_completion_target = 0.9
-
-          wal_buffers = 16MB
-
-          min_wal_size = 512MB
-
-          max_wal_size = 2GB
-
-          '
-        initdb:
-          scripts:
-            grant_public.sql: 'GRANT CREATE ON SCHEMA public TO foundation;
-
-              '
+        # Per-tenant dedicated instance sizing: the chart defaults were
+        # 100m/128Mi requests with a 150m/192Mi limit — Postgres was CPU-
+        # and RAM-starved (shared_buffers 160MB, work_mem 4MB).
         resources:
-          limits:
-            cpu: '2'
-            memory: 2Gi
           requests:
             cpu: 500m
             memory: 1Gi
+          limits:
+            cpu: "2"
+            memory: 2Gi
+        extendedConfiguration: |
+          # Sized for a 2Gi-limit dedicated instance
+          shared_buffers = 512MB
+          effective_cache_size = 1536MB
+          work_mem = 16MB
+          maintenance_work_mem = 256MB
+          max_connections = 200
+          # SSD-backed PVC: favour index/random scans
+          random_page_cost = 1.1
+          effective_io_concurrency = 256
+          # Checkpoints: spread I/O, larger WAL = fewer full-page writes
+          checkpoint_completion_target = 0.9
+          wal_buffers = 16MB
+          min_wal_size = 512MB
+          max_wal_size = 2GB
+        initdb:
+          scripts:
+            grant_public.sql: |
+              GRANT CREATE ON SCHEMA public TO product;
+
     processor:
+      replicaCount: 1
       autoscaling:
-        enabled: false
-      config:
-        iceberg:
-          s3_access_key_id: '{{.Tenant}}'
-          s3_endpoint: http://storage-engine:8080
-          s3_secret_access_key: e95df32785232200f1934146dba4039ea6572113eebbe485
-        kafka:
-          cluster_host: kafka:9092
-        postgres:
-          database: foundation
-          host: postgres-postgresql
-          password: foundation
-          port: 5432
-          user: foundation
-      externalSecret:
         enabled: false
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/processor
         tag: v0.2.33
+      config:
+        kafka:
+          cluster_host: kafka:9092
+        postgres:
+          password: product
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+        iceberg:
+          s3_endpoint: http://storage-engine:8080
+          s3_access_key_id: product-{{.Tenant}}
+          s3_secret_access_key: e95df32785232200f1934146dba4039ea6572113eebbe485
+      externalSecret:
+        enabled: false
       imagePullSecrets:
       - name: acr-pull-secret
       migrations:
         enabled: false
-      replicaCount: 1
+      serviceAccount:
+        # The chart names the ClusterRole "<serviceAccount>-clusterrole";
+        # it must be unique per tenant or installs collide cluster-wide.
+        name: product-{{.Tenant}}-processor
       resources:
         limits:
-          cpu: '1'
+          cpu: "1"
           memory: 1Gi
         requests:
           cpu: 500m
           memory: 512Mi
-      serviceAccount:
-        name: foundation-processor
+
     scheduler:
-      config:
-        MX_KAFKA_CLUSTER_HOST: kafka:9092
-        MX_POSTGRES_DATABASE: foundation
-        MX_POSTGRES_HOST: postgres-postgresql
-        MX_POSTGRES_PORT: 5432
-        MX_POSTGRES_USER: foundation
-        MX_SCHEDULER_HOST: 0.0.0.0
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/scheduler
         tag: v1.1.10
+      config:
+        MX_KAFKA_CLUSTER_HOST: kafka:9092
+        MX_POSTGRES_DATABASE: product
+        MX_POSTGRES_HOST: postgres-postgresql
+        MX_POSTGRES_PORT: 5432
+        MX_POSTGRES_USER: product
+        MX_SCHEDULER_HOST: 0.0.0.0
       imagePullSecrets:
       - name: acr-pull-secret
       initContainer:
         enabled: true
       secret:
-        MX_POSTGRES_PASSWORD: foundation
+        MX_POSTGRES_PASSWORD: product
+
     storage-engine:
-      config:
-        auth:
-          credential: e95df32785232200f1934146dba4039ea6572113eebbe485
-          identity: '{{.Tenant}}'
-          type: awsv4
-        storage:
-          filesystem:
-            baseDir: /data
-          provider: filesystem
-        virusTotal:
-          enabled: false
-      configFile:
-        content: "server:\n  listen: \":8080\"\n  read_timeout: 600s\n  write_timeout:\
-          \ 600s\n  idle_timeout: 120s\n  max_body_size: 5368709120\nstorage:\n  provider:\
-          \ filesystem\n  filesystem:\n    root_path: /data\nauth:\n  type: awsv4\n\
-          ui:\n  enabled: false\nlogging:\n  level: info\n  format: json\n"
-        enabled: true
-        filename: storage-engine.yaml
+      image:
+        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/storage-engine
+        tag: v0.0.43
       externalSecrets:
-        auth:
-          enabled: false
+        enabled: false
         aws:
           enabled: false
         azure:
           enabled: false
-        enabled: false
+        auth:
+          enabled: false
         sentry:
           enabled: false
-      image:
-        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/storage-engine
-        tag: v0.0.43
+      config:
+        auth:
+          type: awsv4
+          identity: product-{{.Tenant}}
+          credential: e95df32785232200f1934146dba4039ea6572113eebbe485
+        storage:
+          provider: filesystem
+          filesystem:
+            baseDir: /data
+        virusTotal:
+          enabled: false
+      configFile:
+        enabled: true
+        filename: storage-engine.yaml
+        content: |
+          server:
+            listen: ":8080"
+            read_timeout: 600s
+            write_timeout: 600s
+            idle_timeout: 120s
+            max_body_size: 5368709120
+          storage:
+            provider: filesystem
+            filesystem:
+              root_path: /data
+          auth:
+            type: awsv4
+          ui:
+            enabled: false
+          logging:
+            level: info
+            format: json
+
     trino:
+      image:
+        repository: meshxregistry.azurecr.io/trinodb/trino
+        tag: "482-meshX"
+      imagePullSecrets:
+      - name: acr-pull-secret
+      serviceAccount:
+        create: false
+      server:
+        workers: 2
+        exchangeManager:
+          name: filesystem
       accessControl:
-        properties: 'access-control.name=opa
-
-          opa.policy.uri=http://opa:8181/v1/data/trino/authz/allow
-
-          opa.policy.batched-uri=http://opa:8181/v1/data/trino/authz/batch
-
-          opa.policy.batch-column-masking-uri=http://opa:8181/v1/data/trino/authz/batchColumnMasks
-
-          opa.log-requests=true
-
-          opa.log-responses=true
-
-          opa.allow-permission-management-operations=false
-
-          opa.http-client.request-timeout=60s
-
-          opa.http-client.max-requests-queued-per-destination=10000
-
-          '
         type: properties
+        properties: |
+          access-control.name=opa
+          opa.policy.uri=http://opa:8181/v1/data/trino/authz/allow
+          opa.policy.batched-uri=http://opa:8181/v1/data/trino/authz/batch
+          opa.policy.batch-column-masking-uri=http://opa:8181/v1/data/trino/authz/batchColumnMasks
+          opa.log-requests=true
+          opa.log-responses=true
+          opa.allow-permission-management-operations=false
+          opa.http-client.request-timeout=60s
+          opa.http-client.max-requests-queued-per-destination=10000
       additionalConfigProperties:
       - catalog.management=dynamic
       - retry-policy=TASK
@@ -417,21 +517,51 @@ spec:
       - exchange.sink-buffer-pool-min-size=10
       - exchange.sink-buffers-per-partition=2
       - exchange.source-concurrent-readers=4
+      env:
+      - name: MINIO_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: trino-s3-credentials
+            key: MINIO_ACCESS_KEY
+      - name: MINIO_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: trino-s3-credentials
+            key: MINIO_SECRET_ACCESS_KEY
+      - name: TRINO_OAUTH2_CLIENT_ID
+        valueFrom:
+          secretKeyRef:
+            name: trino-auth0
+            key: client_id
+      - name: TRINO_OAUTH2_CLIENT_SECRET
+        valueFrom:
+          secretKeyRef:
+            name: trino-auth0
+            key: client_secret
+      secretMounts:
+      - name: trino-credentials
+        path: /etc/trino/auth/password
+        secretName: trino-credentials
       coordinator:
-        additionalConfigFiles:
-          password-authenticator.properties: 'password-authenticator.name=file
-
-            file.password-file=/etc/trino/auth/password/password.db
-
-            '
         additionalConfigProperties:
         - web-ui.authentication.type=OAUTH2
-        additionalVolumeMounts:
-        - mountPath: /mnt/trino-cache
-          name: trino-cache
-        - mountPath: /etc/trino/jwt
-          name: jwt-config
-          readOnly: true
+        additionalConfigFiles:
+          password-authenticator.properties: |
+            password-authenticator.name=file
+            file.password-file=/etc/trino/auth/password/password.db
+        jvm:
+          maxHeapSize: "8G"
+          gcMethod:
+            type: UseG1GC
+            g1:
+              heapRegionSize: "32M"
+        resources:
+          limits:
+            cpu: 4
+            memory: "12Gi"
+          requests:
+            cpu: 2
+            memory: "8Gi"
         additionalVolumes:
         - emptyDir: {}
           name: trino-cache
@@ -440,104 +570,179 @@ spec:
             secretName: trino-jwt-signing-key
         - emptyDir: {}
           name: jwt-config
-        jvm:
-          gcMethod:
-            g1:
-              heapRegionSize: 32M
-            type: UseG1GC
-          maxHeapSize: 8G
-        resources:
-          limits:
-            cpu: 4
-            memory: 12Gi
-          requests:
-            cpu: 2
-            memory: 8Gi
-      env:
-      - name: MINIO_USERNAME
-        valueFrom:
-          secretKeyRef:
-            key: MINIO_ACCESS_KEY
-            name: trino-s3-credentials
-      - name: MINIO_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            key: MINIO_SECRET_ACCESS_KEY
-            name: trino-s3-credentials
-      - name: TRINO_OAUTH2_CLIENT_ID
-        valueFrom:
-          secretKeyRef:
-            key: client_id
-            name: trino-auth0
-      - name: TRINO_OAUTH2_CLIENT_SECRET
-        valueFrom:
-          secretKeyRef:
-            key: client_secret
-            name: trino-auth0
-      image:
-        repository: meshxregistry.azurecr.io/trinodb/trino
-        tag: 482-meshX
-      imagePullSecrets:
-      - name: acr-pull-secret
-      secretMounts:
-      - name: trino-credentials
-        path: /etc/trino/auth/password
-        secretName: trino-credentials
-      server:
-        exchangeManager:
-          name: filesystem
-        workers: 2
-      serviceAccount:
-        create: false
+        additionalVolumeMounts:
+        - mountPath: /mnt/trino-cache
+          name: trino-cache
+        - mountPath: /etc/trino/jwt
+          name: jwt-config
+          readOnly: true
       worker:
         additionalConfigFiles:
-          password-authenticator.properties: 'password-authenticator.name=file
-
+          password-authenticator.properties: |
+            password-authenticator.name=file
             file.password-file=/etc/trino/auth/password/password.db
-
-            '
+        jvm:
+          maxHeapSize: "6G"
+          gcMethod:
+            type: UseG1GC
+            g1:
+              heapRegionSize: "32M"
+        replicas: 2
+        resources:
+          limits:
+            cpu: 2
+            memory: "8Gi"
+          requests:
+            cpu: 1
+            memory: "4Gi"
         additionalVolumeMounts:
         - mountPath: /mnt/trino-cache
           name: trino-cache
         additionalVolumes:
         - emptyDir: {}
           name: trino-cache
-        jvm:
-          gcMethod:
-            g1:
-              heapRegionSize: 32M
-            type: UseG1GC
-          maxHeapSize: 6G
-        replicas: 2
-        resources:
-          limits:
-            cpu: 2
-            memory: 8Gi
-          requests:
-            cpu: 1
-            memory: 4Gi
+
+    ai:
+      image:
+        repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/ai
+        tag: v0.0.2
+      imagePullSecrets:
+      - name: acr-pull-secret
+      externalSecret:
+        enabled: false
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: http
+        initialDelaySeconds: 10
+        timeoutSeconds: 5
+        periodSeconds: 15
+      extraEnvFrom:
+      - secretRef:
+          name: product-ai-secrets
+      config:
+        env:
+          MX_DB_HOST: postgres-postgresql
+          MX_DB_PORT: "5432"
+          MX_DB_NAME: product
+          MX_DB_USER: product
+          MX_AUTH0_DOMAIN: auth0-stg.meshx.app
+          MX_AUTH0_CLIENT_ID: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
+          MX_AUTH0_AUDIENCE: "https://demo.meshx.foundation/"
+          MX_PRODUCT_DATA_MCP_URL: http://backend:8765/mcp
+          MX_MCP_OAUTH_REDIRECT_URI: https://product-{{.Tenant}}.meshx.foundation/ai/oauth/mcp-callback
+          MX_DEFAULT_MODEL: claude-sonnet-4-6
+          # Egress via the tenant agentfw (forward proxy). All LLM/MCP egress is
+          # tunneled through agentfw:8080; internal services bypass it (and its
+          # blockPrivateEgress rule). Audit stream: kubectl -n product-{{.Tenant}} logs -f deploy/agentfw
+          HTTPS_PROXY: http://agentfw:8080
+          HTTP_PROXY: http://agentfw:8080
+          NO_PROXY: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+          no_proxy: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+
+    dai-backend:
+      image:
+        repository: meshxregistry.azurecr.io/cached/ecr-meshx/dai/backend
+        tag: v0.2.79
+      imagePullSecrets:
+      - name: acr-pull-secret
+      migrations:
+        enabled: true
+      streamlit:
+        enabled: false
+      configMap:
+        # The chart gates its ConfigMap behind this flag; without it the
+        # migrations Job (a pre-install hook) fails with configmap
+        # "dai-backend" not found. The keep policy also protects the CM from
+        # the controller's uninstall-retry of a failed/pending release, and
+        # lets the pre-install hook run before the chart renders resources.
+        enabled: true
+        annotations:
+          helm.sh/resource-policy: keep
+        data:
+          MX_NATS_URL: "nats://nats:4222"
+          MX_NATS_AUTO_CREATE_STREAM: "true"
+          MX_MONGO_DATABASE: "dai"
+          MX_LLM_PROVIDER_TYPE: "anthropic"
+          MX_AUTH0_DOMAIN: "auth0-stg.meshx.app"
+          MX_AUTH0_ISSUER: "https://auth0-stg.meshx.app/"
+          MX_AUTH0_AUDIENCE: "https://demo.meshx.foundation/"
+          MX_AUTH0_ENABLED: "true"
+          MX_ENV: "production"
+          MX_RELEASE_TAG: "v0.2.79"
+          MX_POSTGRES_HOST: "postgres-postgresql"
+          MX_POSTGRES_PORT: "5432"
+          MX_POSTGRES_USER: "product"
+          MX_POSTGRES_DATABASE: "product"
+          MX_POSTGRES_SSLMODE: "disable"
+
+    dai-frontend:
+      image:
+        repository: meshxregistry.azurecr.io/foundation/dai-frontend
+        tag: basepath
+      imagePullSecrets:
+      - name: acr-pull-secret
+      virtualService:
+        enabled: false
+      env:
+      - name: NEXT_PUBLIC_BASE_PATH
+        value: /dai
+      - name: AUTH0_ISSUER_BASE_URL
+        value: https://auth0-stg.meshx.app
+      - name: AUTH0_BASE_URL
+        value: https://product-{{.Tenant}}.meshx.foundation/dai
+      - name: API_URL
+        value: http://dai-backend:8000
+      extraEnvFrom:
+      - secretRef:
+          name: dai-frontend-auth0
+
     watcher:
+      replicaCount: 1
       autoscaling:
         enabled: false
-      config:
-        postgres:
-          database: foundation
-          existingSecret: postgres-postgresql
-          existingSecretSuperUserKey: postgres-password
-          host: postgres-postgresql
-          port: 5432
-          user: foundation
-      fullnameOverride: watcher
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/watcher
         tag: v2.0.25
-      replicaCount: 1
+      config:
+        # Chart 2.7.5+: ship the corrected SparkApplication template (the one
+        # baked into images <= v2.0.25 omits the ConfigMap volume, killing all
+        # data-system ingestion drivers at startup).
+        spark_template_overlay:
+          enabled: true
+        postgres:
+          database: product
+          host: postgres-postgresql
+          port: 5432
+          user: product
+          existingSecret: postgres-postgresql
+          # The watcher authenticates as the "product" app user (auth.username
+          # above), so it must read that user's password key — not the
+          # generated superuser key, which drifts from the database on
+          # re-provisioning.
+          existingSecretSuperUserKey: password
+      # Per-tenant fullname so the ClusterRole "<fullname>-metrics-reader"
+      # does not collide across tenants; the backend's config.watcher.host
+      # above must match this service name.
+      fullnameOverride: watcher-{{.Tenant}}
+
   extraBundles:
-  - secretRef:
+  - url: oci://ghcr.io/meshxdata/dai-bundle:0.0.8
+    secretRef:
       name: ghcr-pull-secret
-    url: oci://ghcr.io/meshxdata/dai-bundle:0.0.8
+
+  exclude: []
+
   inline:
     components:
+    - chartPullSecretRef:
+        name: acr-pull-secret
+      chartRef:
+        chartName: nats
+        chartVersion: 2.10.1
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
+      name: nats
+      scope: Namespaced
     - chartPullSecretRef:
         name: ghcr-pull-secret
       chartRef:
@@ -550,7 +755,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: storage-engine
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - postgres
       name: storage-engine
@@ -569,7 +774,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: backend
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - postgres
       - kafka
@@ -580,7 +785,7 @@ spec:
       chartRef:
         chartName: frontend
         chartVersion: 0.4.12
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       name: frontend
@@ -589,8 +794,12 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: watcher
+        # 2.7.5 carries config.spark_template_overlay (fixes data-system
+        # ingestion drivers dying with "can't open file /mnt/config-maps/
+        # <...>-source.py"). Activates on merge of foundation-charts#221 +
+        # CI publish; until then the overlay must be applied manually.
         chartVersion: 2.7.5
-        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
+        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - backend
       name: watcher
@@ -599,7 +808,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: opa
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       name: opa
@@ -608,7 +817,7 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: scheduler
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       name: scheduler
@@ -617,7 +826,6 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: processor
-        chartVersion: 0.6.2
         repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
@@ -637,9 +845,9 @@ spec:
     - chartPullSecretRef:
         name: meshxregistry-helm-secret
       chartRef:
-        chartName: foundation-ai
+        chartName: product-ai
         chartVersion: 0.1.2
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       - postgres
@@ -649,7 +857,6 @@ spec:
         chartName: dai-backend
       dependsOn:
       - postgres
-      - nats
       name: dai-backend
       scope: Namespaced
     - chartRef:
@@ -658,114 +865,13 @@ spec:
       - dai-backend
       name: dai-frontend
       scope: Namespaced
-    - chartPullSecretRef:
-        name: acr-pull-secret
-      chartRef:
-        chartName: nats
-        chartVersion: 2.10.1
-        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
-      name: nats
-      scope: Namespaced
-      values:
-        image:
-          repository: meshxregistry.azurecr.io/cached/docker.io/library/nats
-          tag: 2.10-alpine
-    description: Foundation data mesh platform (tenant {{.Tenant}})
-    title: Foundation A (demo)
+    description: Product data mesh platform (tenant product-{{.Tenant}})
+    title: Product A (demo)
+
   mode: Direct
   operators:
     agentFW: true
+    certManager: false
+    istio: false
+    spark: false
     vault: true
-  secretsRef:
-  - from: '{{.Tenant}}-backend-auth0'
-    to: backend-auth0
-  - from: '{{.Tenant}}-frontend-auth0'
-    to: foundation-frontend-auth0
-  - from: '{{.Tenant}}-trino-jwt-signing-key'
-    to: trino-jwt-signing-key
-  - from: '{{.Tenant}}-trino-credentials'
-    to: trino-credentials
-  - from: '{{.Tenant}}-trino-auth0'
-    to: trino-auth0
-  - from: '{{.Tenant}}-trino-s3-credentials'
-    to: trino-s3-credentials
-  - from: '{{.Tenant}}-ai-secrets'
-    to: foundation-ai-secrets
-  - from: '{{.Tenant}}-hive-metastore-minio-credentials'
-    to: hive-metastore-minio-credentials
-  - from: '{{.Tenant}}-dai-backend'
-    to: dai-backend
-  - from: '{{.Tenant}}-dai-frontend'
-    to: dai-frontend
-  virtualService:
-    additionalHosts:
-    - '{{.Tenant}}.meshx.foundation'
-    gateway: foundation/foundation-gateway
-    host: '{{.Tenant}}.demo.meshx.foundation'
-    http:
-    - match:
-      - uri:
-          prefix: /dai
-      name: dai
-      route:
-      - destination:
-          host: dai-frontend
-          port:
-            number: 3000
-      timeout: 50s
-    - match:
-      - uri:
-          prefix: /mcp
-      name: mcp
-      route:
-      - destination:
-          host: backend
-          port:
-            number: 8765
-      timeout: 300s
-    - match:
-      - uri:
-          exact: /ai
-      name: ai-root-redirect
-      redirect:
-        uri: /ai/dev
-    - match:
-      - uri:
-          prefix: /ai/
-      name: ai
-      rewrite:
-        uri: /
-      route:
-      - destination:
-          host: ai-foundation-ai
-          port:
-            number: 8000
-      timeout: 300s
-    - corsPolicy:
-        allowHeaders:
-        - X-Account
-        - Content-Type
-        - Authorization
-        allowMethods:
-        - GET
-        - POST
-        - PUT
-        - DELETE
-        - OPTIONS
-        allowOrigins:
-        - exact: https://{{.Tenant}}.demo.meshx.foundation
-        - exact: https://{{.Tenant}}.meshx.foundation
-      headers:
-        response:
-          set:
-            Strict-Transport-Security: max-age=31536000
-      match:
-      - uri:
-          prefix: /
-      name: frontend
-      route:
-      - destination:
-          host: frontend
-          port:
-            number: 80
-      timeout: 50s
