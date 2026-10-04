@@ -937,3 +937,12 @@ func since(t time.Time) string {
 		return fmt.Sprintf("%dd", int(d.Hours()/24))
 	}
 }
+
+// mcpNav returns the nav snippet for the MCP view, or "" when the MCP
+// bridge is not wired into this portal.
+func (p *Portal) mcpNav() string {
+	if p.mcpCaller == nil {
+		return ""
+	}
+	return `<button class="btn secondary" onclick="showMCP()">MCP <span class="btn-icon">⌘</span></button>`
+}
