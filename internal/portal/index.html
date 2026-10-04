@@ -701,6 +701,7 @@
       <option value="0">paused</option>
     </select>
     <!-- agentfw-nav -->
+    <button class="btn secondary" onclick="showMCP()">MCP</button>
     <button class="btn" onclick="document.getElementById('create').showModal()">
       New stack
       <span class="btn-icon">+</span>
@@ -891,6 +892,36 @@
       </div>
     </div>
     </section>
+  </div>
+
+  <!-- MCP view -->
+  <div id="mcp-view" style="display:none">
+    <div class="detail-head">
+      <button class="back-btn" onclick="hideMCP()">← All stacks</button>
+      <div>
+        <div class="detail-title">MCP server</div>
+        <div class="detail-sub" id="mcp-sub"></div>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:60ms">
+      <div class="card-inner">
+        <div class="section-title">Tools — click to load a form, then Run</div>
+        <div class="mcp-tools" id="mcp-tools"></div>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:120ms">
+      <div class="card-inner">
+        <div class="section-title">Playground</div>
+        <div class="field">
+          <label for="mcp-tool">Tool</label>
+          <select id="mcp-tool" onchange="renderToolForm()"></select>
+        </div>
+        <div id="mcp-form"></div>
+        <div class="field-error" id="mcp-error"></div>
+        <button class="btn" style="margin-top:10px" onclick="runTool()">Run tool</button>
+        <pre id="mcp-result" style="display:none"></pre>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -1712,6 +1743,101 @@ async function create() {
     }
   } catch (e) { err.textContent = e.message; }
   btn.disabled = false;
+}
+
+
+// ── MCP ──────────────────────────────────────────────────────────────
+let mcpTools = [];
+
+function showMCP() {
+  hideDetail();
+  document.getElementById('list-view').style.display = 'none';
+  const v = document.getElementById('mcp-view');
+  v.style.display = 'block';
+  loadMCP();
+}
+
+function hideMCP() {
+  document.getElementById('mcp-view').style.display = 'none';
+  document.getElementById('list-view').style.display = 'block';
+}
+
+async function loadMCP() {
+  try {
+    const [info, tools] = await Promise.all([
+      api('/api/mcp'),
+      fetch('/api/mcp/tools').then(r => r.ok ? r.json() : []),
+    ]);
+    mcpTools = Array.isArray(tools) ? tools : [];
+    document.getElementById('mcp-sub').textContent =
+      `${mcpTools.length} tools · auth: ${info.authMode}`;
+    const grid = document.getElementById('mcp-tools');
+    grid.innerHTML = mcpTools.map(t =>
+      `<div class="mcp-tool" onclick="pickTool('${esc(t.name)}')">
+         <div class="mcp-tool-name">${esc(t.name)}</div>
+         <div class="muted" style="font-size:11px">${esc(t.description || '')}</div>
+       </div>`).join('') || '<span class="muted">no tools</span>';
+    const sel = document.getElementById('mcp-tool');
+    sel.innerHTML = mcpTools.map(t => `<option value="${esc(t.name)}">${esc(t.name)}</option>`).join('');
+    renderToolForm();
+  } catch (e) {
+    document.getElementById('mcp-sub').textContent = 'unavailable: ' + e.message;
+  }
+}
+
+function toolSchema(name) {
+  const t = mcpTools.find(t => t.name === name);
+  return (t && t.inputSchema) || { type: 'object', properties: {} };
+}
+
+function pickTool(name) {
+  document.getElementById('mcp-tool').value = name;
+  renderToolForm();
+  document.getElementById('mcp-view').scrollIntoView({ behavior: 'smooth' });
+}
+
+function renderToolForm() {
+  const name = document.getElementById('mcp-tool').value;
+  const sch = toolSchema(name);
+  const form = document.getElementById('mcp-form');
+  const props = sch.properties || {};
+  const req = sch.required || [];
+  form.innerHTML = Object.keys(props).map(k => `
+    <div class="field">
+      <label for="f-${esc(k)}">${esc(k)}${req.includes(k) ? ' *' : ''}</label>
+      ${props[k].type === 'boolean'
+        ? `<select id="f-${esc(k)}"><option value="">unset</option><option value="true">true</option><option value="false">false</option></select>`
+        : props[k].type === 'array'
+          ? `<input id="f-${esc(k)}" placeholder='["a","b"] (JSON array)'>`
+          : `<input id="f-${esc(k)}" placeholder="${esc(String(props[k].description || '')).slice(0,60)}">`}
+    </div>`).join('') || '<span class="muted">no arguments</span>';
+}
+
+async function runTool() {
+  const err = document.getElementById('mcp-error');
+  err.textContent = '';
+  const name = document.getElementById('mcp-tool').value;
+  const sch = toolSchema(name);
+  const args = {};
+  for (const [k, def] of Object.entries(sch.properties || {})) {
+    const el = document.getElementById('f-' + k);
+    if (!el || el.value === '') continue;
+    args[k] = def.type === 'number' ? +el.value
+      : def.type === 'array' ? (() => { try { return JSON.parse(el.value); } catch { return el.value; } })()
+      : def.type === 'boolean' ? el.value === 'true'
+      : el.value;
+  }
+  try {
+    const r = await fetch('/api/mcp/call', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, arguments: args }),
+    });
+    const body = await r.json();
+    const pre = document.getElementById('mcp-result');
+    pre.style.display = 'block';
+    pre.textContent = JSON.stringify(body, null, 2);
+    if (!r.ok) throw new Error(body.error || r.statusText);
+  } catch (e) { err.textContent = e.message; }
 }
 
 const tenantVal = () => document.getElementById('tenant').value.trim();
