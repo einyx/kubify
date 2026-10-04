@@ -263,7 +263,7 @@ if %t; then
     -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;'
   echo "[db] pg_dump %s -> %s"
   PGPASSWORD="$SRC_PGPASSWORD" pg_dump -h %s -p %d -U %s -d %s --no-owner \
-    | PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=1
+    | PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=0
 fi
 
 if %t; then
