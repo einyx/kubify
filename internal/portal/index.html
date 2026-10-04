@@ -858,17 +858,20 @@
         Paused - reconciliation is stopped; deployed components keep running
       </span>
     </div>
-    <div class="detail-spec card-outer" style="animation-delay:60ms">
-      <div class="card-inner" id="spec-chips"></div>
-    </div>
     <div class="tabbar" id="tabbar">
       <button data-tab="components" class="active">Components <span class="badge" id="badge-components"></span></button>
+      <button data-tab="spec">Spec</button>
       <button data-tab="conditions">Conditions <span class="badge" id="badge-conditions"></span></button>
       <button data-tab="events">Events <span class="badge" id="badge-events"></span></button>
       <button data-tab="backups">Backups <span class="badge" id="badge-backups"></span></button>
       <button data-tab="secrets">Secrets <span class="badge warn" id="badge-secrets"></span></button>
       <button data-tab="manifest">Manifest</button>
     </div>
+    <section data-tab="spec">
+    <div class="detail-spec card-outer">
+      <div class="card-inner" id="spec-chips"></div>
+    </div>
+    </section>
     <section data-tab="components" class="tab-open">
     <div class="card-outer" style="animation-delay:100ms">
       <div class="card-inner">
@@ -1997,16 +2000,20 @@ async function runTool() {
 }
 
 // ── Agent traffic (agentfw) ────────────────────────────────────────────
-const afw = { tab: 'dashboard', q: '', action: '', session: '', page: 0, timer: null };
+const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [] };
 const afwInt = n => (n ?? 0).toLocaleString('en-US');
 const afwCost = µ => { const d = (µ ?? 0) / 1e6; if (d === 0) return '$0'; if (d < 0.01) return '$' + d.toFixed(4); return '$' + d.toFixed(2); };
-const afwTime = t => new Date(t * 1000).toLocaleTimeString();
-const afwDay = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+// The aggregated API returns RFC3339 strings; the raw archive used unix
+// seconds — accept both.
+const afwDate = t => new Date(typeof t === 'number' ? t * 1000 : t);
+const afwTime = t => afwDate(t).toLocaleTimeString();
+const afwDay = t => afwDate(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const afwURL = u => { try { const x = new URL(u); return x.host + x.pathname; } catch { return u; } };
 const afwDebounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 async function afwAPI(path) {
-  const r = await fetch('/agentfw/api/v1' + path);
+  const sep = path.includes('?') ? '&' : '?';
+  const r = await fetch('/agentfw/api/v1' + path + (afw.product ? sep + 'product=' + encodeURIComponent(afw.product) : ''));
   if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
   return r.json();
 }
@@ -2020,6 +2027,7 @@ function showAgents(tab) {
   const nb = document.getElementById('afw-nav-btn');
   const lbl = nb ? (nb.dataset.label || '') : '';
   document.getElementById('agent-label').textContent = lbl ? '· ' + lbl : '';
+  afwLoadProducts();
   if (tab) afw.tab = tab;
   document.querySelectorAll('#agent-tabbar button').forEach(b =>
     b.classList.toggle('active', b.dataset.atab === afw.tab));
@@ -2049,6 +2057,13 @@ document.querySelectorAll('#agent-tabbar button').forEach(b =>
     history.replaceState(null, '', '#/agents' + (afw.tab !== 'dashboard' ? '/' + afw.tab : ''));
     afwRender();
   }));
+
+async function afwLoadProducts() {
+  try {
+    const { products } = await fetch('/agentfw/api/v1/products' + (afw.product ? '?product=' + encodeURIComponent(afw.product) : '')).then(r => r.json());
+    afw.products = (products || []).map(p => p.product).filter(Boolean);
+  } catch { afw.products = []; }
+}
 
 async function afwRender() {
   const live = document.getElementById('agent-live');
@@ -2089,6 +2104,13 @@ async function afwDashboard() {
       ${afwCard('Spend', afwCost(s.cost_micro), 'estimated', '--ok')}
     </div>
     <div class="card-outer" style="animation-delay:60ms"><div class="card-inner">
+      <div class="section-title">By product</div>
+      <div style="padding:12px 16px">${(s.products || []).map(pp => `
+        <div class="afw-row"><div class="name" title="${esc(pp.product)}">${esc(pp.product)}${pp.offline ? ' (offline)' : ''}</div>
+          <div class="num">${afwInt(pp.total_requests)} req · ${afwCost(pp.cost_micro)}</div></div>`).join('')
+        || '<div class="afw-empty">Single product</div>'}</div>
+    </div></div>
+    <div class="card-outer" style="animation-delay:80ms"><div class="card-inner">
       <div class="section-title">Findings by kind</div>
       <div style="padding:12px 16px">${kinds}</div>
     </div></div>
@@ -2105,10 +2127,11 @@ async function afwSessions() {
   document.getElementById('agent-body').innerHTML = `
     <div class="card-outer"><div class="card-inner">
       <div class="section-title">Sessions</div>
-      ${sessions.length ? `<table><thead><tr><th>Session</th><th>Requests</th><th>Blocked</th><th>Findings</th><th>Tokens</th><th>Cost</th><th>Models</th><th>Last active</th></tr></thead>
+      ${sessions.length ? `<table><thead><tr><th>Session</th><th>Product</th><th>Requests</th><th>Blocked</th><th>Findings</th><th>Tokens</th><th>Cost</th><th>Models</th><th>Last active</th></tr></thead>
       <tbody>${sessions.map(s => `
         <tr class="stack-row" onclick="afwDrill('${esc(s.session_id)}')">
           <td class="cell-mode">${esc(s.session_id)}</td>
+          <td class="cell-ns">${esc(s.product || '—')}</td>
           <td class="cell-count">${afwInt(s.requests)}</td>
           <td>${s.blocked ? `<span class="afw-badge block">${s.blocked}</span>` : '<span class="muted">0</span>'}</td>
           <td>${s.findings ? `<span class="afw-badge redact">${s.findings}</span>` : '<span class="muted">0</span>'}</td>
@@ -2141,6 +2164,10 @@ async function afwRequests() {
           <option value="">all actions</option>
           ${['allow', 'redact', 'block'].map(a => `<option value="${a}"${afw.action === a ? ' selected' : ''}>${a}</option>`).join('')}
         </select>
+        <select id="afw-product" class="tool-select">
+          <option value="">all products</option>
+          ${afw.products.map(p => `<option value="${esc(p)}"${afw.product === p ? ' selected' : ''}>${esc(p)}</option>`).join('')}
+        </select>
         ${afw.session ? `<span class="afw-badge kind">session: ${esc(afw.session)} <span style="cursor:pointer" onclick="afwDrill('')">✕</span></span>` : ''}
       </div>
       ${requests.length ? afwTable(requests, false) : '<div class="afw-empty">No matching requests</div>'}
@@ -2152,6 +2179,7 @@ async function afwRequests() {
     </div></div>`;
   document.getElementById('afw-q').oninput = afwDebounce(e => { afw.q = e.target.value; afw.page = 0; afwRefreshList(); }, 300);
   document.getElementById('afw-action').onchange = e => { afw.action = e.target.value; afw.page = 0; afwRefreshList(); };
+  document.getElementById('afw-product').onchange = e => { afw.product = e.target.value; afw.page = 0; afwRefreshList(); };
 }
 
 function afwPage(d) { afw.page = Math.max(0, afw.page + d); afwRender(); }
@@ -2173,10 +2201,11 @@ async function afwRefreshList() {
 }
 
 function afwTable(recs, compact) {
-  return `<table><thead><tr><th>Time</th><th>Session</th><th>Target</th><th>Model</th><th>Action</th><th>Findings</th><th>Tokens</th><th>Cost</th></tr></thead>
+  return `<table><thead><tr><th>Time</th><th>Product</th><th>Session</th><th>Target</th><th>Model</th><th>Action</th><th>Findings</th><th>Tokens</th><th>Cost</th></tr></thead>
   <tbody>${recs.map(r => `
     <tr class="stack-row" onclick="openAfwDetail(${r.id})">
       <td class="cell-mode">${afwTime(r.time)}</td>
+      <td class="cell-ns">${esc(r.product || '—')}</td>
       <td class="cell-mode" title="${esc(r.session_id)}">${esc(r.session_id.length > 18 ? r.session_id.slice(0, 18) + '…' : r.session_id)}</td>
       <td class="cell-mode">${esc(afwURL(r.url))}${compact ? '' : ` <span class="muted">${r.status || ''}</span>`}</td>
       <td class="cell-ns">${esc(r.model || '—')}</td>
@@ -2196,8 +2225,9 @@ async function openAfwDetail(id) {
         <span>request #${r.id} <span class="afw-badge ${r.action}">${r.action}</span></span>
       </div>
       <table><tbody>
-        <tr><td class="cell-ns" style="width:120px">Session</td><td class="cell-mode">${esc(r.session_id)}</td></tr>
-        <tr><td class="cell-ns">Time</td><td class="cell-mode">${new Date(r.time * 1000).toLocaleString()} · ${r.duration_ms}ms</td></tr>
+        <tr><td class="cell-ns" style="width:120px">Product</td><td class="cell-ns">${esc(r.product || '—')}</td></tr>
+        <tr><td class="cell-ns">Session</td><td class="cell-mode">${esc(r.session_id)}</td></tr>
+        <tr><td class="cell-ns">Time</td><td class="cell-mode">${afwDate(r.time).toLocaleString()} · ${r.duration_ms}ms</td></tr>
         <tr><td class="cell-ns">Target</td><td class="cell-mode">${esc(r.method)} ${esc(r.url)} → ${r.status || '—'}</td></tr>
         <tr><td class="cell-ns">Model</td><td class="cell-mode">${esc(r.model || '—')}</td></tr>
         ${r.usage ? `<tr><td class="cell-ns">Usage</td><td class="cell-mode">${afwInt(r.usage.input_tokens)} in / ${afwInt(r.usage.output_tokens)} out · <b>${afwCost(r.usage.cost_micro)}</b></td></tr>` : ''}

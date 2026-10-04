@@ -53,25 +53,25 @@ func (p *Portal) Mux() http.Handler {
 	}
 
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		p.refreshAgentfws(r.Context()) // nav reflects discovered products immediately
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		html := strings.Replace(p.GetIndexHTML(), "<!-- mcp-nav -->", p.mcpNav(), 1)
 		html = strings.Replace(html, "<!-- agentfw-nav -->", p.agentfwNav(), 1)
 		w.Write([]byte(html))
 	})
-	// agentfw archive API, proxied to the agentfw admin port when
-	// configured via SetAgentfwURL. The portal SPA renders the UI itself
-	// (Agent traffic view); only the JSON API is proxied. Plain /agentfw
-	// paths redirect into the SPA so old bookmarks keep working.
-	if p.agentfwProxy != nil {
-		handle("GET /agentfw", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
-		})
-		handle("GET /agentfw/", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
-		})
-		handle("GET /agentfw/api/", p.agentfwProxy.ServeHTTP)
-	}
+	// agentfw archive API: all discovered agentfw instances (plus any
+	// explicit -agentfw config) aggregated under one mount; every record
+	// labeled with its product (namespace). Routes stay registered even
+	// before discovery fills in.
+	handle("GET /agentfw", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
+	})
+	handle("GET /agentfw/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/#/agents", http.StatusPermanentRedirect)
+	})
+	handle("GET /agentfw/api/v1/", p.handleAgentfwAPI)
+	handle("GET /agentfw/api/v1/{$}", p.handleAgentfwAPI)
 	handle("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
