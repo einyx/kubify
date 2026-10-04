@@ -24,6 +24,9 @@ import (
 type Server struct {
 	Client client.Client
 	Addr   string
+	// Token, when set, requires Authorization: Bearer <token> on the SSE
+	// and message endpoints. Empty disables auth (cluster-internal use only).
+	Token string
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -47,7 +50,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	srv := &http.Server{
 		Addr:         s.Addr,
-		Handler:      mux,
+		Handler:      wrapTokenAuth(mux, s.Token),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 0, // SSE streams are long-lived
 		IdleTimeout:  120 * time.Second,

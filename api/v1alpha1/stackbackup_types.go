@@ -59,6 +59,15 @@ type PostgresBackup struct {
 	// TargetPasswordSecret is the Secret in TargetNamespace holding the password.
 	// +optional
 	TargetPasswordSecret *SecretKeyRef `json:"targetPasswordSecret,omitempty"`
+	// RestoreUser is the database user the restore runs as on the target.
+	// Restore may need elevated rights (CREATE EXTENSION, schema drops);
+	// defaults to User. The dump always runs as User.
+	// +optional
+	RestoreUser string `json:"restoreUser,omitempty"`
+	// RestorePasswordSecret is the Secret in TargetNamespace holding the
+	// restore user's password. Defaults to TargetPasswordSecret.
+	// +optional
+	RestorePasswordSecret *SecretKeyRef `json:"restorePasswordSecret,omitempty"`
 }
 
 // S3Backup configures the storage-engine copy step.

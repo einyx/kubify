@@ -91,9 +91,19 @@ func (r *StackBackupReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// the SOURCE namespace and cannot reference them (k8s Secrets are
 	// namespaced). Copy the referenced values into a job-local Secret here,
 	// refreshed on every reconcile so rotation propagates.
+	pgSpec := bk.Spec.Postgres
+	if pgSpec == nil {
+		pgSpec = &platformv1alpha1.PostgresBackup{}
+	}
+	restoreSrcName, restoreSrcKey := "postgres-postgresql", "postgres-password"
+	if pgSpec.RestorePasswordSecret != nil {
+		restoreSrcName = pgSpec.RestorePasswordSecret.Name
+		restoreSrcKey = pgSpec.RestorePasswordSecret.Key
+	}
 	targetSecrets := []struct{ localName, srcName, key string }{
 		{"stackbackup-target-pg", "postgres-postgresql", "postgres-password"},
 		{"stackbackup-target-s3", "storage-engine", "auth-credential"},
+		{"stackbackup-target-restore-pg", restoreSrcName, restoreSrcKey},
 	}
 	for _, ts := range targetSecrets {
 		var src corev1.Secret
@@ -201,6 +211,13 @@ func (r *StackBackupReconciler) buildJob(bk *platformv1alpha1.StackBackup, name 
 	user := pg.User
 	srcPgSec, srcPgKey := secretRef(pg.SourcePasswordSecret, defaultPGSecret, defaultPGPwdKey)
 	dstPgSec, dstPgKey := secretRef(pg.TargetPasswordSecret, defaultPGSecret, defaultPGPwdKey)
+	restoreUser := firstNonEmpty(pg.RestoreUser, pg.User)
+	restoreKey := defaultPGPwdKey
+	if pg.RestorePasswordSecret != nil && pg.RestorePasswordSecret.Key != "" {
+		restoreKey = pg.RestorePasswordSecret.Key
+	}
+	// RESTORE_PGPASSWORD comes from the reconciler's cross-namespace copy.
+	restoreSec := "stackbackup-target-restore-pg"
 // (overridden below: target-ns values are copied to the source ns at create-time)
 
 	s3 := bk.Spec.S3
@@ -239,14 +256,14 @@ set -euo pipefail
 
 if %t; then
   echo "[db] reset target: drop all non-system schemas (mirror restore)"
-  PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s -Atc \
+  PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s -Atc \
     "SELECT format('DROP SCHEMA IF EXISTS %%I CASCADE', nspname) FROM pg_namespace WHERE nspname <> 'public' AND nspname NOT LIKE 'pg\\_%%' AND nspname <> 'information_schema'" \
-    | PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s
-  PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
+    | PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s
+  PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s \
     -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public; GRANT ALL ON SCHEMA public TO public;'
   echo "[db] pg_dump %s -> %s"
   PGPASSWORD="$SRC_PGPASSWORD" pg_dump -h %s -p %d -U %s -d %s --no-owner \
-    | PGPASSWORD="$DST_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=1
+    | PGPASSWORD="$RESTORE_PGPASSWORD" psql -h %s -p %d -U %s -d %s -v ON_ERROR_STOP=1
 fi
 
 if %t; then
@@ -269,12 +286,12 @@ if %t; then
 fi
 echo "done."
 `,
-		doDB, dstDBHost, port, user, db,
-		dstDBHost, port, user, db,
-		dstDBHost, port, user, db,
+		doDB, dstDBHost, port, restoreUser, db,
+		dstDBHost, port, restoreUser, db,
+		dstDBHost, port, restoreUser, db,
 		srcDBHost, dstDBHost,
 		srcDBHost, port, user, db,
-		dstDBHost, port, user, db,
+		dstDBHost, port, restoreUser, db,
 		doS3, srcS3Host, dstS3Host,
 		srcS3Host, dstS3Host, buckets,
 	)
@@ -304,6 +321,7 @@ echo "done."
 						Env: []corev1.EnvVar{
 							envFromSecret("SRC_PGPASSWORD", srcPgSec, srcPgKey),
 							envFromSecret("DST_PGPASSWORD", dstPgSec, dstPgKey),
+							envFromSecret("RESTORE_PGPASSWORD", restoreSec, restoreKey),
 							// Access key ID = tenant identity = namespace name.
 							corev1.EnvVar{Name: "SRC_S3_AK", Value: bk.Spec.SourceNamespace},
 							corev1.EnvVar{Name: "DST_S3_AK", Value: bk.Spec.TargetNamespace},
