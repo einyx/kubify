@@ -53,6 +53,7 @@ type Portal struct {
 	registry     *Registry
 	metrics      *Metrics
 	agentfwURL   string
+	agentfwLabel string // product/tenant name shown with the agentfw view
 	agentfwProxy http.Handler
 	// vaultAddrOverride, when set, replaces the in-cluster Vault address
 	// template (http://vault.<ns>.svc:8200) — used for local development
@@ -141,11 +142,16 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		p.agentfwURL, p.agentfwProxy = "", nil
+		p.agentfwLabel = ""
 		return nil
 	}
 	// svc:<ns>/<svc>[:<port>] — service-proxy form (no port-forward needed).
+	// The namespace doubles as the product label shown in the UI.
 	if strings.HasPrefix(raw, "svc:") {
-		proxy, err := p.agentfwServiceProxy(strings.TrimPrefix(raw, "svc:"))
+		spec := strings.TrimPrefix(raw, "svc:")
+		// Label first: the proxy's response rewriter reads it.
+		p.agentfwLabel, _, _ = strings.Cut(spec, "/")
+		proxy, err := p.agentfwServiceProxy(spec)
 		if err != nil {
 			return err
 		}
@@ -157,6 +163,9 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 	if err != nil {
 		return fmt.Errorf("portal: invalid agentfw url %q: %w", raw, err)
 	}
+	// Optional #fragment names the product (e.g. http://localhost:18081#foundation-b).
+	p.agentfwLabel = u.Fragment
+	u.Fragment = ""
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("portal: agentfw url must be http(s), got %q", raw)
 	}
@@ -174,9 +183,9 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 		// The upstream viewer serves its SPA at root with no base path
 		// configured, so inject the portal mount prefix into the HTML —
 		// mirroring agentsview's --base-path proxy integration.
-		ModifyResponse: agentfwRewriteResponse(""),
+		ModifyResponse: agentfwRewriteResponse("", p.agentfwLabel),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			http.Error(w, "portal: agentfw unreachable — is the proxy running with its admin port exposed?",
+			http.Error(w, "portal: agentfw unreachable via service proxy ("+err.Error()+")",
 				http.StatusBadGateway)
 		},
 	}
@@ -241,7 +250,7 @@ func (p *Portal) agentfwServiceProxy(spec string) (http.Handler, error) {
 				pr.Out.URL.Path = "/"
 			}
 		},
-		ModifyResponse: agentfwRewriteResponse(""),
+		ModifyResponse: agentfwRewriteResponse("", p.agentfwLabel),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			mu.Lock()
 			was := up
@@ -284,7 +293,7 @@ func itoa(n int) string { return strconv.Itoa(n) }
 // agentfwRewriteResponse post-processes agentfw responses: inject the SPA
 // base path into HTML, and map absolute redirect locations back onto the
 // /agentfw mount.
-func agentfwRewriteResponse(proxyPrefix string) func(*http.Response) error {
+func agentfwRewriteResponse(proxyPrefix, label string) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		if loc := resp.Header.Get("Location"); loc != "" {
 			if strings.HasPrefix(loc, proxyPrefix) {
@@ -301,8 +310,22 @@ func agentfwRewriteResponse(proxyPrefix string) func(*http.Response) error {
 		if err != nil {
 			return err
 		}
-		injected := bytes.Replace(body, []byte("<script>"),
-			[]byte(`<script>window.__AFW_BASE__="/agentfw";</script><script>`), 1)
+		pre := `<script>window.__AFW_BASE__="/agentfw";`
+		if label != "" {
+			pre += `window.__AFW_LABEL__="` + template.JSEscapeString(label) + `";`
+		}
+		pre += `</script><script>`
+		if label != "" {
+			// Product badge: fixed pill + document title, so the view always
+			// says which tenant's firewall is being browsed.
+			pre += `document.title=document.title.replace(/ · .*$/,'')+' · ` + template.JSEscapeString(label) + `';` +
+				`addEventListener('DOMContentLoaded',function(){var b=document.createElement('div');` +
+				`b.textContent='⬤ ` + template.JSEscapeString(label) + `';` +
+				`b.style.cssText='position:fixed;left:12px;bottom:12px;z-index:9999;background:#16181d;color:#fff;` +
+				`font:600 11px/1 system-ui,sans-serif;padding:5px 11px;border-radius:9999px;opacity:.85;pointer-events:none';` +
+				`document.body.appendChild(b);});`
+		}
+		injected := bytes.Replace(body, []byte("<script>"), []byte(pre), 1)
 		resp.Body = io.NopCloser(bytes.NewReader(injected))
 		resp.Header.Del("Content-Length")
 		resp.Header.Set("Content-Length", strconv.Itoa(len(injected)))
@@ -315,6 +338,9 @@ func agentfwRewriteResponse(proxyPrefix string) func(*http.Response) error {
 func (p *Portal) agentfwNav() string {
 	if p.agentfwProxy == nil {
 		return ""
+	}
+	if p.agentfwLabel != "" {
+		return `<a class="btn" href="/agentfw/" title="agentfw session archive — ` + p.agentfwLabel + `">Agentfw · ` + p.agentfwLabel + ` <span class="btn-icon">◉</span></a>`
 	}
 	return `<a class="btn" href="/agentfw/" title="agentfw session archive">Agent traffic <span class="btn-icon">◉</span></a>`
 }
