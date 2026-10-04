@@ -52,7 +52,9 @@ func main() {
 	restCfg, cfgErr := config.GetConfig()
 	if cfgErr == nil {
 		if k8sClient, err := client.New(restCfg, client.Options{Scheme: sch}); err == nil {
-			p.SetMCPCaller(mcpserver.New(k8sClient, ""))
+			mcpSrv := mcpserver.New(k8sClient, "")
+			mcpSrv.Portal = p // wire template tools (list_templates, create_from_template)
+			p.SetMCPCaller(mcpSrv)
 		}
 	}
 	p.SetTemplateDir(*templatesDir)
