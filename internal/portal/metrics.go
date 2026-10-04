@@ -49,6 +49,14 @@ func (r *statusRecorder) WriteHeader(code int) {
 	r.ResponseWriter.WriteHeader(code)
 }
 
+// Flush forwards to the underlying writer so streaming responses (SSE)
+// work through the instrumented wrapper.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // instrument wraps a handler with request metrics and structured logging.
 // Path templates (e.g. /api/stacks/{namespace}/{name}) are used as the label
 // so cardinality stays bounded; unmatched paths fall back to the raw URL.
