@@ -2373,6 +2373,24 @@ setInterval(() => {
   if (el && refreshMs > 0) el.textContent = 'updated ' + Math.round((Date.now() - lastRefreshAt) / 1000) + 's ago';
 }, 1000);
 
+// ── Real-time (SSE change signal from the portal) ──────────────────────
+// The server watches Stack resources and pushes a "refresh" event on every
+// change; browsers immediately re-fetch their data. The fallback interval
+// stays as a safety net (10s normally, 30s while SSE is down); SSE makes
+// updates effectively real-time.
+const evtSource = new EventSource('/api/events');
+let sseLive = false;
+evtSource.addEventListener('refresh', () => { lastRefreshAt = Date.now(); tick(); });
+evtSource.onopen = () => {
+  const wasDown = sseLive === false;
+  sseLive = true;
+  if (wasDown) { refreshMs = 10000; scheduleRefresh(); }
+};
+evtSource.onerror = () => {
+  sseLive = false;
+  if (refreshMs < 30000) { refreshMs = 30000; scheduleRefresh(); }
+};
+
 // ── Bootstrap ──────────────────────────────────────────────────────────
 loadTemplates();
 refresh();

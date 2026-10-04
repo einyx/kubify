@@ -223,6 +223,9 @@ func (p *Portal) Mux() http.Handler {
 	// --- Vault (per-tenant bank-vaults KV) ---
 	// Values are redacted unless the request explicitly passes reveal=true.
 	// The Vault root token never appears in any response.
+	handle("GET /api/events", func(w http.ResponseWriter, r *http.Request) {
+		p.stackEvents(w, r)
+	})
 	handle("GET /api/mcp", func(w http.ResponseWriter, r *http.Request) {
 		info := p.MCPInfo(r.Context())
 		w.Header().Set("Content-Type", "application/json")
