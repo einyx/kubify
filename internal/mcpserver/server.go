@@ -14,8 +14,9 @@ import (
 	"time"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
-	"k8s.io/apimachinery/pkg/types"
+	"github.com/einyx/kubo/internal/portal"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -27,6 +28,9 @@ type Server struct {
 	// Token, when set, requires Authorization: Bearer <token> on the SSE
 	// and message endpoints. Empty disables auth (cluster-internal use only).
 	Token string
+	// Portal, when set, enables template tools (list_templates,
+	// create_stack_from_template) backed by the portal's template registry.
+	Portal *portal.Portal
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -308,6 +312,106 @@ func toolList() []toolDef {
 				"values", map[string]interface{}{"type": "object", "description": "Helm values to set for the component (JSON object)."},
 			)),
 		},
+		{
+			Name:        "get_stack_yaml",
+			Description: "Get the full Stack manifest as YAML.",
+			InputSchema: schema([]string{"name", "namespace"}, props(
+				"name", str("Stack CR name."),
+				"namespace", str("Namespace the Stack lives in."),
+			)),
+		},
+		{
+			Name:        "get_events",
+			Description: "Recent Warning events in a Stack namespace (newest first).",
+			InputSchema: schema(nil, props(
+				"namespace", str("Namespace to read events from."),
+				"limit", map[string]interface{}{"type": "number", "description": "Max events (default 15, max 50)."},
+			)),
+		},
+		{
+			Name:        "diagnose_stack",
+			Description: "One-call triage: stack status + non-ready components + recent warning events.",
+			InputSchema: schema([]string{"name", "namespace"}, props(
+				"name", str("Stack CR name."),
+				"namespace", str("Namespace the Stack lives in."),
+			)),
+		},
+		{
+			Name:        "get_flags",
+			Description: "Read the MX_FF_* feature flags of a component from the Stack spec.",
+			InputSchema: schema([]string{"name", "namespace", "component"}, props(
+				"name", str("Stack CR name."),
+				"namespace", str("Namespace the Stack lives in."),
+				"component", str("Component name (e.g. frontend, backend)."),
+			)),
+		},
+		{
+			Name:        "set_flags",
+			Description: "Set MX_FF_* feature flags on a component. The operator rolls the workload to apply them — expect a brief restart.",
+			InputSchema: schema([]string{"name", "namespace", "component", "flags"}, props(
+				"name", str("Stack CR name."),
+				"namespace", str("Namespace the Stack lives in."),
+				"component", str("Component name."),
+				"flags", map[string]interface{}{"type": "object", "description": "MX_FF_* keys with string values (e.g. {\"MX_FF_CONNECTORS_ENABLED\":\"true\"})."},
+			)),
+		},
+		{
+			Name:        "list_backups",
+			Description: "List StackBackup resources (optionally by namespace).",
+			InputSchema: schema(nil, props(
+				"namespace", str("Filter by namespace. Empty = all."),
+			)),
+		},
+		{
+			Name:        "create_backup",
+			Description: "Create a StackBackup: copies Postgres + storage-engine S3 state from a source to a target Stack namespace.",
+			InputSchema: schema([]string{"name", "namespace", "source", "target"}, props(
+				"name", str("StackBackup name."),
+				"namespace", str("Namespace the StackBackup lives in (usually the source namespace)."),
+				"source", str("Source Stack namespace."),
+				"target", str("Target Stack namespace."),
+				"include", map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}, "description": "Subset to copy: database, s3. Empty = both."},
+			)),
+		},
+		{
+			Name:        "get_stack_backup",
+			Description: "Status of one StackBackup: phase, job, timestamps, message.",
+			InputSchema: schema([]string{"name", "namespace"}, props(
+				"name", str("StackBackup name."),
+				"namespace", str("Namespace it lives in."),
+			)),
+		},
+		{
+			Name:        "get_vault_health",
+			Description: "Whether a namespace's Vault is installed and its root token is tracked. Read-only.",
+			InputSchema: schema([]string{"namespace"}, props(
+				"namespace", str("Tenant namespace."),
+			)),
+		},
+		{
+			Name:        "list_templates",
+			Description: "List stack templates available for create_stack_from_template.",
+			InputSchema: schema(nil, nil),
+		},
+		{
+			Name:        "create_stack_from_template",
+			Description: "Create a new Stack (namespace + CR) from a template. Use dry_run=true to preview the YAML first.",
+			InputSchema: schema([]string{"template", "tenant"}, props(
+				"template", str("Template id (see list_templates)."),
+				"tenant", str("Tenant slug — becomes namespace foundation-<tenant>."),
+				"mode", str("Deployment mode: Direct (default) or Flux."),
+				"dry_run", map[string]interface{}{"type": "boolean", "description": "Preview without creating."},
+			)),
+		},
+		{
+			Name:        "delete_stack",
+			Description: "Delete a Stack CR. The finalizer uninstalls all component releases. GUARDED: confirm must equal the namespace. Prefer pause_stack for temporary stops.",
+			InputSchema: schema([]string{"name", "namespace", "confirm"}, props(
+				"name", str("Stack CR name."),
+				"namespace", str("Namespace the Stack lives in."),
+				"confirm", str("Must equal the namespace — typed confirmation against accidental deletes."),
+			)),
+		},
 	}
 }
 
@@ -355,13 +459,66 @@ func (s *Server) handleToolCall(ctx context.Context, req *jsonRPCRequest) *jsonR
 		result, err = s.toolTriggerReconcile(ctx, str("name"), str("namespace"))
 	case "update_stack_values":
 		var vals json.RawMessage
-		if v, ok := params.Arguments, true; ok {
-			var raw map[string]json.RawMessage
-			if e := json.Unmarshal(v, &raw); e == nil {
-				vals = raw["values"]
-			}
+		var raw map[string]json.RawMessage
+		if e := json.Unmarshal(params.Arguments, &raw); e == nil {
+			vals = raw["values"]
 		}
 		result, err = s.toolUpdateValues(ctx, str("name"), str("namespace"), str("component"), vals)
+	case "get_stack_yaml":
+		result, err = s.toolGetStackYAML(ctx, str("name"), str("namespace"))
+	case "get_events":
+		limit := 0
+		if n, ok := args["limit"].(float64); ok {
+			limit = int(n)
+		}
+		result, err = s.toolGetEvents(ctx, str("namespace"), limit)
+	case "diagnose_stack":
+		result, err = s.toolDiagnoseStack(ctx, str("name"), str("namespace"))
+	case "get_flags":
+		result, err = s.toolGetFlags(ctx, str("name"), str("namespace"), str("component"))
+	case "set_flags":
+		flags := map[string]string{}
+		if raw, ok := args["flags"].(map[string]interface{}); ok {
+			for k, v := range raw {
+				switch tv := v.(type) {
+				case string:
+					flags[k] = tv
+				case bool:
+					if tv {
+						flags[k] = "true"
+					} else {
+						flags[k] = "false"
+					}
+				}
+			}
+		}
+		result, err = s.toolSetFlags(ctx, str("name"), str("namespace"), str("component"), flags)
+	case "list_backups":
+		result, err = s.toolListBackups(ctx, str("namespace"))
+	case "create_backup":
+		var include []string
+		if raw, ok := args["include"].([]interface{}); ok {
+			for _, v := range raw {
+				if s, ok := v.(string); ok {
+					include = append(include, s)
+				}
+			}
+		}
+		result, err = s.toolCreateBackup(ctx, str("name"), str("namespace"), str("source"), str("target"), include)
+	case "get_stack_backup":
+		result, err = s.toolGetBackup(ctx, str("name"), str("namespace"))
+	case "get_vault_health":
+		result, err = s.toolGetVaultHealth(ctx, str("namespace"))
+	case "list_templates":
+		result, err = s.toolListTemplates(ctx)
+	case "create_stack_from_template":
+		dry := false
+		if v, ok := args["dry_run"].(bool); ok {
+			dry = v
+		}
+		result, err = s.toolCreateFromTemplate(ctx, str("template"), str("tenant"), str("mode"), dry)
+	case "delete_stack":
+		result, err = s.toolDeleteStack(ctx, str("name"), str("namespace"), str("confirm"))
 	default:
 		return errResp(req.ID, -32601, "unknown tool: "+params.Name)
 	}
@@ -556,4 +713,3 @@ func mustJSON(v interface{}) string {
 	}
 	return string(b)
 }
-

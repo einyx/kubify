@@ -30,6 +30,7 @@ import (
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 	"github.com/einyx/kubo/internal/controller"
 	"github.com/einyx/kubo/internal/mcpserver"
+	"github.com/einyx/kubo/internal/portal"
 	"github.com/einyx/kubo/internal/prereqs"
 	kubowh "github.com/einyx/kubo/internal/webhook"
 	helmv2 "github.com/fluxcd/helm-controller/api/v2"
@@ -41,6 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -89,6 +91,10 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&mcpAddr, "mcp-bind-address", ":9090", "The address the MCP server binds to.")
+	var mcpToken string
+	flag.StringVar(&mcpToken, "mcp-token", os.Getenv("KUBO_MCP_TOKEN"),
+		"Bearer token required on MCP SSE endpoints. Empty disables auth — "+
+			"bind the MCP server to localhost or a ClusterIP only.")
 	opts := zap.Options{
 		Development: false,
 	}
@@ -303,7 +309,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := mgr.Add(mcpserver.New(mgr.GetClient(), mcpAddr)); err != nil {
+	if err := mgr.Add(func() manager.Runnable {
+		srv := mcpserver.New(mgr.GetClient(), mcpAddr)
+		srv.Token = mcpToken
+		srv.Portal = portal.New(mgr.GetClient())
+		return srv
+	}()); err != nil {
 		setupLog.Error(err, "unable to add MCP server")
 		os.Exit(1)
 	}

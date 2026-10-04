@@ -7,7 +7,9 @@ import (
 	"sort"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
+	"github.com/einyx/kubo/internal/portal"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -44,14 +46,14 @@ func (s *Server) toolGetEvents(ctx context.Context, namespace string, limit int)
 		return list.Items[j].LastTimestamp.Before(&list.Items[i].LastTimestamp)
 	})
 	type row struct {
-		Type      string `json:"type"`
-		Reason    string `json:"reason"`
-		Object    string `json:"object"`
-		Count     int    `json:"count"`
-		Message   string `json:"message"`
-		LastSeen  string `json:"lastSeen"`
+		Type     string `json:"type"`
+		Reason   string `json:"reason"`
+		Object   string `json:"object"`
+		Count    int    `json:"count"`
+		Message  string `json:"message"`
+		LastSeen string `json:"lastSeen"`
 	}
-	var rows []row
+	rows := []row{}
 	for _, e := range list.Items {
 		if e.Type != corev1.EventTypeWarning {
 			continue
@@ -59,14 +61,11 @@ func (s *Server) toolGetEvents(ctx context.Context, namespace string, limit int)
 		rows = append(rows, row{
 			Type: e.Type, Reason: e.Reason,
 			Object: e.InvolvedObject.Kind + "/" + e.InvolvedObject.Name,
-			Count:  e.Count, Message: e.Message, LastSeen: e.LastTimestamp.Format("15:04:05"),
+			Count:  int(e.Count), Message: e.Message, LastSeen: e.LastTimestamp.Format("15:04:05"),
 		})
 		if len(rows) >= limit {
 			break
 		}
-	}
-	if rows == nil {
-		rows = []row{}
 	}
 	return map[string]interface{}{"warnings": rows}, nil
 }
@@ -91,21 +90,25 @@ func (s *Server) toolDiagnoseStack(ctx context.Context, name, namespace string) 
 // --- feature flags ----------------------------------------------------------
 
 // getFlags reads the MX_FF_* env entries for a component from the Stack spec.
-// flags: map key→value for entries present; unset catalogue flags are absent.
 func (s *Server) toolGetFlags(ctx context.Context, name, namespace, component string) (interface{}, error) {
 	var st platformv1alpha1.Stack
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, &st); err != nil {
 		return nil, err
 	}
-	flat := flattenValues(st.Spec.ComponentValues, component)
+	if st.Spec.ComponentValues == nil || len(st.Spec.ComponentValues[component].Raw) == 0 {
+		return map[string]interface{}{"component": component, "flags": map[string]string{}}, nil
+	}
+	var comp struct {
+		Env map[string]string `json:"env,omitempty"`
+	}
+	if err := json.Unmarshal(st.Spec.ComponentValues[component].Raw, &comp); err != nil {
+		return nil, fmt.Errorf("component %q values are not an env map", component)
+	}
 	flags := map[string]string{}
-	for k, v := range flat {
+	for k, v := range comp.Env {
 		if len(k) > 6 && k[:6] == "MX_FF_" {
 			flags[k] = v
 		}
-	}
-	if flags == nil {
-		flags = map[string]string{}
 	}
 	return map[string]interface{}{"component": component, "flags": flags}, nil
 }
@@ -128,13 +131,13 @@ func (s *Server) toolSetFlags(ctx context.Context, name, namespace, component st
 		return nil, err
 	}
 	if st.Spec.ComponentValues == nil {
-		st.Spec.ComponentValues = map[string]json.RawMessage{}
+		st.Spec.ComponentValues = map[string]apiextensionsv1.JSON{}
 	}
 	var comp struct {
 		Env map[string]string `json:"env,omitempty"`
 	}
-	if len(st.Spec.ComponentValues[component]) > 0 {
-		if err := json.Unmarshal(st.Spec.ComponentValues[component], &comp); err != nil {
+	if len(st.Spec.ComponentValues[component].Raw) > 0 {
+		if err := json.Unmarshal(st.Spec.ComponentValues[component].Raw, &comp); err != nil {
 			return nil, fmt.Errorf("component %q values are not an env map (raw list form unsupported by this tool)", component)
 		}
 	}
@@ -153,40 +156,14 @@ func (s *Server) toolSetFlags(ctx context.Context, name, namespace, component st
 	if err != nil {
 		return nil, err
 	}
-	st.Spec.ComponentValues[component] = blob
+	st.Spec.ComponentValues[component] = apiextensionsv1.JSON{Raw: blob}
 	if err := s.Client.Update(ctx, &st); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{
-		"updated":  changed,
-		"note":     "componentValues updated — the operator will roll " + component + " to apply the flags",
+		"updated": changed,
+		"note":    "componentValues updated — the operator will roll " + component + " to apply the flags",
 	}, nil
-}
-
-// flattenValues merges every env-ish map of a component's values into one
-// key→value view (handles env map shapes used by the demo stacks).
-func flattenValues(componentValues map[string]json.RawMessage, component string) map[string]string {
-	out := map[string]string{}
-	var shapes []struct {
-		Env map[string]string `json:"env"`
-	}
-	var cfg struct {
-		Env map[string]string `json:"env"`
-	}
-	var raw json.RawMessage
-	if componentValues[component] != nil {
-		raw = componentValues[component]
-	}
-	if len(raw) > 0 {
-		_ = json.Unmarshal(raw, &shapes[0])
-		_ = json.Unmarshal(raw, &cfg)
-	}
-	for _, m := range []map[string]string{shapes[0].Env, cfg.Env} {
-		for k, v := range m {
-			out[k] = v
-		}
-	}
-	return out
 }
 
 // --- backups ----------------------------------------------------------------
@@ -269,23 +246,38 @@ func (s *Server) toolGetVaultHealth(ctx context.Context, namespace string) (inte
 	}
 	token := string(unseal.Data["vault-root"])
 	return map[string]interface{}{
-		"installed": true,
-		"tracked":   true,
+		"installed":        true,
 		"rootTokenTracked": token != "",
-		"note":        "use the portal Vault panel for content operations",
+		"note":             "use the portal Vault panel for content operations",
 	}, nil
 }
 
-// --- list_templates / create_stack_from_template -----------------------------
+// --- templates + create from template (via the portal) ----------------------
 
-func (s *Server) toolListTemplates(ctx context.Context, registry interface {
-	List(ctx context.Context) ([]TemplateMetaLite, error)
-}) (interface{}, error) {
-	tpls, err := registry.List(ctx)
+func (s *Server) toolListTemplates(ctx context.Context) (interface{}, error) {
+	if s.Portal == nil {
+		return nil, fmt.Errorf("templates unavailable: the MCP server is not wired to the portal registry")
+	}
+	tpls, err := s.Portal.ListTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{"templates": tpls}, nil
+}
+
+func (s *Server) toolCreateFromTemplate(ctx context.Context, template, tenant, mode string, dryRun bool) (interface{}, error) {
+	if s.Portal == nil {
+		return nil, fmt.Errorf("templates unavailable: the MCP server is not wired to the portal registry")
+	}
+	req := portal.CreateRequest{Template: template, Tenant: tenant, Mode: mode}
+	out, err := s.Portal.CreateFromTemplate(ctx, req, dryRun)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		return map[string]interface{}{"dryRun": true, "yaml": out}, nil
+	}
+	return map[string]interface{}{"created": true, "tenant": tenant}, nil
 }
 
 // --- delete_stack (guarded) --------------------------------------------------
@@ -304,7 +296,3 @@ func (s *Server) toolDeleteStack(ctx context.Context, name, namespace, confirm s
 	return map[string]interface{}{"deleted": name, "namespace": namespace,
 		"note": "finalizer will uninstall all component releases"}, nil
 }
-
-var _ = apierrors.IsNotFound
-var _ = sort.Strings
-var _ = client.Object(&corev1.Namespace{})
