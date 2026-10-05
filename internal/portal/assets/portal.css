@@ -515,6 +515,22 @@
   }
   select { cursor: pointer; }
 
+  /* The -webkit-appearance:none above (for text inputs) also strips the
+     native checkbox rendering, leaving checked state invisible. Restore
+     it and tint with the accent so selection is obvious in both themes. */
+  input[type="checkbox"] {
+    -webkit-appearance: checkbox;
+    appearance: checkbox;
+    width: 15px !important;
+    height: 15px;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  input[type="checkbox"]:checked {
+    outline: 2px solid var(--accent);
+    outline-offset: 1px;
+  }
+
   .dialog-actions {
     display: flex;
     gap: 8px;
