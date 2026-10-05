@@ -2,9 +2,9 @@ package agentfw
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,9 +20,10 @@ func TestParseUsageOpenAI(t *testing.T) {
 	if u.Model != "gpt-4o" || u.InputTokens != 1000 || u.OutputTokens != 250 || u.CacheRead != 200 {
 		t.Fatalf("bad usage: %+v", u)
 	}
-	// gpt-4o: $2.50 in / $10 out per 1M → 1000*2.5 + 250*10 micro = 2500+2500 = 5000
-	if u.CostMicro != 5000 {
-		t.Fatalf("cost = %d, want 5000", u.CostMicro)
+	// gpt-4o: $2.50 in / $10 out per 1M, cached reads at 10% ($0.25).
+	// prompt=1000 includes 200 cached → 800*2.5 + 200*0.25 + 250*10 = 4550
+	if u.CostMicro != 4550 {
+		t.Fatalf("cost = %d, want 4550", u.CostMicro)
 	}
 }
 
