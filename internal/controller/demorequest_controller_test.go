@@ -116,3 +116,60 @@ func TestDemoRequestCapacityCap(t *testing.T) {
 		t.Fatalf("phase = %q, want Failed (capacity)", updated.Status.Phase)
 	}
 }
+
+// Regression: editing spec.company after admission must not re-derive the
+// tenant slug — the reconciler keeps provisioning into status.tenant, or it
+// would spawn a second namespace and orphan the first.
+func TestDemoRequestTenantPinnedAcrossCompanyEdit(t *testing.T) {
+	sch := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(sch)
+	_ = platformv1alpha1.AddToScheme(sch)
+
+	now := metav1.Now()
+	dr := platformv1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo-edit", Namespace: "kubo-system", Generation: 1, CreationTimestamp: now},
+		Spec:       platformv1alpha1.DemoRequestSpec{Email: "ada@acme.io", Company: "Acme", Template: "full", Approved: true},
+	}
+	c := fake.NewClientBuilder().WithScheme(sch).WithStatusSubresource(&platformv1alpha1.DemoRequest{}).WithObjects(&dr).Build()
+	r := &DemoRequestReconciler{
+		Client:          c,
+		Scheme:          sch,
+		Registry:        portal.NewRegistry("", c),
+		DefaultTemplate: "full",
+		MaxTenants:      5,
+	}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "kubo-system", Name: "demo-edit"}}); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	var first platformv1alpha1.DemoRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "kubo-system", Name: "demo-edit"}, &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Status.Tenant == "" {
+		t.Fatal("status.tenant not set on first reconcile")
+	}
+
+	// Operator fixes a typo in the company via the portal.
+	first.Spec.Company = "Acme Corp Renamed"
+	first.Generation = 2
+	if err := c.Update(context.Background(), &first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{NamespacedName: types.NamespacedName{Namespace: "kubo-system", Name: "demo-edit"}}); err != nil {
+		t.Fatalf("reconcile after edit: %v", err)
+	}
+
+	var second platformv1alpha1.DemoRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "kubo-system", Name: "demo-edit"}, &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Status.Tenant != first.Status.Tenant {
+		t.Fatalf("tenant drifted after company edit: %q -> %q", first.Status.Tenant, second.Status.Tenant)
+	}
+	// No Stack may appear in the re-derived namespace.
+	var stranger platformv1alpha1.Stack
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: tenantSlug("Acme Corp Renamed", "ada@acme.io"), Name: "product"}, &stranger); err == nil {
+		t.Fatal("stack provisioned into a second namespace derived from the edited company")
+	}
+}
