@@ -2,6 +2,7 @@ package portal
 
 import (
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -147,6 +148,37 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 	handle("GET /api/stacks/{namespace}/{name}", func(w http.ResponseWriter, r *http.Request) {
 		d, err := p.GetStack(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
 		respond(w, r, d, err)
+	})
+	// Website demo requests: bearer-token-authed (the website's own Turnstile
+	// + rate limiting runs first at the edge). Disabled unless the
+	// kubo-system/demo-requests-token secret exists.
+	handle("POST /api/demorequests", func(w http.ResponseWriter, r *http.Request) {
+		token := p.demoRequestToken(r.Context())
+		if token == "" {
+			http.Error(w, "demo requests disabled", http.StatusServiceUnavailable)
+			return
+		}
+		got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if got == "" || !constantTimeEq(got, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var in DemoRequestInbound
+		body := http.MaxBytesReader(w, r.Body, 16<<10)
+		if err := json.NewDecoder(body).Decode(&in); err != nil {
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		dr, err := p.CreateDemoRequest(r.Context(), in)
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]string{
+			"name":   dr.Name,
+			"phase":  string(dr.Status.Phase),
+			"tenant": dr.Status.Tenant,
+		}, nil)
 	})
 	handle("GET /api/stacks/{namespace}/{name}/yaml", func(w http.ResponseWriter, r *http.Request) {
 		out, err := p.GetStackYAML(r.Context(), r.PathValue("namespace"), r.PathValue("name"))
@@ -512,4 +544,9 @@ func respondYAML(w http.ResponseWriter, r *http.Request, yamlText string, err er
 	}
 	w.Header().Set("Content-Type", "text/yaml")
 	w.Write([]byte(yamlText))
+}
+
+// constantTimeEq compares two strings without early exit.
+func constantTimeEq(a, b string) bool {
+	return len(a) == len(b) && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
