@@ -6,6 +6,7 @@ import (
 )
 
 // Assets ship with the portal binary; no frontend build or runtime is required.
+//
 //go:embed assets/*.css assets/*.js
 var assetFS embed.FS
 

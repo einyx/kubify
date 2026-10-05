@@ -124,3 +124,81 @@ func TestDemoRequestLifecycleEndpoints(t *testing.T) {
 		t.Fatalf("reject: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func demoReq(name, email, company string, approved bool) *v1alpha1.DemoRequest {
+	return &v1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubo-system"},
+		Spec:       v1alpha1.DemoRequestSpec{Email: email, Company: company, Approved: approved},
+	}
+}
+
+func TestPatchDemoRequestEndpoint(t *testing.T) {
+	p := newFake(t, demoReq("acme-corp", "typo@acme.io", "Acme", false))
+	h := p.Mux()
+
+	t.Run("updates email and company", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPatch, "http://localhost/api/demorequests/acme-corp",
+			strings.NewReader(`{"email":"ops@acme.io","company":"Acme Corp Inc"}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+		}
+		var dr v1alpha1.DemoRequest
+		if err := p.client.Get(context.Background(), types.NamespacedName{Namespace: "kubo-system", Name: "acme-corp"}, &dr); err != nil {
+			t.Fatal(err)
+		}
+		if dr.Spec.Email != "ops@acme.io" || dr.Spec.Company != "Acme Corp Inc" {
+			t.Fatalf("spec = %+v", dr.Spec)
+		}
+	})
+
+	t.Run("rejects invalid email", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPatch, "http://localhost/api/demorequests/acme-corp",
+			strings.NewReader(`{"email":"nope"}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code == http.StatusOK {
+			t.Fatal("invalid email accepted")
+		}
+	})
+
+	t.Run("empty patch rejected", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPatch, "http://localhost/api/demorequests/acme-corp",
+			strings.NewReader(`{}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code == http.StatusOK {
+			t.Fatal("empty patch accepted")
+		}
+	})
+
+	t.Run("404 for unknown name", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPatch, "http://localhost/api/demorequests/ghost",
+			strings.NewReader(`{"email":"a@b.io"}`))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want 404", w.Code)
+		}
+	})
+}
+
+func TestDeleteDemoRequestEndpoint(t *testing.T) {
+	p := newFake(t, demoReq("acme-corp", "ops@acme.io", "Acme", true))
+	h := p.Mux()
+
+	r := httptest.NewRequest(http.MethodDelete, "http://localhost/api/demorequests/acme-corp", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", w.Code, w.Body.String())
+	}
+	var drs v1alpha1.DemoRequestList
+	if err := p.client.List(context.Background(), &drs); err != nil {
+		t.Fatal(err)
+	}
+	if len(drs.Items) != 0 {
+		t.Fatalf("demorequests = %d, want 0", len(drs.Items))
+	}
+}

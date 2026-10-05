@@ -452,7 +452,6 @@ function renderProduct(d) {
   const box = document.getElementById('flags-rows');
   if (!keys.length) {
     box.innerHTML = '<span class="muted">No feature flags configured.</span>';
-    return;
   }
   box.innerHTML = keys.map(k => {
     const on = flags[k] === 'true';
@@ -465,6 +464,62 @@ function renderProduct(d) {
       <span class="flag-state ${on ? 'on' : 'off'}">${on ? 'on' : 'off'}</span>
     </label>`;
   }).join('');
+
+  const tags = d.imageTags || {};
+  const tkeys = Object.keys(tags).sort();
+  setBadge('badge-tags', tkeys.length, false);
+  const tbox = document.getElementById('tags-rows');
+  tbox.innerHTML = tkeys.length ? tkeys.map(k => tagRow(k, tags[k])).join('')
+    : '<span class="muted">No image tag overrides configured.</span>';
+}
+
+function tagRow(name, tag) {
+  return `<label class="flag-row">
+    <code class="flag-name">${esc(name)}</code>
+    <input class="tag-input" value="${esc(tag || '')}" placeholder="tag or digest"
+      onchange="saveTag('${esc(name)}', this.value)" aria-label="Image tag for ${esc(name)}">
+    <button class="btn secondary" onclick="removeTag('${esc(name)}')">remove</button>
+  </label>`;
+}
+
+function addTagRow() {
+  const name = prompt('Component name (e.g. backend, ai, frontend):');
+  if (!name) return;
+  const tags = Object.assign({}, currentData && currentData.imageTags || {});
+  if (!(name in tags)) {
+    tags[name] = '';
+    renderProduct(Object.assign({}, currentData, { imageTags: tags }));
+    const box = document.getElementById('tags-rows');
+    if (box) box.querySelector(`input[aria-label="Image tag for ${CSS.escape(name)}"]`)?.focus();
+  }
+}
+
+async function saveTag(name, tag) {
+  if (!currentDetail) return;
+  const { ns, name: sname } = currentDetail;
+  const tags = Object.assign({}, currentData.imageTags || {});
+  tags[name] = tag;
+  await patchTags(ns, sname, tags, `Tag for ${name} saved`);
+}
+
+async function removeTag(name) {
+  if (!currentDetail) return;
+  const { ns, name: sname } = currentDetail;
+  const tags = Object.assign({}, currentData.imageTags || {});
+  delete tags[name];
+  await patchTags(ns, sname, tags, `Tag override for ${name} removed`);
+}
+
+async function patchTags(ns, sname, tags, msg) {
+  try {
+    await fetch(`/api/stacks/${ns}/${sname}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageTags: tags }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(msg, true);
+    fetchDetail(ns, sname);
+  } catch (e) { toast(e.message, false); }
 }
 
 async function toggleFlag(key, on) {

@@ -64,6 +64,21 @@ spec:
     storage_explorer_enabled: "true"
     landscape_auto_stack: "false"
     landscape_search_focus: "false"
+  # All component image tags in one place (the controller compiles them into
+  # each component's image.tag, overriding componentValues). Update tags here.
+  imageTags:
+    backend: v0.5.62
+    frontend: v0.7.37
+    opa: v0.5.62
+    postgres: "18.6.0"
+    processor: v0.2.33
+    scheduler: v1.1.10
+    storage-engine: v0.0.43
+    trino: "482-kubify"
+    ai: v0.0.2
+    dai-backend: v0.2.79
+    dai-frontend: basepath
+    watcher: v2.0.25
   seedVault:
     # Product knowledge lives HERE, not in the controller: static entries
     # copy shared credentials from canonical kubo-system sources; generated
@@ -195,7 +210,6 @@ spec:
     backend:
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/backend
-        tag: v0.5.62
       # The chart ships an HPA but no resource requests, so its metrics
       # always fail and the deployment stays at 1 replica — every rollout
       # is a full tenant outage. Requests/limits mirror the foundation
@@ -295,7 +309,6 @@ spec:
     frontend:
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/frontend
-        tag: v0.7.37
       # Match the foundation frontend: idle use is ~100Mi and SSR bursts go
       # higher — 256Mi limits OOMKill under real load.
       resources:
@@ -417,7 +430,6 @@ spec:
       image:
         registry: kubifyregistry.azurecr.io
         repository: cached/ecr-kubify/foundation/opa
-        tag: v0.5.62
       env:
         API_BASE_URL: http://backend:65432
 
@@ -432,7 +444,6 @@ spec:
       image:
         registry: kubifyregistry.azurecr.io
         repository: postgresql
-        tag: "18.6.0"
       primary:
         # Per-tenant dedicated instance sizing: the chart defaults were
         # 100m/128Mi requests with a 150m/192Mi limit — Postgres was CPU-
@@ -477,7 +488,6 @@ spec:
         enabled: false
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/processor
-        tag: v0.2.33
       config:
         kafka:
           cluster_host: kafka:9092
@@ -512,7 +522,6 @@ spec:
     scheduler:
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/scheduler
-        tag: v1.1.10
       config:
         MX_KAFKA_CLUSTER_HOST: kafka:9092
         MX_POSTGRES_DATABASE: product
@@ -533,7 +542,6 @@ spec:
         size: 20Gi
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/storage-engine
-        tag: v0.0.43
       externalSecrets:
         enabled: false
         aws:
@@ -580,7 +588,6 @@ spec:
     trino:
       image:
         repository: kubifyregistry.azurecr.io/trinodb/trino
-        tag: "482-kubify"
       imagePullSecrets:
       - name: acr-pull-secret
       serviceAccount:
@@ -721,7 +728,6 @@ spec:
     ai:
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/ai
-        tag: v0.0.2
       imagePullSecrets:
       - name: acr-pull-secret
       externalSecret:
@@ -753,7 +759,6 @@ spec:
     dai-backend:
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/dai/backend
-        tag: v0.2.79
       imagePullSecrets:
       - name: acr-pull-secret
       migrations:
@@ -790,7 +795,6 @@ spec:
     dai-frontend:
       image:
         repository: kubifyregistry.azurecr.io/foundation/dai-frontend
-        tag: basepath
       imagePullSecrets:
       - name: acr-pull-secret
       virtualService:
@@ -833,7 +837,6 @@ spec:
         enabled: false
       image:
         repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/watcher
-        tag: v2.0.25
       config:
         # Chart 2.7.5+: ship the corrected SparkApplication template (the one
         # baked into images <= v2.0.25 omits the ConfigMap volume, killing all

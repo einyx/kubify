@@ -205,6 +205,7 @@ type StackDetail struct {
 	ValueOverrides  []string                   `json:"valueOverrides,omitempty"`
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
 	FeatureFlags    map[string]string          `json:"featureFlags,omitempty"`
+	ImageTags       map[string]string          `json:"imageTags,omitempty"`
 	URL             string                     `json:"url,omitempty"`
 	Conditions      []ConditionView            `json:"conditions,omitempty"`
 	Components      []ComponentView            `json:"components"`
@@ -261,6 +262,9 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 	components := stackComponents(ctx, p.client, &s)
 	if s.Spec.FeatureFlags != nil {
 		d.FeatureFlags = s.Spec.FeatureFlags
+	}
+	if s.Spec.ImageTags != nil {
+		d.ImageTags = s.Spec.ImageTags
 	}
 	if vs := s.Spec.VirtualService; vs != nil && vs.Host != "" {
 		d.URL = "https://" + vs.Host
@@ -530,6 +534,8 @@ type PatchRequest struct {
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
 	// FeatureFlags patches tenant feature flags. Replaces the entire map.
 	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
+	// ImageTags patches per-component image tags. Replaces the entire map.
+	ImageTags map[string]string `json:"imageTags,omitempty"`
 }
 
 // PatchStackSpec applies partial spec updates (mode, bundle, exclude,
@@ -607,6 +613,12 @@ func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchR
 		s.Spec.FeatureFlags = req.FeatureFlags
 		if len(s.Spec.FeatureFlags) == 0 {
 			s.Spec.FeatureFlags = nil
+		}
+	}
+	if req.ImageTags != nil {
+		s.Spec.ImageTags = req.ImageTags
+		if len(s.Spec.ImageTags) == 0 {
+			s.Spec.ImageTags = nil
 		}
 	}
 	if err := p.client.Patch(ctx, &s, patch); err != nil {
@@ -1104,6 +1116,50 @@ func (p *Portal) ApproveDemoRequest(ctx context.Context, name string) error {
 // RejectDemoRequest deletes an unapproved request (nothing was provisioned,
 // so there is nothing to clean up beyond the CR itself).
 func (p *Portal) RejectDemoRequest(ctx context.Context, name string) error {
+	dr := v1alpha1.DemoRequest{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubo-system"}}
+	return p.client.Delete(ctx, &dr)
+}
+
+// EditDemoRequestIn is the PATCH /api/demorequests/{name} payload. Fields
+// left as nil keep their current value.
+type EditDemoRequestIn struct {
+	Email   *string `json:"email,omitempty"`
+	Company *string `json:"company,omitempty"`
+}
+
+// UpdateDemoRequest edits spec.email / spec.company in place. Email must
+// stay valid (the Ready mail goes there); company is capped like the CRD.
+func (p *Portal) UpdateDemoRequest(ctx context.Context, name string, in EditDemoRequestIn) error {
+	var dr v1alpha1.DemoRequest
+	if err := p.client.Get(ctx, types.NamespacedName{Namespace: "kubo-system", Name: name}, &dr); err != nil {
+		return err
+	}
+	svc := map[string]any{}
+	if in.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*in.Email))
+		if email == "" || len(email) > 254 || !strings.Contains(email, "@") {
+			return fmt.Errorf("a valid email is required")
+		}
+		svc["email"] = email
+	}
+	if in.Company != nil {
+		if len(*in.Company) > 40 {
+			return fmt.Errorf("company must be at most 40 characters")
+		}
+		svc["company"] = *in.Company
+	}
+	if len(svc) == 0 {
+		return fmt.Errorf("nothing to update")
+	}
+	raw, _ := json.Marshal(map[string]any{"spec": svc})
+	patch := client.RawPatch(types.MergePatchType, raw)
+	return p.client.Patch(ctx, &dr, patch)
+}
+
+// DeleteDemoRequest removes the DemoRequest regardless of phase. The CR's
+// finalizer cascades: a provisioned tenant Stack and its namespace are
+// torn down by the controller before the CR goes away.
+func (p *Portal) DeleteDemoRequest(ctx context.Context, name string) error {
 	dr := v1alpha1.DemoRequest{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "kubo-system"}}
 	return p.client.Delete(ctx, &dr)
 }

@@ -153,6 +153,17 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 	handle("POST /api/demorequests/{name}/approve", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, r, map[string]bool{"ok": true}, p.ApproveDemoRequest(r.Context(), r.PathValue("name")))
 	})
+	handle("PATCH /api/demorequests/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var in EditDemoRequestIn
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&in); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body: {\"email\": ..., \"company\": ...}"))
+			return
+		}
+		respond(w, r, map[string]bool{"ok": true}, p.UpdateDemoRequest(r.Context(), r.PathValue("name"), in))
+	})
+	handle("DELETE /api/demorequests/{name}", func(w http.ResponseWriter, r *http.Request) {
+		respond(w, r, map[string]bool{"ok": true}, p.DeleteDemoRequest(r.Context(), r.PathValue("name")))
+	})
 	handle("POST /api/demorequests/{name}/reject", func(w http.ResponseWriter, r *http.Request) {
 		respond(w, r, map[string]bool{"ok": true}, p.RejectDemoRequest(r.Context(), r.PathValue("name")))
 	})
