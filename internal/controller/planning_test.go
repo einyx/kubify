@@ -153,3 +153,50 @@ func TestDefaultFrontendBaseURL(t *testing.T) {
 		}
 	})
 }
+
+func TestApplyFeatureFlags(t *testing.T) {
+	t.Run("merges normalized flags into frontend env", func(t *testing.T) {
+		v := map[string]interface{}{
+			"env": map[string]interface{}{
+				"feature_flags": map[string]interface{}{"connectors_enabled": "false"},
+			},
+		}
+		applyFeatureFlags(map[string]string{
+			"MX_FF_CONNECTORS_ENABLED":   "true",
+			"query_exports_enabled":      "true",
+			"MX_FF_LANDSCAPE_AUTO_STACK": "true",
+		}, "frontend", v)
+		ff := v["env"].(map[string]interface{})["feature_flags"].(map[string]interface{})
+		for k, want := range map[string]string{
+			"connectors_enabled":    "true",
+			"query_exports_enabled": "true",
+			"landscape_auto_stack":  "true",
+		} {
+			if got := ff[k]; got != want {
+				t.Fatalf("flag %s = %v, want %v", k, got, want)
+			}
+		}
+	})
+	t.Run("creates env structure when absent", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "frontend", v)
+		got := v["env"].(map[string]interface{})["feature_flags"].(map[string]interface{})["connectors_enabled"]
+		if got != "true" {
+			t.Fatalf("connectors_enabled = %v", got)
+		}
+	})
+	t.Run("non-frontend components untouched", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "backend", v)
+		if _, ok := v["env"]; ok {
+			t.Fatal("backend values should not gain env")
+		}
+	})
+	t.Run("empty flags no-op", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(nil, "frontend", v)
+		if len(v) != 0 {
+			t.Fatal("nil flags should not modify values")
+		}
+	})
+}
