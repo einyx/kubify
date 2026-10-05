@@ -457,6 +457,15 @@
   /* ── Dialog ── */
   dialog {
     color: var(--text);
+    /* Explicit centering: the global * { margin: 0 } reset kills the UA's
+       margin:auto dialog centering, which anchored dialogs top-left. */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    margin: 0;
+    transform: translate(-50%, -50%) translateY(16px) scale(0.97);
+    max-height: calc(100dvh - 32px);
+    overflow: auto;
     border: 1px solid transparent;
     border-radius: 24px;
     padding: 0;
@@ -466,13 +475,13 @@
       linear-gradient(var(--panel), var(--panel)) padding-box,
       linear-gradient(135deg, rgba(15,18,25,0.14), rgba(15,18,25,0.02)) border-box;
     box-shadow: 0 32px 80px rgba(22,26,45,0.18), inset 0 1px 0 rgba(15,18,25,0.045);
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
     opacity: 0;
-    transform: translateY(16px) scale(0.97);
   }
   dialog[open] {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translate(-50%, -50%) translateY(0) scale(1);
     transition: opacity 400ms cubic-bezier(0.32,0.72,0,1), transform 500ms cubic-bezier(0.32,0.72,0,1);
   }
   dialog::backdrop { background: rgba(22,26,45,0.45); backdrop-filter: blur(4px); }
