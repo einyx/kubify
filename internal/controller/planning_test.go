@@ -154,6 +154,46 @@ func TestDefaultFrontendBaseURL(t *testing.T) {
 	})
 }
 
+func TestApplyImageTags(t *testing.T) {
+	t.Run("overrides matching component tag", func(t *testing.T) {
+		v := map[string]interface{}{"image": map[string]interface{}{"repository": "reg/backend", "tag": "v0.2.78"}}
+		applyImageTags(map[string]string{"backend": "v0.2.79"}, "backend", v)
+		img := v["image"].(map[string]interface{})
+		if img["tag"] != "v0.2.79" || img["repository"] != "reg/backend" {
+			t.Fatalf("image = %v", img)
+		}
+	})
+	t.Run("creates image map when absent", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyImageTags(map[string]string{"ai": "dev-42"}, "ai", v)
+		img := v["image"].(map[string]interface{})
+		if img["tag"] != "dev-42" {
+			t.Fatalf("tag = %v", img["tag"])
+		}
+	})
+	t.Run("components not in the map untouched", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyImageTags(map[string]string{"backend": "v1"}, "frontend", v)
+		if len(v) != 0 {
+			t.Fatalf("unrelated component modified: %v", v)
+		}
+	})
+	t.Run("empty tag value ignored", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyImageTags(map[string]string{"backend": ""}, "backend", v)
+		if len(v) != 0 {
+			t.Fatalf("empty tag should be a no-op: %v", v)
+		}
+	})
+	t.Run("nil map no-op", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyImageTags(nil, "backend", v)
+		if len(v) != 0 {
+			t.Fatal("nil imageTags should not modify values")
+		}
+	})
+}
+
 func TestApplyFeatureFlags(t *testing.T) {
 	t.Run("merges normalized flags into frontend env", func(t *testing.T) {
 		v := map[string]interface{}{

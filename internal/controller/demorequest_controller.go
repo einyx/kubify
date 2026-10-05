@@ -146,7 +146,14 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
+	// The tenant slug is pinned at admission: later spec edits (e.g. an
+	// operator fixing a typo in company via the portal) must NOT re-derive
+	// it, or the reconciler would provision a second namespace and orphan
+	// the first.
 	tenant := tenantSlug(dr.Spec.Company, dr.Spec.Email)
+	if dr.Status.Tenant != "" {
+		tenant = dr.Status.Tenant
+	}
 	if dr.Status.Tenant == "" {
 		if err := r.admit(ctx, &dr); err != nil {
 			return ctrl.Result{}, err

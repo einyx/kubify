@@ -92,6 +92,27 @@ func applyFeatureFlags(featureFlags map[string]string, compName string, values m
 	}
 }
 
+// applyImageTags compiles stack.spec.imageTags into each component's
+// image.tag, with the highest precedence (above componentValues). Keys are
+// component names; only components present in the map are touched, so a
+// typo'd name is a no-op rather than a broken chart.
+func applyImageTags(imageTags map[string]string, compName string, values map[string]interface{}) {
+	if len(imageTags) == 0 {
+		return
+	}
+	tag, ok := imageTags[compName]
+	if !ok || tag == "" {
+		return
+	}
+	image, _ := values["image"].(map[string]interface{})
+	if image == nil {
+		image = map[string]interface{}{}
+
+		values["image"] = image
+	}
+	image["tag"] = tag
+}
+
 // normalizeFeatureFlagKey converts MX_FF_UPPER_SNAKE to the chart's
 // lowercase snake_case key. Already-normalized keys pass through.
 func normalizeFeatureFlagKey(k string) string {
@@ -198,4 +219,17 @@ func ptr(m map[string]apiextensionsv1.JSON, k string) *apiextensionsv1.JSON {
 		return &v
 	}
 	return nil
+}
+
+// applyChartVersion compiles spec.chartVersions into a component's chart
+// pin with the highest precedence, mirroring applyImageTags. Only meaningful
+// for components that pull charts from an OCI repo; bundle-supplied charts
+// ignore it (the bundle packages exactly one version).
+func applyChartVersion(chartVersions map[string]string, compName string, ref *platformv1alpha1.ChartRef) {
+	if len(chartVersions) == 0 || ref == nil {
+		return
+	}
+	if v, ok := chartVersions[compName]; ok && v != "" {
+		ref.ChartVersion = v
+	}
 }
