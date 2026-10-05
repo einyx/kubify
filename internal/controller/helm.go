@@ -2,7 +2,9 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -10,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -241,10 +244,56 @@ func isPendingStatus(s release.Status) bool {
 }
 
 // Deploy installs or upgrades the release and returns the resulting release.
+// deployMemo remembers recently verified deployments so unchanged
+// (chart, values) pairs skip helm entirely on subsequent reconciles.
+var deployMemo sync.Map // "ns/release" -> deployMemoEntry
+
+// deployMemoTTL bounds how long a memoized skip is trusted. After it lapses,
+// the full render + dry-run comparison runs again, which also re-heals any
+// manual drift applied directly to the cluster in the meantime.
+const deployMemoTTL = 10 * time.Minute
+
+type deployMemoEntry struct {
+	fingerprint string
+	release     *release.Release
+	verified    time.Time
+}
+
+// deployFingerprint uniquely identifies a desired deployment state. Values
+// maps marshal deterministically because encoding/json sorts map keys.
+func deployFingerprint(ch *chart.Chart, values map[string]interface{}) string {
+	h := sha256.New()
+	if ch != nil && ch.Metadata != nil {
+		fmt.Fprintf(h, "%s/%s|%s|", ch.Metadata.Name, ch.Metadata.Version, ch.Metadata.AppVersion)
+	}
+	if b, err := json.Marshal(values); err == nil {
+		h.Write(b)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
 func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values map[string]interface{}) (*release.Release, error) {
 	cfg, err := h.cfgFor(namespace)
 	if err != nil {
 		return nil, err
+	}
+
+	// Fast path: when this exact (chart, values) pair was verified deployed
+	// recently, skip render + dry-run + upgrade entirely and only confirm the
+	// release is still deployed (one secret read). Cuts steady-state
+	// reconciles from ~15 API-heavy helm operations per stack to one cheap
+	// read per component. TTL bounds drift-healing latency.
+	memoKey := namespace + "/" + compName
+	fp := deployFingerprint(ch, values)
+	if e, ok := deployMemo.Load(memoKey); ok {
+		entry := e.(deployMemoEntry)
+		if entry.fingerprint == fp && time.Since(entry.verified) < deployMemoTTL {
+			if rel, rerr := getRelease(cfg, compName); rerr == nil &&
+				rel != nil && rel.Info != nil && rel.Info.Status == release.StatusDeployed {
+				deployMemo.Store(memoKey, deployMemoEntry{fingerprint: fp, release: rel, verified: time.Now()})
+				return rel, nil
+			}
+		}
 	}
 
 	existing, err := getRelease(cfg, compName)
@@ -265,6 +314,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	if existing != nil && existing.Chart != nil && existing.Chart.Metadata != nil &&
 		existing.Chart.Metadata.Version == chartVersion(ch) {
 		if rendered, rerr := renderManifest(cfg, compName, namespace, ch, values); rerr == nil && rendered == existing.Manifest {
+			deployMemo.Store(memoKey, deployMemoEntry{fingerprint: fp, release: existing, verified: time.Now()})
 			return existing, nil
 		}
 	}
@@ -304,6 +354,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 		if err != nil {
 			return nil, fmt.Errorf("helm install %s: %w", compName, err)
 		}
+		deployMemo.Store(memoKey, deployMemoEntry{fingerprint: fp, release: rel, verified: time.Now()})
 		return rel, nil
 	}
 
@@ -330,6 +381,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 			// fall through to the real upgrade rather than skipping it.
 			slogInfo("dry-run render failed for %s, proceeding with upgrade: %v", compName, derr)
 		} else if normalizeManifest(rendered.Manifest) == normalizeManifest(existing.Manifest) {
+			deployMemo.Store(memoKey, deployMemoEntry{fingerprint: fp, release: existing, verified: time.Now()})
 			return existing, nil // nothing changed — skip the upgrade
 		}
 	}
@@ -345,6 +397,7 @@ func (h *HelmEngine) Deploy(compName, namespace string, ch *chart.Chart, values 
 	if err != nil {
 		return nil, fmt.Errorf("helm upgrade %s: %w", compName, err)
 	}
+	deployMemo.Store(memoKey, deployMemoEntry{fingerprint: fp, release: rel, verified: time.Now()})
 	return rel, nil
 }
 
@@ -366,6 +419,7 @@ func (h *HelmEngine) ReleaseStatus(name, namespace string) (release.Status, erro
 
 // Uninstall removes a release (used on Stack deletion).
 func (h *HelmEngine) Uninstall(name, namespace string) error {
+	deployMemo.Delete(namespace + "/" + name)
 	cfg, err := h.cfgFor(namespace)
 	if err != nil {
 		return err
