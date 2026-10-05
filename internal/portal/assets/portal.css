@@ -674,6 +674,15 @@
     transition: border-color 150ms ease, background 150ms ease;
   }
   .flag-row:hover { border-color: var(--border-hi); background: rgba(15,18,25,0.02); }
+  .tag-input {
+    flex: 1.4; font-size: 12.5px;
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+    padding: 4px 8px;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: transparent; color: var(--text);
+    cursor: text;
+  }
+  .tag-input:focus { outline: none; border-color: var(--border-hi); }
   .flag-name {
     flex: 1; font-size: 12.5px;
     font-family: 'JetBrains Mono', 'SF Mono', monospace;

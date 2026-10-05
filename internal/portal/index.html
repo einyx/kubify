@@ -142,6 +142,12 @@
             <span class="muted">No feature flags configured.</span>
           </div>
         </div>
+        <div class="product-section">
+          <div class="section-title">Image tags <span class="badge" id="badge-tags"></span> <button class="btn secondary" style="float:right" onclick="addTagRow()">add</button></div>
+          <div id="tags-rows" class="flags-grid">
+            <span class="muted">No image tag overrides configured.</span>
+          </div>
+        </div>
       </div>
     </div>
     </section>
@@ -356,6 +362,29 @@
   <div class="dialog-actions">
     <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
     <button class="btn" id="del-btn" style="background:var(--err)" onclick="doDelete()">Delete</button>
+  </div>
+</dialog>
+
+<!-- Edit demo request dialog -->
+<dialog id="demo-edit">
+  <div class="dialog-header">
+    <h2>Edit demo request</h2>
+    <p>Fix a typo in the submission. The Ready email goes to this address.</p>
+  </div>
+  <div class="dialog-body">
+    <div class="field">
+      <label for="demo-edit-email">Email</label>
+      <input id="demo-edit-email" autocomplete="off" placeholder="email">
+    </div>
+    <div class="field">
+      <label for="demo-edit-company">Company</label>
+      <input id="demo-edit-company" autocomplete="off" placeholder="company">
+    </div>
+    <div class="field-error" id="demo-edit-error"></div>
+  </div>
+  <div class="dialog-actions">
+    <button class="btn secondary" onclick="this.closest('dialog').close()">Cancel</button>
+    <button class="btn" id="demo-edit-btn" onclick="doEditDemo()">Save</button>
   </div>
 </dialog>
 
