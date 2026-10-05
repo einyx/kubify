@@ -9,6 +9,7 @@ let currentData = null;   // last StackDetail for prefilling the edit dialog
 
 let stacksETag = null;
 let lastStacks = [];
+let phaseFilter = ''; // set via the phase pills in the stats strip
 
 async function refresh() {
   let stacks;
@@ -31,7 +32,7 @@ async function refresh() {
     renderStats(stacks);
     renderSortHeaders();
     const q = document.getElementById('search').value.trim().toLowerCase();
-    const phase = document.getElementById('phase-filter').value;
+    const phase = phaseFilter;
     let visible = stacks.filter(s =>
       (!phase || s.phase === phase) &&
       (!q || s.namespace.includes(q) || s.name.includes(q)));
@@ -105,7 +106,7 @@ function renderStats(stacks) {
   const segs = order.filter(p => counts[p]).map(p =>
     `<div class="phase-seg s-${p.toLowerCase()}" style="flex:${counts[p]}" title="${counts[p]} ${p}"></div>`).join('');
 
-  const active = document.getElementById('phase-filter').value;
+  const active = phaseFilter;
   document.getElementById('stats').innerHTML = `
     <div class="stats-strip">
       <div class="stats-total">
@@ -128,8 +129,7 @@ function renderStats(stacks) {
 }
 
 function filterPhase(p) {
-  const sel = document.getElementById('phase-filter');
-  sel.value = sel.value === p ? '' : p; // click again to clear
+  phaseFilter = phaseFilter === p ? '' : p; // click again to clear
   refresh();
 }
 
@@ -435,10 +435,16 @@ async function openValues(comp = '') {
 function renderProduct(d) {
   const urlEl = document.getElementById('product-url');
   if (d.url) {
-    urlEl.innerHTML = `<a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--link)">${esc(d.url)}</a>
-      <button class="copy-btn" onclick="copyText('${esc(d.url)}')" style="margin-left:8px">copy</button>`;
+    urlEl.className = 'product-url';
+    urlEl.innerHTML = `
+      <a href="${esc(d.url)}" target="_blank" rel="noopener">${esc(d.url)}</a>
+      <span class="product-url-actions">
+        <button class="copy-btn" onclick="copyText('${esc(d.url)}')">copy</button>
+        <a class="btn secondary product-open" href="${esc(d.url)}" target="_blank" rel="noopener">Open ↗</a>
+      </span>`;
   } else {
-    urlEl.innerHTML = '<span class="muted">No VirtualService host configured.</span>';
+    urlEl.className = 'muted';
+    urlEl.innerHTML = 'No VirtualService host configured — this stack is not exposed outside the cluster.';
   }
   const flags = d.featureFlags || {};
   const keys = Object.keys(flags).sort();
@@ -450,10 +456,13 @@ function renderProduct(d) {
   }
   box.innerHTML = keys.map(k => {
     const on = flags[k] === 'true';
-    return `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;padding:4px 0">
-      <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleFlag('${esc(k)}', this.checked)" style="width:auto;accent-color:var(--ok)">
-      <code style="flex:1">${esc(k)}</code>
-      <span class="comp-phase ${on ? 'Ready' : 'Failed'}" style="font-size:11px">${on ? 'on' : 'off'}</span>
+    return `<label class="flag-row">
+      <code class="flag-name">${esc(k)}</code>
+      <span class="flag-switch">
+        <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleFlag('${esc(k)}', this.checked)" aria-label="Toggle ${esc(k)}">
+        <span class="flag-track"><span class="flag-knob"></span></span>
+      </span>
+      <span class="flag-state ${on ? 'on' : 'off'}">${on ? 'on' : 'off'}</span>
     </label>`;
   }).join('');
 }

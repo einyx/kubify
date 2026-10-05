@@ -23,22 +23,22 @@ type Archive struct {
 
 // Record is one proxied LLM call stored in the archive.
 type Record struct {
-	ID          int64     `json:"id"`
-	SessionID   string    `json:"session_id"`
-	Time        time.Time `json:"time"`
-	Method      string    `json:"method"`
-	URL         string    `json:"url"`
-	Host        string    `json:"host"`
-	Model       string    `json:"model,omitempty"`
-	Status      int       `json:"status"`
-	DurationMS  int64     `json:"duration_ms"`
-	ReqBytes    int       `json:"req_bytes"`
-	RespBytes   int       `json:"resp_bytes"`
-	Action      string    `json:"action"`
-	ReqBody     string    `json:"req_body,omitempty"`
-	RespBody    string    `json:"resp_body,omitempty"`
-	Findings    []Finding `json:"findings,omitempty"`
-	Usage       *Usage    `json:"usage,omitempty"`
+	ID         int64     `json:"id"`
+	SessionID  string    `json:"session_id"`
+	Time       time.Time `json:"time"`
+	Method     string    `json:"method"`
+	URL        string    `json:"url"`
+	Host       string    `json:"host"`
+	Model      string    `json:"model,omitempty"`
+	Status     int       `json:"status"`
+	DurationMS int64     `json:"duration_ms"`
+	ReqBytes   int       `json:"req_bytes"`
+	RespBytes  int       `json:"resp_bytes"`
+	Action     string    `json:"action"`
+	ReqBody    string    `json:"req_body,omitempty"`
+	RespBody   string    `json:"resp_body,omitempty"`
+	Findings   []Finding `json:"findings,omitempty"`
+	Usage      *Usage    `json:"usage,omitempty"`
 }
 
 // SessionSummary is a rolled-up session row for list views.
@@ -57,16 +57,16 @@ type SessionSummary struct {
 
 // Stats is the dashboard payload — agentsview's front page, firewall flavor.
 type Stats struct {
-	TotalRequests   int            `json:"total_requests"`
-	TotalSessions   int            `json:"total_sessions"`
-	Blocked         int            `json:"blocked"`
-	Redacted        int            `json:"redacted"`
-	FindingsByKind  map[string]int `json:"findings_by_kind"`
-	TopModels       []ModelUsage   `json:"top_models"`
-	InputTokens     int64          `json:"input_tokens"`
-	OutputTokens    int64          `json:"output_tokens"`
-	CostMicro       int64          `json:"cost_micro"`
-	RecentBlocked   []Record       `json:"recent_blocked,omitempty"`
+	TotalRequests  int            `json:"total_requests"`
+	TotalSessions  int            `json:"total_sessions"`
+	Blocked        int            `json:"blocked"`
+	Redacted       int            `json:"redacted"`
+	FindingsByKind map[string]int `json:"findings_by_kind"`
+	TopModels      []ModelUsage   `json:"top_models"`
+	InputTokens    int64          `json:"input_tokens"`
+	OutputTokens   int64          `json:"output_tokens"`
+	CostMicro      int64          `json:"cost_micro"`
+	RecentBlocked  []Record       `json:"recent_blocked,omitempty"`
 }
 
 // ModelUsage is per-model token/cost rollup.

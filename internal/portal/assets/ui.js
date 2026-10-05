@@ -36,7 +36,6 @@ function toast(msg, ok = true) {
 }
 
 document.getElementById('search').addEventListener('input', refresh);
-document.getElementById('phase-filter').addEventListener('change', refresh);
 
 function copyText(t) {
   navigator.clipboard.writeText(t).then(() => toast('copied'));
