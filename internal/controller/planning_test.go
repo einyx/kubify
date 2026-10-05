@@ -113,3 +113,90 @@ func TestGenerateValueKinds(t *testing.T) {
 		t.Error("unknown kind should error")
 	}
 }
+
+func TestDefaultFrontendBaseURL(t *testing.T) {
+	t.Run("derives from VS host with placeholder", func(t *testing.T) {
+		v := map[string]interface{}{
+			"virtualService": map[string]interface{}{"host": "{{ namespace }}.meshx.foundation"},
+			"env":            map[string]interface{}{"auth0": map[string]interface{}{"enabled": "true"}},
+		}
+		defaultFrontendBaseURL("acme", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://acme.meshx.foundation/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("explicit value wins", func(t *testing.T) {
+		v := map[string]interface{}{
+			"virtualService": map[string]interface{}{"host": "acme.meshx.foundation"},
+			"env":            map[string]interface{}{"auth0": map[string]interface{}{"baseurl": "https://custom.example.com/"}},
+		}
+		defaultFrontendBaseURL("acme", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://custom.example.com/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("no host, no env map yet", func(t *testing.T) {
+		v := map[string]interface{}{"virtualService": map[string]interface{}{"host": "{{ namespace }}.demo.meshx.foundation"}}
+		defaultFrontendBaseURL("product-z", v)
+		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
+		if got != "https://product-z.demo.meshx.foundation/" {
+			t.Fatalf("baseurl = %v", got)
+		}
+	})
+	t.Run("missing host is a no-op", func(t *testing.T) {
+		v := map[string]interface{}{}
+		defaultFrontendBaseURL("acme", v)
+		if e, ok := v["env"]; ok {
+			t.Fatalf("env should stay absent, got %v", e)
+		}
+	})
+}
+
+func TestApplyFeatureFlags(t *testing.T) {
+	t.Run("merges normalized flags into frontend env", func(t *testing.T) {
+		v := map[string]interface{}{
+			"env": map[string]interface{}{
+				"feature_flags": map[string]interface{}{"connectors_enabled": "false"},
+			},
+		}
+		applyFeatureFlags(map[string]string{
+			"MX_FF_CONNECTORS_ENABLED":   "true",
+			"query_exports_enabled":      "true",
+			"MX_FF_LANDSCAPE_AUTO_STACK": "true",
+		}, "frontend", v)
+		ff := v["env"].(map[string]interface{})["feature_flags"].(map[string]interface{})
+		for k, want := range map[string]string{
+			"connectors_enabled":    "true",
+			"query_exports_enabled": "true",
+			"landscape_auto_stack":  "true",
+		} {
+			if got := ff[k]; got != want {
+				t.Fatalf("flag %s = %v, want %v", k, got, want)
+			}
+		}
+	})
+	t.Run("creates env structure when absent", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "frontend", v)
+		got := v["env"].(map[string]interface{})["feature_flags"].(map[string]interface{})["connectors_enabled"]
+		if got != "true" {
+			t.Fatalf("connectors_enabled = %v", got)
+		}
+	})
+	t.Run("non-frontend components untouched", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "backend", v)
+		if _, ok := v["env"]; ok {
+			t.Fatal("backend values should not gain env")
+		}
+	})
+	t.Run("empty flags no-op", func(t *testing.T) {
+		v := map[string]interface{}{}
+		applyFeatureFlags(nil, "frontend", v)
+		if len(v) != 0 {
+			t.Fatal("nil flags should not modify values")
+		}
+	})
+}
