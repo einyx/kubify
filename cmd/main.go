@@ -294,6 +294,7 @@ func main() {
 		Registry:        portal.NewRegistry("", mgr.GetClient()),
 		Emailer:         demoEmailer,
 		MaxTenants:      atoiEnv("DEMO_MAX_TENANTS", 10),
+		Target:          os.Getenv("DEMO_TARGET"),
 		DefaultTemplate: envOr("DEMO_DEFAULT_TEMPLATE", "full"),
 		TenantDomain:    envOr("DEMO_TENANT_DOMAIN", "meshx.foundation"),
 	}

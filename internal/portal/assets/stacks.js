@@ -62,6 +62,7 @@ async function refresh() {
         <td class="cell-mode">${esc(s.age)}</td>
       </tr>`;
     }).join('');
+    if (typeof loadDemos === 'function') loadDemos();
   } catch (e) {
     document.getElementById('list-error').textContent = e.message;
     const banner = document.getElementById('api-banner');
@@ -73,28 +74,63 @@ async function refresh() {
   }
 }
 
+const PHASE_COLORS = {
+  Ready: 'var(--ok)',
+  Progressing: 'var(--warn)',
+  Failed: 'var(--err)',
+  Pending: 'var(--pend)',
+  Degraded: 'var(--warn)',
+  Paused: 'var(--muted)',
+  Terminating: 'var(--muted)',
+};
+
 function renderStats(stacks) {
   const counts = {};
   for (const s of stacks) counts[s.phase] = (counts[s.phase] || 0) + 1;
   const order = ['Ready', 'Progressing', 'Failed', 'Pending', 'Degraded', 'Paused', 'Terminating'];
   const ready = stacks.reduce((n, s) => n + (s.phase === 'Ready' ? 1 : 0), 0);
   const ratio = stacks.length ? Math.round(ready / stacks.length * 100) : 0;
+
+  // Readiness ring in the page header.
+  const ring = document.getElementById('ready-ring');
+  if (ring) {
+    ring.style.setProperty('--ring', ratio + '%');
+    ring.dataset.tone = ratio === 100 ? 'ok' : ratio >= 50 ? 'warn' : 'err';
+    document.getElementById('ready-ring-pct').textContent = ratio + '%';
+    document.getElementById('ready-ring-sub').textContent =
+      `${ready} of ${stacks.length} ready`;
+  }
+
+  // Segmented distribution bar, proportional to phase counts.
+  const segs = order.filter(p => counts[p]).map(p =>
+    `<div class="phase-seg s-${p.toLowerCase()}" style="flex:${counts[p]}" title="${counts[p]} ${p}"></div>`).join('');
+
+  const active = document.getElementById('phase-filter').value;
   document.getElementById('stats').innerHTML = `
-    <div class="stat total">
-      <div class="stat-inner">
-        <div class="stat-num">${stacks.length}</div>
-        <div class="stat-label">Stacks · ${ratio}% ready</div>
-        <div class="bar-track" style="margin-top:10px">
-          <div class="bar-fill" style="width:${ratio}%"></div>
+    <div class="stats-strip">
+      <div class="stats-total">
+        <div class="stats-total-num">${stacks.length}</div>
+        <div class="stat-label">stacks total</div>
+      </div>
+      <div class="stats-body">
+        <div class="phase-dist">${segs || '<div class="phase-seg" style="flex:1"></div>'}</div>
+        <div class="phase-legend">
+          ${order.map(p => {
+            const n = counts[p] || 0;
+            return `<button class="phase-pill${n ? '' : ' zero'}${p === active ? ' active' : ''}"
+              onclick="filterPhase('${p}')" title="Filter by ${p}">
+              <span class="phase-dot" style="background:${PHASE_COLORS[p]}"></span>${p}
+              <span class="phase-pill-num">${n}</span>
+            </button>`; }).join('')}
         </div>
       </div>
-    </div>` + order.map(p => `
-    <div class="stat ${p.toLowerCase()}">
-      <div class="stat-inner">
-        <div class="stat-num">${counts[p] || 0}</div>
-        <div class="stat-label">${p}</div>
-      </div>
-    </div>`).join('');
+    </div>`;
+}
+
+function filterPhase(p) {
+  const sel = document.getElementById('phase-filter');
+  sel.value = sel.value === p ? '' : p; // click again to clear
+  refresh();
 }
 
 async function showDetail(ns, name, tab) {
@@ -153,6 +189,7 @@ async function fetchDetail(ns, name) {
     loadEvents(ns);
     syncPaused(d);
     renderValues(d);
+    renderProduct(d);
     loadBackups(ns);
     loadVault(ns);
     document.getElementById('cond-rows').innerHTML = (d.conditions || []).map(c => `
@@ -282,6 +319,7 @@ async function doDelete() {
     document.getElementById('del').close();
     hideDetail();
     refresh();
+  if (typeof loadDemos === 'function') loadDemos();
   } catch (e) { err.textContent = e.message; }
   btn.disabled = false;
 }
@@ -392,6 +430,48 @@ async function openValues(comp = '') {
   document.getElementById('values-json').value = saved == null ? '' : JSON.stringify(saved, null, 2);
   document.getElementById('values-error').textContent = '';
   document.getElementById('values').showModal();
+}
+
+function renderProduct(d) {
+  const urlEl = document.getElementById('product-url');
+  if (d.url) {
+    urlEl.innerHTML = `<a href="${esc(d.url)}" target="_blank" rel="noopener" style="color:var(--link)">${esc(d.url)}</a>
+      <button class="copy-btn" onclick="copyText('${esc(d.url)}')" style="margin-left:8px">copy</button>`;
+  } else {
+    urlEl.innerHTML = '<span class="muted">No VirtualService host configured.</span>';
+  }
+  const flags = d.featureFlags || {};
+  const keys = Object.keys(flags).sort();
+  setBadge('badge-flags', keys.length, false);
+  const box = document.getElementById('flags-rows');
+  if (!keys.length) {
+    box.innerHTML = '<span class="muted">No feature flags configured.</span>';
+    return;
+  }
+  box.innerHTML = keys.map(k => {
+    const on = flags[k] === 'true';
+    return `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px;padding:4px 0">
+      <input type="checkbox" ${on ? 'checked' : ''} onchange="toggleFlag('${esc(k)}', this.checked)" style="width:auto;accent-color:var(--ok)">
+      <code style="flex:1">${esc(k)}</code>
+      <span class="comp-phase ${on ? 'Ready' : 'Failed'}" style="font-size:11px">${on ? 'on' : 'off'}</span>
+    </label>`;
+  }).join('');
+}
+
+async function toggleFlag(key, on) {
+  if (!currentDetail || !currentData) return;
+  const { ns, name } = currentDetail;
+  const flags = Object.assign({}, currentData.featureFlags || {});
+  flags[key] = on ? 'true' : 'false';
+  try {
+    await fetch(`/api/stacks/${ns}/${name}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ featureFlags: flags }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
+    toast(`Flag ${key} ${on ? 'enabled' : 'disabled'}`, true);
+    fetchDetail(ns, name);
+  } catch (e) { toast(e.message, false); }
 }
 
 async function saveValues() {

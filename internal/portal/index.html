@@ -42,12 +42,32 @@
   <!-- Stack list -->
   <div id="list-view">
     <div class="page-header">
-      <div class="eyebrow">Infrastructure / Overview</div>
-      <h2>Stacks</h2>
-      <p class="page-description">Deployment health, components, and operations across your namespaces.</p>
+      <div>
+        <div class="eyebrow">Infrastructure / Overview</div>
+        <h2>Stacks</h2>
+        <p class="page-description">Deployment health, components, and operations across your namespaces.</p>
+      </div>
+      <div class="ready-ring" id="ready-ring" data-tone="ok" role="img" aria-label="Stack readiness">
+        <div class="ready-ring-pct" id="ready-ring-pct">–</div>
+        <div class="ready-ring-sub" id="ready-ring-sub"></div>
+      </div>
     </div>
 
-    <div class="stat-row" id="stats"></div>
+    <div id="stats"></div>
+
+    <!-- Demo requests (website submissions awaiting approval, or live demos) -->
+    <div class="card-outer" id="demos-card" style="display:none">
+      <div class="card-inner">
+        <div class="section-title" style="display:flex;justify-content:space-between;align-items:center">
+          <span>Demo requests <span class="badge warn" id="badge-demos"></span></span>
+          <button class="btn secondary" style="padding:3px 10px;font-size:11px;margin:8px" onclick="loadDemos()">Refresh</button>
+        </div>
+        <table>
+          <thead><tr><th>Email</th><th>Company</th><th>Phase</th><th>Tenant</th><th>Expires</th><th style="text-align:right">Actions</th></tr></thead>
+          <tbody id="demo-rows"></tbody>
+        </table>
+      </div>
+    </div>
 
     <div class="toolbar">
       <input id="search" class="tool-input" aria-label="Search stacks" placeholder="Search namespace or name…" autocomplete="off">
@@ -111,6 +131,7 @@
     </div>
     <div class="tabbar" id="tabbar">
       <button data-tab="components" class="active">Components <span class="badge" id="badge-components"></span></button>
+      <button data-tab="product">Product</button>
       <button data-tab="spec">Spec</button>
       <button data-tab="conditions">Conditions <span class="badge" id="badge-conditions"></span></button>
       <button data-tab="events">Events <span class="badge" id="badge-events"></span></button>
@@ -118,6 +139,22 @@
       <button data-tab="secrets">Secrets <span class="badge warn" id="badge-secrets"></span></button>
       <button data-tab="manifest">Manifest</button>
     </div>
+    <section data-tab="product">
+    <div class="card-outer" style="animation-delay:80ms">
+      <div class="card-inner">
+        <div class="section-title">Tenant URL</div>
+        <div id="product-url" class="muted" style="font-size:13px">-</div>
+      </div>
+    </div>
+    <div class="card-outer" style="animation-delay:100ms">
+      <div class="card-inner">
+        <div class="section-title">Feature flags <span class="badge" id="badge-flags"></span></div>
+        <div id="flags-rows" style="display:flex;flex-direction:column;gap:8px">
+          <span class="muted">No feature flags configured.</span>
+        </div>
+      </div>
+    </div>
+    </section>
     <section data-tab="spec">
     <div class="detail-spec card-outer">
       <div class="card-inner" id="spec-chips"></div>
@@ -485,6 +522,7 @@
 </dialog>
 
 <script defer src="/assets/stacks.js"></script>
+<script defer src="/assets/demos.js"></script>
 <script defer src="/assets/backups.js"></script>
 <script defer src="/assets/editor.js"></script>
 <script defer src="/assets/templates.js"></script>
