@@ -116,10 +116,7 @@ func (p *Portal) refreshAgentfws(ctx context.Context) {
 			if port.Name != "admin" && int(port.Port) != agentfwDefaultPort {
 				continue
 			}
-			fetch, err := p.agentfwPortForwardFetcher(svc.Namespace, int(port.Port))
-			if err != nil {
-				continue
-			}
+			fetch := p.agentfwFetcher(svc.Namespace, int(port.Port))
 			p.setAgentfwItem(agentfwItem{Label: lbl, Fetch: fetch})
 			break
 		}
@@ -172,10 +169,7 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 		if !ok || ns == "" || svc == "" {
 			return fmt.Errorf("portal: invalid agentfw service spec %q (want svc:<namespace>/<service>[:<port>])", strings.TrimPrefix(raw, "svc:"))
 		}
-		fetch, err := p.agentfwPortForwardFetcher(ns, 0)
-		if err != nil {
-			return err
-		}
+		fetch := p.agentfwFetcher(ns, 0)
 		p.setAgentfwItem(agentfwItem{Label: ns, Explicit: true, Fetch: fetch})
 		return nil
 	}
@@ -194,6 +188,29 @@ func (p *Portal) SetAgentfwURL(raw string) error {
 	}
 	p.setAgentfwItem(agentfwItem{Label: label, Explicit: true, Fetch: fetch})
 	return nil
+}
+
+// agentfwFetcher returns the right fetcher for where the portal runs:
+// in-cluster pods talk to the Service DNS directly (agentfw.<ns>.svc),
+// local dev runs shell out to kubectl port-forward.
+func (p *Portal) agentfwFetcher(ns string, port int) func(ctx context.Context, path string) (json.RawMessage, error) {
+	if port == 0 {
+		port = agentfwDefaultPort
+	}
+	if !p.outOfCluster {
+		client := &http.Client{Timeout: 10 * time.Second}
+		base := fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", agentfwSvcName, ns, port)
+		return func(ctx context.Context, path string) (json.RawMessage, error) {
+			return fetchJSON(ctx, client, base+path)
+		}
+	}
+	fetch, err := p.agentfwPortForwardFetcher(ns, port)
+	if err != nil {
+		return func(context.Context, string) (json.RawMessage, error) {
+			return nil, err
+		}
+	}
+	return fetch
 }
 
 // agentfwPortForwardFetcher manages a `kubectl port-forward` child for the
