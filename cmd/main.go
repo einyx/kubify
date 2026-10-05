@@ -303,7 +303,7 @@ func main() {
 	// Subscribe/pull transport: drain website demo requests from a Storage
 	// Queue when configured (env or kubo-system/demo-request-queue secret).
 	// The push transport (POST /api/demorequests on the portal) is always on.
-	if err := controller.StartQueueIngesterFromEnv(ctx, mgr.GetClient()); err != nil {
+	if err := controller.StartQueueIngesterFromEnv(ctx, mgr.GetAPIReader(), mgr.GetClient()); err != nil {
 		setupLog.Error(err, "unable to start demo request queue ingester")
 		os.Exit(1)
 	}

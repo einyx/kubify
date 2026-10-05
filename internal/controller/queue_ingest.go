@@ -186,11 +186,14 @@ func decodeQueuePayload(text string) (queuePayload, bool) {
 // StartQueueIngesterFromEnv wires the ingester when DEMO_QUEUE_URL is set
 // (env), or falls back to the kubo-system/demo-request-queue secret (url
 // key). Returns nil silently when unconfigured — push-only deployments.
-func StartQueueIngesterFromEnv(ctx context.Context, c client.Client) error {
+func StartQueueIngesterFromEnv(ctx context.Context, reader client.Reader, c client.Client) error {
 	queueURL := envOrController("DEMO_QUEUE_URL", "")
 	if queueURL == "" {
 		var s corev1.Secret
-		if err := c.Get(ctx, client.ObjectKey{Namespace: "kubo-system", Name: "demo-request-queue"}, &s); err != nil {
+		// reader must be the uncached APIReader: at startup the manager's
+		// cache is not synced yet and a cached read silently misses the
+		// secret, leaving the ingester unconfigured.
+		if err := reader.Get(ctx, client.ObjectKey{Namespace: "kubo-system", Name: "demo-request-queue"}, &s); err != nil {
 			return nil // not configured: push-only
 		}
 		queueURL = string(s.Data["url"])
