@@ -106,3 +106,22 @@ func TestLoadPricesAbsentFile(t *testing.T) {
 		t.Fatalf("missing prices file must be a no-op, got %v", err)
 	}
 }
+
+func TestLookupPricePrefixPrefersLongestMatch(t *testing.T) {
+	// Date-suffixed ids must price against their generation, not an older
+	// prefix that also matches (map iteration order is random).
+	for _, tc := range []struct{ model string; in, out float64 }{
+		{"claude-haiku-4-5-20251001", 1.00, 5.00},
+		{"claude-sonnet-4-5-20251215", 3.00, 15.00},
+		{"claude-sonnet-4-6", 3.00, 15.00},
+		{"claude-opus-4-5-20251101", 15.00, 75.00},
+	} {
+		p, ok := lookupPrice(tc.model)
+		if !ok {
+			t.Fatalf("%s: no price found", tc.model)
+		}
+		if p.in != tc.in || p.out != tc.out {
+			t.Fatalf("%s: got in=%v out=%v, want %v/%v", tc.model, p.in, p.out, tc.in, tc.out)
+		}
+	}
+}

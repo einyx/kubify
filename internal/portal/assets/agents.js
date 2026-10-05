@@ -1,7 +1,20 @@
 // ── Agent traffic (agentfw) ────────────────────────────────────────────
 const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [], lastSig: '' };
 const afwInt = n => (n ?? 0).toLocaleString('en-US');
-const afwCost = µ => { const d = (µ ?? 0) / 1e6; if (d === 0) return '$0'; if (d < 0.01) return '$' + d.toFixed(4); return '$' + d.toFixed(2); };
+const afwCost = µ => {
+  const d = (µ ?? 0) / 1e6;
+  if (d === 0) return '$0';
+  if (d < 0.01) return '$' + d.toFixed(6).replace(/0+$/, '').replace(/\.$/, '');
+  return '$' + d.toFixed(2);
+};
+// Friendlier session labels: ip-sessions drop the ephemeral port, long ids
+// truncate. The raw id stays available via the title tooltip / drill-down.
+const afwSessionLabel = id => {
+  if (!id) return '—';
+  let s = String(id);
+  if (s.startsWith('ip:')) s = s.replace(/:\d+$/, '');
+  return s.length > 28 ? s.slice(0, 27) + '…' : s;
+};
 // The aggregated API returns RFC3339 strings; the raw archive used unix
 // seconds — accept both.
 const afwDate = t => new Date(typeof t === 'number' ? t * 1000 : t);
@@ -136,14 +149,14 @@ async function afwSessions() {
       ${sessions.length ? `<table><thead><tr><th>Session</th><th>Product</th><th>Requests</th><th>Blocked</th><th>Findings</th><th>Tokens</th><th>Cost</th><th>Models</th><th>Last active</th></tr></thead>
       <tbody>${sessions.map(s => `
         <tr class="stack-row" onclick="afwDrill('${esc(s.session_id)}')">
-          <td class="cell-mode">${esc(s.session_id)}</td>
+          <td class="cell-mode" title="${esc(s.session_id)}">${esc(afwSessionLabel(s.session_id))}</td>
           <td class="cell-ns">${esc(s.product || '—')}</td>
           <td class="cell-count">${afwInt(s.requests)}</td>
           <td>${s.blocked ? `<span class="afw-badge block">${s.blocked}</span>` : '<span class="muted">0</span>'}</td>
           <td>${s.findings ? `<span class="afw-badge redact">${s.findings}</span>` : '<span class="muted">0</span>'}</td>
           <td class="cell-mode">${afwInt(s.input_tokens)} / ${afwInt(s.output_tokens)}</td>
           <td class="cell-mode">${afwCost(s.cost_micro)}</td>
-          <td class="cell-ns">${esc((s.models || []).slice(0, 2).join(', '))}</td>
+          <td class="cell-ns" title="${esc((s.models || []).join(', '))}">${esc((s.models || []).slice(0, 2).join(', '))}</td>
           <td class="cell-mode">${afwDay(s.last_seen)}</td>
         </tr>`).join('')}</tbody></table>` : '<div class="afw-empty">No sessions recorded yet</div>'}
     </div></div>`;
