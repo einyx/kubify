@@ -194,7 +194,14 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	if time.Now().After(deadline) {
 		return ctrl.Result{}, r.expire(ctx, &dr)
 	}
-	return ctrl.Result{RequeueAfter: time.Until(deadline)}, nil
+	// Requeue at the sooner of the TTL deadline and the mirror cadence:
+	// the phase must keep tracking the Stack (Ready flip → notify), so a
+	// 72h deadline must not suppress the 1-minute mirror.
+	requeue := time.Until(deadline)
+	if requeue > time.Minute {
+		requeue = time.Minute
+	}
+	return ctrl.Result{RequeueAfter: requeue}, nil
 }
 
 // admit enforces capacity caps and records the tenant/URL.
