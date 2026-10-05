@@ -49,6 +49,10 @@ var priceTable = map[string]price{
 	// Anthropic
 	"claude-opus-4":     {in: 15.00, out: 75.00},
 	"claude-sonnet-4":   {in: 3.00, out: 15.00},
+	"claude-opus-4-5":   {in: 15.00, out: 75.00},
+	"claude-sonnet-4-5": {in: 3.00, out: 15.00},
+	"claude-haiku-4-5":  {in: 1.00, out: 5.00},
+	"claude-sonnet-4-6": {in: 3.00, out: 15.00},
 	"claude-3-7-sonnet": {in: 3.00, out: 15.00},
 	"claude-3-5-sonnet": {in: 3.00, out: 15.00},
 	"claude-3-5-haiku":  {in: 0.80, out: 4.00},
@@ -84,10 +88,19 @@ func lookupPrice(model string) (price, bool) {
 	if p, ok := priceTable[m]; ok {
 		return p.withDefaults(), true
 	}
+	// Prefix match (date-suffixed model ids like claude-haiku-4-5-20251001).
+	// Longest matching key wins: "claude-sonnet-4-5" must outrank the older
+	// "claude-sonnet-4" for claude-sonnet-4-5-20251215, and map iteration
+	// order is random, so collect and compare explicitly.
+	best, bestLen := "", -1
 	for name, p := range priceTable {
-		if strings.HasPrefix(m, name) {
-			return p.withDefaults(), true
+		if strings.HasPrefix(m, name) && len(name) > bestLen {
+			best, bestLen = name, len(name)
+			_ = p
 		}
+	}
+	if bestLen > 0 {
+		return priceTable[best].withDefaults(), true
 	}
 	return price{}, false
 }
