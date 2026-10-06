@@ -71,16 +71,6 @@
 
     <div class="toolbar">
       <input id="search" class="tool-input" aria-label="Search stacks" placeholder="Search namespace or name…" autocomplete="off">
-      <select id="phase-filter" class="tool-select" aria-label="Filter by phase">
-        <option value="">All phases</option>
-        <option>Ready</option>
-        <option>Progressing</option>
-        <option>Failed</option>
-        <option>Pending</option>
-        <option>Degraded</option>
-        <option>Paused</option>
-        <option>Terminating</option>
-      </select>
     </div>
 
     <div class="card-outer">
@@ -141,16 +131,16 @@
     </div>
     <section data-tab="product">
     <div class="card-outer" style="animation-delay:80ms">
-      <div class="card-inner">
-        <div class="section-title">Tenant URL</div>
-        <div id="product-url" class="muted" style="font-size:13px">-</div>
-      </div>
-    </div>
-    <div class="card-outer" style="animation-delay:100ms">
-      <div class="card-inner">
-        <div class="section-title">Feature flags <span class="badge" id="badge-flags"></span></div>
-        <div id="flags-rows" style="display:flex;flex-direction:column;gap:8px">
-          <span class="muted">No feature flags configured.</span>
+      <div class="card-inner product-card">
+        <div class="product-section">
+          <div class="section-title">Tenant URL</div>
+          <div id="product-url" class="muted" style="font-size:13px">-</div>
+        </div>
+        <div class="product-section product-flags">
+          <div class="section-title">Feature flags <span class="badge" id="badge-flags"></span></div>
+          <div id="flags-rows" class="flags-grid">
+            <span class="muted">No feature flags configured.</span>
+          </div>
         </div>
       </div>
     </div>

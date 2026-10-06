@@ -281,6 +281,10 @@ spec:
         value: auth0-stg.meshx.app
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
         value: meshx-stg.eu.auth0.com
+      - name: MX_OPA_URL
+        value: http://opa:8181
+      - name: OPENAI_BASE_URL
+        value: http://agentfw:8080/https://api.openai.com
       sidecar:
         mcp:
           enabled: true
@@ -426,8 +430,9 @@ spec:
         security:
           allowInsecureImages: true
       image:
-        repository: bitnamilegacy/postgresql
-        tag: "16"
+        registry: meshxregistry.azurecr.io
+        repository: postgresql
+        tag: "18.6.0"
       primary:
         # Per-tenant dedicated instance sizing: the chart defaults were
         # 100m/128Mi requests with a 150m/192Mi limit — Postgres was CPU-
@@ -743,13 +748,7 @@ spec:
           MX_FOUNDATION_DATA_MCP_URL: http://backend:8765/mcp
           MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.meshx.foundation/ai/oauth/mcp-callback
           MX_DEFAULT_MODEL: claude-sonnet-4-6
-          # Egress via the tenant agentfw (forward proxy). All LLM/MCP egress is
-          # tunneled through agentfw:8080; internal services bypass it (and its
-          # blockPrivateEgress rule). Audit stream: kubectl -n {{.Tenant}} logs -f deploy/agentfw
-          HTTPS_PROXY: http://agentfw:8080
-          HTTP_PROXY: http://agentfw:8080
-          NO_PROXY: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
-          no_proxy: postgres-postgresql,backend,localhost,127.0.0.1,.svc,.cluster.local
+          ANTHROPIC_BASE_URL: http://agentfw:8080
 
     dai-backend:
       image:
@@ -775,6 +774,7 @@ spec:
           MX_NATS_AUTO_CREATE_STREAM: "true"
           MX_MONGO_DATABASE: "dai"
           MX_LLM_PROVIDER_TYPE: "anthropic"
+          ANTHROPIC_BASE_URL: http://agentfw:8080
           MX_AUTH0_DOMAIN: "auth0-stg.meshx.app"
           MX_AUTH0_ISSUER: "https://auth0-stg.meshx.app/"
           MX_AUTH0_AUDIENCE: "https://demo.meshx.foundation/"

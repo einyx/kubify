@@ -44,14 +44,14 @@ type QueueIngester struct {
 // queueMessage covers both wire formats: the REST API answers in XML
 // (PascalCase elements), tests may use JSON (camelCase).
 type queueMessage struct {
-	MessageID      string `xml:"MessageId" json:"messageId"`
-	PopReceipt     string `xml:"PopReceipt" json:"popReceipt"`
-	Text           string `xml:"MessageText" json:"messageText"`
-	DequeueCount   int64  `xml:"DequeueCount" json:"dequeueCount"`
-	VisibilityTO   int    `xml:"VisibilityTimeout" json:"visibilityTimeout"`
-	NextVisibleAt  string `xml:"NextVisibleTime" json:"nextVisibleTime"`
-	InsertedAt     string `xml:"InsertionTime" json:"insertionTime"`
-	ExpiresAt      string `xml:"ExpirationTime" json:"expirationTime"`
+	MessageID     string `xml:"MessageId" json:"messageId"`
+	PopReceipt    string `xml:"PopReceipt" json:"popReceipt"`
+	Text          string `xml:"MessageText" json:"messageText"`
+	DequeueCount  int64  `xml:"DequeueCount" json:"dequeueCount"`
+	VisibilityTO  int    `xml:"VisibilityTimeout" json:"visibilityTimeout"`
+	NextVisibleAt string `xml:"NextVisibleTime" json:"nextVisibleTime"`
+	InsertedAt    string `xml:"InsertionTime" json:"insertionTime"`
+	ExpiresAt     string `xml:"ExpirationTime" json:"expirationTime"`
 }
 
 // Start blocks until ctx is done, draining the queue every PollInterval.
