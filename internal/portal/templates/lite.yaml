@@ -151,6 +151,16 @@ spec:
     dai-frontend: basepath
     watcher: v2.0.25
     foundation-bootstrap: "0.1.36"
+  # OCI Helm chart pins in one place. These override the corresponding
+  # inline chartRef.chartVersion values and are editable through Git write-back.
+  chartVersions:
+    nats: "2.10.1"
+    postgres: "16.7.27"
+    kafka: "29.3.14"
+    frontend: "0.4.12"
+    watcher: "2.7.5"
+    trino: "1.36.0"
+    ai: "0.1.4"
   seedVault:
     # Product knowledge lives HERE, not in the controller: static entries
     # copy shared credentials from canonical kubo-system sources; generated
