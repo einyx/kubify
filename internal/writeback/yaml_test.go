@@ -12,7 +12,7 @@ func TestMutateFeatureFlagsPreservesComments(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(out)
-	for _, want := range []string{"# file comment", "# keep me", "old: \"true\"", "new: \"false\""} {
+	for _, want := range []string{"# file comment", "# keep me", "old: 'true'", "new: 'false'"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in %s", want, s)
 		}

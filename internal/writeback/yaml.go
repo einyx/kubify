@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -13,8 +14,9 @@ import (
 // document while retaining comments and the rest of the YAML node tree.
 func MutateFeatureFlags(src []byte, namespace, name string, expected, desired map[string]string) ([]byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(src))
-	var docs []*yaml.Node
 	found := false
+	start, end, indent := -1, -1, ""
+	var order []string
 	for {
 		var doc yaml.Node
 		if err := dec.Decode(&doc); err != nil {
@@ -26,7 +28,6 @@ func MutateFeatureFlags(src []byte, namespace, name string, expected, desired ma
 		if len(doc.Content) == 0 {
 			continue
 		}
-		docs = append(docs, &doc)
 		root := doc.Content[0]
 		if scalar(root, "apiVersion") != "platform.kubo.io/v1alpha1" || scalar(root, "kind") != "Stack" {
 			continue
@@ -50,22 +51,69 @@ func MutateFeatureFlags(src []byte, namespace, name string, expected, desired ma
 				return nil, fmt.Errorf("feature flag %s changed from expected %q to %q", k, v, current[k])
 			}
 		}
-		setStringMap(spec, "featureFlags", desired)
+		key := mappingKey(spec, "featureFlags")
+		if key == nil {
+			return nil, fmt.Errorf("Stack %s/%s has no featureFlags block", namespace, name)
+		}
+		start = key.Line - 1
+		indent = strings.Repeat(" ", key.Column-1)
+		end = blockEnd(src, start, key.Column-1)
+		if flags != nil {
+			for i := 0; i+1 < len(flags.Content); i += 2 {
+				order = append(order, flags.Content[i].Value)
+			}
+		}
 		found = true
+		break
 	}
 	if !found {
 		return nil, fmt.Errorf("Stack %s/%s not found", namespace, name)
 	}
-	var out bytes.Buffer
-	enc := yaml.NewEncoder(&out)
-	enc.SetIndent(2)
-	for _, doc := range docs {
-		if err := enc.Encode(doc); err != nil {
-			return nil, err
+	lines := strings.Split(string(src), "\n")
+	seen := map[string]bool{}
+	var replacement []string
+	replacement = append(replacement, indent+"featureFlags:")
+	for _, k := range order {
+		if v, ok := desired[k]; ok {
+			replacement = append(replacement, indent+"  "+k+": '"+v+"'")
+			seen[k] = true
 		}
 	}
-	enc.Close()
-	return out.Bytes(), nil
+	var extra []string
+	for k := range desired {
+		if !seen[k] {
+			extra = append(extra, k)
+		}
+	}
+	sort.Strings(extra)
+	for _, k := range extra {
+		replacement = append(replacement, indent+"  "+k+": '"+desired[k]+"'")
+	}
+	lines = append(lines[:start], append(replacement, lines[end:]...)...)
+	return []byte(strings.Join(lines, "\n")), nil
+}
+
+func mappingKey(n *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			return n.Content[i]
+		}
+	}
+	return nil
+}
+func blockEnd(src []byte, start, indent int) int {
+	lines := strings.Split(string(src), "\n")
+	for i := start + 1; i < len(lines); i++ {
+		line := lines[i]
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		spaces := len(line) - len(strings.TrimLeft(line, " "))
+		if spaces <= indent {
+			return i
+		}
+	}
+	return len(lines)
 }
 
 func mapping(n *yaml.Node, key string) *yaml.Node {
