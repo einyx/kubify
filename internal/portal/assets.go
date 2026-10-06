@@ -7,7 +7,7 @@ import (
 
 // Assets ship with the portal binary; no frontend build or runtime is required.
 //
-//go:embed assets/*.css assets/*.js
+//go:embed assets/*.css assets/*.js assets/fonts/*.woff2
 var assetFS embed.FS
 
 func serveAsset(w http.ResponseWriter, r *http.Request) {

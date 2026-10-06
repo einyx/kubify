@@ -14,6 +14,8 @@ spec:
   http:
     - match:
         - uri:
+            exact: /
+        - uri:
             exact: /marketplace
         - uri:
             exact: /api/marketplace/resolve
@@ -21,6 +23,12 @@ spec:
             exact: /api/marketplace/activate
         - uri:
             exact: /api/marketplace/webhook
+        - uri:
+            prefix: /assets/fonts/marketplace-
+      rewrite:
+        uriRegexRewrite:
+          match: ^/$
+          rewrite: /marketplace
       route:
         - destination:
             host: kubo-portal.kubo-system.svc.cluster.local
