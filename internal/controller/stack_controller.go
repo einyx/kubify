@@ -167,6 +167,10 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err := r.ensureVirtualService(ctx, &stack); err != nil {
 		return ctrl.Result{}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
 	}
+	// NOTE: deploys below may DELETE the VS again — a chart upgrade that
+	// turns its own virtualService off removes the object it created in an
+	// earlier revision. The post-deploy re-ensure below recreates it; keep
+	// both calls.
 
 	var bundleCharts map[string]*chart.Chart
 	var bundleImages map[string]bundleImage
@@ -450,6 +454,14 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	stack.Status.Components = statuses
+
+	// Re-ensure after deploys: a chart upgrade removing its own
+	// virtualService (enabled flipped to false) deletes the VS mid-reconcile
+	// even though the operator just created it above. The operator's VS is
+	// authoritative, so it wins the last word.
+	if err := r.ensureVirtualService(ctx, &stack); err != nil {
+		return ctrl.Result{}, r.fail(ctx, &stack, "VirtualServiceFailed", err)
+	}
 
 	if allReady {
 		stack.Status.Phase = "Ready"
