@@ -143,6 +143,9 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		// is logged and retried on the next reconcile.
 		log.Info("dns reconcile pending", "err", err.Error())
 	}
+	if err := r.ensureTenantAccess(ctx, &stack); err != nil {
+		log.Info("access app reconcile pending", "err", err.Error())
+	}
 
 	// Bootstrap seeding must run BEFORE propagation so a fresh tenant's
 	// kubo-system secrets exist on the very first pass (generated per-tenant
@@ -769,6 +772,9 @@ func (r *StackReconciler) finalize(ctx context.Context, stack *platformv1alpha1.
 	// hosts (best-effort — a CF API failure must not block finalization).
 	if err := r.deleteTenantDNS(ctx, stack); err != nil {
 		logf.FromContext(ctx).Error(err, "dns cleanup failed (continuing finalization)")
+	}
+	if err := r.deleteTenantAccess(ctx, stack); err != nil {
+		logf.FromContext(ctx).Error(err, "access app cleanup failed (continuing finalization)")
 	}
 
 	switch mode {
