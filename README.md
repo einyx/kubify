@@ -1,6 +1,6 @@
-# kubo
+# kubify
 
-Kubo facilitates the bundling, installing, and managing of container-native applications — and their coupled services — on Kubernetes.
+Kubify is Kubernetes tooling for the meshX platform. It facilitates the bundling, installing, and managing of container-native applications — and their coupled services — on Kubernetes.
 
 A Stack is a cloud-native application bundle: an OCI artifact that packages Helm charts, images, and values into a single, versioned, portable deliverable. Stacks can be composed to utilize whatever infrastructure or services you require — there's no vendor lock-in — and can be delivered across teams, organizations, and registries.
 
