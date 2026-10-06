@@ -136,6 +136,7 @@ spec:
     storage_explorer_enabled: "true"
     landscape_auto_stack: "false"
     landscape_search_focus: "false"
+    ttyd_enabled: "true"
   # All component image tags in one place (the controller compiles them into
   # each component's image.tag, overriding componentValues). Update tags here.
   imageTags:
@@ -175,6 +176,11 @@ spec:
             MX_AUTH0_CLIENT_ID: MX_AUTH0_CLIENT_ID
             MX_AUTH0_CLIENT_SECRET: MX_AUTH0_CLIENT_SECRET
             MX_AUTH0_DOMAIN: MX_AUTH0_DOMAIN
+      - name: "{{.Tenant}}-backend-auth0"
+        copyFrom:
+          name: kubo-shared-azure-openai
+          keys:
+            MX_OPENAI_API_KEY: MX_OPENAI_API_KEY
       - name: "{{.Tenant}}-frontend-auth0"
         generate:
           AUTH0_SECRET:
@@ -406,6 +412,29 @@ spec:
         value: meshx-stg.eu.auth0.com
       - name: MX_OPA_URL
         value: http://opa:8181
+      # TTYD uses the Foundation demo Azure OpenAI deployment. The API key is
+      # copied from kubo-system/kubo-shared-azure-openai into backend-auth0.
+      - name: MX_AZURE_OPENAI_ENDPOINT
+        value: https://az-vel-app-data-demo-uaen-oai.openai.azure.com
+      - name: MX_AZURE_OPENAI_API_VERSION
+        value: "2024-12-01-preview"
+      - name: MX_AZURE_OPENAI_DEPLOYMENT_NAME
+        value: gpt-4.1-mini
+      - name: MX_AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
+        value: text-embedding-3-large
+      - name: MX_OPENAI_API_KEY
+        valueFrom:
+          secretKeyRef:
+            name: backend-auth0
+            key: MX_OPENAI_API_KEY
+      - name: MX_OPENAI_MODEL
+        value: gpt-4.1-mini
+      - name: MX_OPENAI_EMBEDDING_MODEL
+        value: text-embedding-3-large
+      - name: MX_FF_TTYD_ENABLED
+        value: "true"
+      - name: MX_TTYD_AGENT_TOKEN_BUDGET
+        value: "64000"
       - name: OPENAI_BASE_URL
         value: http://agentfw:8080/https://api.openai.com
       sidecar:
