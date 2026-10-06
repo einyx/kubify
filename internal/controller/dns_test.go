@@ -42,7 +42,7 @@ func (s *cfStub) handler(t *testing.T) http.Handler {
 		switch {
 		case r.URL.Path == "/zones":
 			writeJSON(w, map[string]interface{}{"success": true,
-				"result": []map[string]interface{}{{"id": "zone-1", "name": "kubify.foundation"}}})
+				"result": []map[string]interface{}{{"id": "zone-1", "name": "example.com"}}})
 		case strings.Contains(r.URL.Path, "/dns_records") && r.Method == http.MethodGet:
 			out := []map[string]interface{}{}
 			name := r.URL.Query().Get("name")
@@ -137,7 +137,7 @@ func TestDNSManageHealAndDelete(t *testing.T) {
 			Data: map[string]string{"config.yaml": "tunnel: tunnel-1\ningress:\n  - service: http_status:404"}},
 	).Build()
 	r := &StackReconciler{Client: c, Scheme: sch}
-	stack := dnsTestStack("foundation-x.kubify.foundation")
+	stack := dnsTestStack("foundation-x.example.com")
 	ctx := context.Background()
 
 	// 1. Create both hosts.
@@ -159,15 +159,15 @@ func TestDNSManageHealAndDelete(t *testing.T) {
 
 	// 3. Simulate drift: content flipped out-of-band → next pass heals (PUT).
 	stub.mu.Lock()
-	rec := stub.records["foundation-x.kubify.foundation"]
+	rec := stub.records["foundation-x.example.com"]
 	rec.Content = "wrong-target.cfargotunnel.com"
-	stub.records["foundation-x.kubify.foundation"] = rec
+	stub.records["foundation-x.example.com"] = rec
 	stub.mu.Unlock()
 	if err := r.ensureTenantDNS(ctx, stack); err != nil {
 		t.Fatal(err)
 	}
 	stub.mu.Lock()
-	rec2 := stub.records["foundation-x.kubify.foundation"]
+	rec2 := stub.records["foundation-x.example.com"]
 	healed := rec2.Content == "tunnel-1.cfargotunnel.com"
 	stub.mu.Unlock()
 	if !healed {
@@ -189,7 +189,7 @@ func TestDNSManageHealAndDelete(t *testing.T) {
 // A record without the kubo tag (human-managed) must never be deleted.
 func TestDNSDeleteSkipsUntagged(t *testing.T) {
 	stub := newCFStub()
-	stub.records["foundation-x.kubify.foundation"] = cfRecord{ID: "human", Comment: "created by hand"}
+	stub.records["foundation-x.example.com"] = cfRecord{ID: "human", Comment: "created by hand"}
 	srv := httptest.NewServer(stub.handler(t))
 	defer srv.Close()
 	restore := setCFBase(srv.URL)
@@ -222,7 +222,7 @@ func TestDNSDisabledWithoutToken(t *testing.T) {
 	platformv1alpha1.AddToScheme(sch)
 	c := fake.NewClientBuilder().WithScheme(sch).Build()
 	r := &StackReconciler{Client: c, Scheme: sch}
-	if err := r.ensureTenantDNS(context.Background(), dnsTestStack("foundation-x.kubify.foundation")); err != nil {
+	if err := r.ensureTenantDNS(context.Background(), dnsTestStack("foundation-x.example.com")); err != nil {
 		t.Fatalf("disabled DNS should be a silent no-op, got: %v", err)
 	}
 }

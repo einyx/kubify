@@ -57,7 +57,7 @@ spec:
     processor: v0.2.33
     scheduler: v1.1.10
     storage-engine: v0.0.43
-    trino: "482-kubify"
+    trino: "482-Kubify"
     ai: v0.0.2
     dai-backend: v0.2.87
     dai-frontend: basepath
@@ -81,8 +81,8 @@ spec:
             kind: hex
             length: 64
         literal:
-          APP_BASE_URL: https://{{.Tenant}}.kubify.foundation
-          AUTH0_BASE_URL: https://{{.Tenant}}.kubify.foundation
+          APP_BASE_URL: https://{{.Tenant}}.example.com
+          AUTH0_BASE_URL: https://{{.Tenant}}.example.com
         copyFrom:
           name: kubo-shared-auth0-frontend
           keys:
@@ -129,9 +129,9 @@ spec:
         copyFrom:
           name: acr-pull-secret
           namespace: acr-cache-system
-      - name: kubifyregistry-helm-secret
+      - name: registry-helm-secret
         copyFrom:
-          name: kubifyregistry-helm-secret
+          name: registry-helm-secret
           namespace: acr-cache-system
     generated:
       # Pre-populates the Helm-owned Secret declared above. Without this,
@@ -215,7 +215,7 @@ spec:
   componentValues:
     backend:
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/backend
+        repository: registry.example.com/cached/ecr-vendor/foundation/backend
       # The chart ships an HPA but no resource requests, so its metrics
       # always fail and the deployment stays at 1 replica — every rollout
       # is a full tenant outage. Requests/limits mirror the foundation
@@ -232,9 +232,9 @@ spec:
           memory: 4Gi
       config:
         auth0:
-          audience: "https://demo.kubify.foundation/"
+          audience: "https://demo.example.com/"
           client_id: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
-          domain: auth0-stg.kubify.app
+          domain: auth.example.com
           enabled: true
         kafka:
           cluster_host: kafka:9092
@@ -263,13 +263,13 @@ spec:
           connector_scheduling_enabled: true
         mcp:
           enabled: true
-          publicUrl: https://{{.Tenant}}.kubify.foundation
-          auth0Audience: "https://demo.kubify.foundation/"
+          publicUrl: https://{{.Tenant}}.example.com
+          auth0Audience: "https://demo.example.com/"
       env:
       # Data-system connector image: use the ACR mirror path (the default is
       # the raw ECR registry, which cluster nodes cannot pull from).
       - name: MX_DOCKER_REPOSITORY
-        value: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/foundation-data
+        value: registry.example.com/cached/ecr-vendor/foundation/foundation-data
       # The backend image defaults its postgres user to a legacy name — pin it
       # to the auth.username this template provisions.
       - name: MX_POSTGRES_USER
@@ -298,9 +298,9 @@ spec:
       - name: MX_PRODUCT_API_URL
         value: http://localhost:65432
       - name: MX_AUTH0_DOMAIN
-        value: auth0-stg.kubify.app
+        value: auth.example.com
       - name: MX_AUTH0_MANAGEMENT_DOMAIN
-        value: kubify-stg.eu.auth0.com
+        value: tenant.eu.auth0.com
       - name: MX_OPA_URL
         value: http://opa:8181
       - name: OPENAI_BASE_URL
@@ -314,7 +314,7 @@ spec:
 
     frontend:
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/frontend
+        repository: registry.example.com/cached/ecr-vendor/foundation/frontend
       # Match the foundation frontend: idle use is ~100Mi and SSR bursts go
       # higher — 256Mi limits OOMKill under real load.
       resources:
@@ -346,9 +346,9 @@ spec:
         enabled: true
         gateway: product/product-gateway
         gatewayNamespace: product
-        host: "{{.Tenant}}.kubify.foundation"
+        host: "{{.Tenant}}.example.com"
         additionalHosts:
-        - "{{.Tenant}}.kubify.foundation"
+        - "{{.Tenant}}.example.com"
         extraHttp:
         - name: dai
           match:
@@ -407,7 +407,7 @@ spec:
             - DELETE
             - OPTIONS
             allowOrigins:
-            - exact: https://{{.Tenant}}.kubify.foundation
+            - exact: https://{{.Tenant}}.example.com
           destination:
             host: frontend
             port: 80
@@ -440,8 +440,8 @@ spec:
 
     opa:
       image:
-        registry: kubifyregistry.azurecr.io
-        repository: cached/ecr-kubify/foundation/opa
+        registry: registry.example.com
+        repository: cached/ecr-vendor/foundation/opa
       env:
         API_BASE_URL: http://backend:65432
 
@@ -454,7 +454,7 @@ spec:
         security:
           allowInsecureImages: true
       image:
-        registry: kubifyregistry.azurecr.io
+        registry: registry.example.com
         repository: postgresql
       primary:
         # Per-tenant dedicated instance sizing: the chart defaults were
@@ -502,7 +502,7 @@ spec:
       autoscaling:
         enabled: false
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/processor
+        repository: registry.example.com/cached/ecr-vendor/foundation/processor
       config:
         kafka:
           cluster_host: kafka:9092
@@ -536,7 +536,7 @@ spec:
 
     scheduler:
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/scheduler
+        repository: registry.example.com/cached/ecr-vendor/foundation/scheduler
       config:
         MX_KAFKA_CLUSTER_HOST: kafka:9092
         MX_POSTGRES_DATABASE: product
@@ -556,7 +556,7 @@ spec:
         enabled: true
         size: 20Gi
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/storage-engine
+        repository: registry.example.com/cached/ecr-vendor/foundation/storage-engine
       externalSecrets:
         enabled: false
         aws:
@@ -602,7 +602,7 @@ spec:
 
     trino:
       image:
-        repository: kubifyregistry.azurecr.io/trinodb/trino
+        repository: registry.example.com/trinodb/trino
       imagePullSecrets:
       - name: acr-pull-secret
       serviceAccount:
@@ -742,7 +742,7 @@ spec:
 
     ai:
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/ai
+        repository: registry.example.com/cached/ecr-vendor/foundation/ai
       imagePullSecrets:
       - name: acr-pull-secret
       externalSecret:
@@ -763,17 +763,17 @@ spec:
           MX_DB_PORT: "5432"
           MX_DB_NAME: ai
           MX_DB_USER: product
-          MX_AUTH0_DOMAIN: auth0-stg.kubify.app
+          MX_AUTH0_DOMAIN: auth.example.com
           MX_AUTH0_CLIENT_ID: VaSTC5RcCTSQlphYUySBNlnmqMyzVvf8
-          MX_AUTH0_AUDIENCE: "https://demo.kubify.foundation/"
+          MX_AUTH0_AUDIENCE: "https://demo.example.com/"
           MX_FOUNDATION_DATA_MCP_URL: http://backend:8765/mcp
-          MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.kubify.foundation/ai/oauth/mcp-callback
+          MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.example.com/ai/oauth/mcp-callback
           MX_DEFAULT_MODEL: claude-sonnet-4-6
           ANTHROPIC_BASE_URL: http://agentfw:8080
 
     dai-backend:
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/dai/backend
+        repository: registry.example.com/cached/ecr-vendor/dai/backend
       imagePullSecrets:
       - name: acr-pull-secret
       migrations:
@@ -795,9 +795,9 @@ spec:
           MX_MONGO_DATABASE: "dai"
           MX_LLM_PROVIDER_TYPE: "anthropic"
           ANTHROPIC_BASE_URL: http://agentfw:8080
-          MX_AUTH0_DOMAIN: "auth0-stg.kubify.app"
-          MX_AUTH0_ISSUER: "https://auth0-stg.kubify.app/"
-          MX_AUTH0_AUDIENCE: "https://demo.kubify.foundation/"
+          MX_AUTH0_DOMAIN: "auth.example.com"
+          MX_AUTH0_ISSUER: "https://auth.example.com/"
+          MX_AUTH0_AUDIENCE: "https://demo.example.com/"
           MX_AUTH0_ENABLED: "true"
           MX_ENV: "production"
           MX_RELEASE_TAG: "v0.2.87"
@@ -809,7 +809,7 @@ spec:
 
     dai-frontend:
       image:
-        repository: kubifyregistry.azurecr.io/foundation/dai-frontend
+        repository: registry.example.com/foundation/dai-frontend
       imagePullSecrets:
       - name: acr-pull-secret
       virtualService:
@@ -818,14 +818,14 @@ spec:
       - name: NEXT_PUBLIC_BASE_PATH
         value: /dai
       - name: AUTH0_ISSUER_BASE_URL
-        value: https://auth0-stg.kubify.app
+        value: https://auth.example.com
       - name: AUTH0_BASE_URL
-        value: https://{{.Tenant}}.kubify.foundation/dai
+        value: https://{{.Tenant}}.example.com/dai
       # Origin only — no /dai suffix. The app already serves under
       # NEXT_PUBLIC_BASE_PATH=/dai and prefixes it itself; a suffixed
       # APP_BASE_URL doubles every redirect (/dai/dai/auth/callback).
       - name: APP_BASE_URL
-        value: https://{{.Tenant}}.kubify.foundation
+        value: https://{{.Tenant}}.example.com
       - name: AUTH0_DOMAIN
         valueFrom:
           secretKeyRef:
@@ -858,14 +858,14 @@ spec:
       # MX_AUTH0_AUDIENCE. Without it every authenticated API call 403s
       # with "Audience doesn't match".
       - name: AUTH0_AUDIENCE
-        value: https://demo.kubify.foundation/
+        value: https://demo.example.com/
 
     watcher:
       replicaCount: 1
       autoscaling:
         enabled: false
       image:
-        repository: kubifyregistry.azurecr.io/cached/ecr-kubify/foundation/watcher
+        repository: registry.example.com/cached/ecr-vendor/foundation/watcher
       config:
         # Chart 2.7.5+: ship the corrected SparkApplication template (the one
         # baked into images <= v2.0.25 omits the ConfigMap volume, killing all
@@ -889,7 +889,7 @@ spec:
       fullnameOverride: watcher-{{.Tenant}}
 
   extraBundles:
-  - url: oci://ghcr.io/kubifydata/dai-bundle:0.0.8
+  - url: oci://ghcr.io/example/dai-bundle:0.0.8
     secretRef:
       name: ghcr-pull-secret
 
@@ -902,7 +902,7 @@ spec:
       chartRef:
         chartName: nats
         chartVersion: 2.10.1
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       name: nats
       scope: Namespaced
     - chartPullSecretRef:
@@ -910,14 +910,14 @@ spec:
       chartRef:
         chartName: postgresql
         chartVersion: 16.7.27
-        repoURL: oci://ghcr.io/kubifydata/charts
+        repoURL: oci://ghcr.io/example/charts
       name: postgres
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: storage-engine
-        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+        repoURL: oci://registry.example.com/cached/ecr-vendor/foundation-charts
       dependsOn:
       - postgres
       name: storage-engine
@@ -927,16 +927,16 @@ spec:
       chartRef:
         chartName: kafka
         chartVersion: 29.3.14
-        repoURL: oci://ghcr.io/kubifydata/charts
+        repoURL: oci://ghcr.io/example/charts
       dependsOn:
       - postgres
       name: kafka
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: backend
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       dependsOn:
       - postgres
       - kafka
@@ -945,17 +945,17 @@ spec:
       name: backend
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: frontend
         chartVersion: 0.4.12
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       dependsOn:
       - backend
       name: frontend
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: watcher
         # 2.7.5 carries config.spark_template_overlay (fixes data-system
@@ -963,7 +963,7 @@ spec:
         # <...>-source.py"). Activates on merge of foundation-charts#221 +
         # CI publish; until then the overlay must be applied manually.
         chartVersion: 2.7.5
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       dependsOn:
       - backend
       dependsOnReady:
@@ -971,28 +971,28 @@ spec:
       name: watcher
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: opa
-        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+        repoURL: oci://registry.example.com/cached/ecr-vendor/foundation-charts
       dependsOn:
       - backend
       name: opa
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: scheduler
-        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
+        repoURL: oci://registry.example.com/cached/ecr-vendor/foundation-charts
       dependsOn:
       - backend
       name: scheduler
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: processor
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       dependsOn:
       - backend
       name: processor
@@ -1002,18 +1002,18 @@ spec:
       chartRef:
         chartName: trino
         chartVersion: 1.36.0
-        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/trinodb-charts
+        repoURL: oci://registry.example.com/cached/ecr-vendor/trinodb-charts
       dependsOn:
       - opa
       - storage-engine
       name: trino
       scope: Namespaced
     - chartPullSecretRef:
-        name: kubifyregistry-helm-secret
+        name: registry-helm-secret
       chartRef:
         chartName: product-ai
         chartVersion: 0.1.2
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://registry.example.com/kubo/charts
       dependsOn:
       - backend
       - postgres

@@ -16,7 +16,7 @@ func TestProductTemplateInRegistry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tpl.Meta.ID != "full" || !strings.Contains(tpl.Body, "{{.Tenant}}.kubify.foundation") {
+	if tpl.Meta.ID != "full" || !strings.Contains(tpl.Body, "{{.Tenant}}.example.com") {
 		t.Fatalf("template: %+v", tpl.Meta)
 	}
 	raw, err := builtinFS.ReadFile("templates/full.yaml")

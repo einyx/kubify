@@ -381,10 +381,10 @@ func generateValue(g platformv1alpha1.GeneratedKey) (generatedValue, error) {
 			return generatedValue{}, err
 		}
 		doc := map[string]interface{}{
-			"scheduler@kubify.io": map[string]interface{}{
+			"scheduler@example.com": map[string]interface{}{
 				"password": base64.RawURLEncoding.EncodeToString(password),
 				"is_admin": true,
-				"username": "scheduler@kubify.io",
+				"username": "scheduler@example.com",
 				"keypair": map[string]string{
 					"access_key_id":     "AKIA" + strings.ToUpper(hex.EncodeToString(accessKey)),
 					"secret_access_key": base64.RawURLEncoding.EncodeToString(secretKey),

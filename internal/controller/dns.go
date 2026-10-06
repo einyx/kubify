@@ -108,8 +108,8 @@ func (c *cfDNSClient) do(req *http.Request, out interface{}) error {
 }
 
 // zoneIDFor resolves the zone id whose name is the longest suffix match of
-// the hostname (e.g. host foundation-a.kubify.foundation matches zone
-// kubify.foundation, not a shorter/other zone).
+// the hostname (e.g. host foundation-a.example.com matches zone
+// example.com, not a shorter/other zone).
 func (c *cfDNSClient) zoneIDFor(ctx context.Context, host string) (string, error) {
 	var zones []struct {
 		ID   string `json:"id"`

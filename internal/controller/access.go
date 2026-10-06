@@ -22,7 +22,7 @@ var (
 	cfAccessTag       = "kubo:"                       // name prefix for managed apps
 	cfAccessSecretKey = "account_id"                  // extra key in kubo-cloudflare-api-token
 	cfAccessIdPKey    = "access_idp_id"               // SSO identity provider UUID
-	cfAccessDomainKey = "access_allowed_email_domain" // e.g. "kubify.io"
+	cfAccessDomainKey = "access_allowed_email_domain" // e.g. "example.com"
 )
 
 type cfAccessClient struct {
@@ -48,7 +48,7 @@ func newCFAccessClient(ctx context.Context, c client.Client) (*cfAccessClient, e
 	idpID := strings.TrimSpace(string(sec.Data[cfAccessIdPKey]))
 	emailDomain := strings.TrimSpace(string(sec.Data[cfAccessDomainKey]))
 	if emailDomain == "" {
-		emailDomain = "kubify.io"
+		emailDomain = "example.com"
 	}
 	dns, _ := newCFDNSClient(ctx, c)
 	return &cfAccessClient{
@@ -152,7 +152,7 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 	return created.ID, nil
 }
 
-// ensureAllowPolicy ensures an "allow kubify.io" policy exists on the app.
+// ensureAllowPolicy ensures an "allow example.com" policy exists on the app.
 func (ac *cfAccessClient) ensureAllowPolicy(ctx context.Context, appID string) error {
 	var policies []cfAccessPolicy
 	if err := ac.get(ctx, fmt.Sprintf("/accounts/%s/access/apps/%s/policies", ac.accountID, appID), &policies); err != nil {

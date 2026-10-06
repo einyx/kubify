@@ -266,7 +266,7 @@ func (r *DemoRequestReconciler) admit(ctx context.Context, dr *platformv1alpha1.
 		}
 		if live >= r.MaxTenants {
 			return r.setStatus(ctx, dr, platformv1alpha1.DemoRequestFailed,
-				fmt.Sprintf("demo capacity reached (%d live); contact hello@kubify.io", r.MaxTenants))
+				fmt.Sprintf("demo capacity reached (%d live); contact support@example.com", r.MaxTenants))
 		}
 	}
 	tenant := tenantSlug(dr.Spec.Company, dr.Spec.Email)
@@ -279,7 +279,7 @@ func (r *DemoRequestReconciler) tenantDomain() string {
 	if r.TenantDomain != "" {
 		return r.TenantDomain
 	}
-	return "kubify.foundation"
+	return "example.com"
 }
 
 // errNamespaceTerminating marks a tenant whose namespace is mid-deletion
@@ -444,8 +444,8 @@ func (a *ACSDemoEmailer) SendDemoReady(ctx context.Context, to, tenant, tenantUR
 		return err
 	}
 	api := endpoint + "/emails:send?api-version=2023-03-31"
-	subject := "Your kubify demo is ready"
-	text := fmt.Sprintf("Hi,\n\nYour kubify demo environment is ready:\n\n  %s\n\nIt will be automatically removed 72 hours after creation.\n\nIf you have any questions, just reply to this email.\n\n— kubify", tenantURL)
+	subject := "Your Kubify demo is ready"
+	text := fmt.Sprintf("Hi,\n\nYour Kubify demo environment is ready:\n\n  %s\n\nIt will be automatically removed 72 hours after creation.\n\nIf you have any questions, just reply to this email.\n\n— Kubify", tenantURL)
 	payload := map[string]any{
 		"senderAddress": a.Sender,
 		"content": map[string]any{
@@ -455,7 +455,7 @@ func (a *ACSDemoEmailer) SendDemoReady(ctx context.Context, to, tenant, tenantUR
 		"recipients": map[string]any{
 			"to": []map[string]any{{"address": to, "displayName": to}},
 		},
-		"replyTo": []map[string]any{{"address": "hello@kubify.io", "displayName": "kubify"}},
+		"replyTo": []map[string]any{{"address": "support@example.com", "displayName": "Kubify"}},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

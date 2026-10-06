@@ -23,7 +23,7 @@ import (
 
 const (
 	agentfwName  = "agentfw"
-	agentfwImage = "kubifyregistry.azurecr.io/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
+	agentfwImage = "registry.example.com/kubo/agentfw:main" // ACR mirror — GHCR is rate-limited from clusters; sync via CI or `docker push`
 	agentfwPort  = 8080
 	// Admin endpoint: kill switch + session-archive viewer. The portal's
 	// agentfw integration proxies this port (svc:<ns>/agentfw:8081).

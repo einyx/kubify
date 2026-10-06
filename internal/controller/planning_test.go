@@ -118,18 +118,18 @@ func TestGenerateValueKinds(t *testing.T) {
 func TestDefaultFrontendBaseURL(t *testing.T) {
 	t.Run("derives from VS host with placeholder", func(t *testing.T) {
 		v := map[string]interface{}{
-			"virtualService": map[string]interface{}{"host": "{{ namespace }}.kubify.foundation"},
+			"virtualService": map[string]interface{}{"host": "{{ namespace }}.example.com"},
 			"env":            map[string]interface{}{"auth0": map[string]interface{}{"enabled": "true"}},
 		}
 		defaultFrontendBaseURL("acme", v)
 		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
-		if got != "https://acme.kubify.foundation/" {
+		if got != "https://acme.example.com/" {
 			t.Fatalf("baseurl = %v", got)
 		}
 	})
 	t.Run("explicit value wins", func(t *testing.T) {
 		v := map[string]interface{}{
-			"virtualService": map[string]interface{}{"host": "acme.kubify.foundation"},
+			"virtualService": map[string]interface{}{"host": "acme.example.com"},
 			"env":            map[string]interface{}{"auth0": map[string]interface{}{"baseurl": "https://custom.example.com/"}},
 		}
 		defaultFrontendBaseURL("acme", v)
@@ -139,10 +139,10 @@ func TestDefaultFrontendBaseURL(t *testing.T) {
 		}
 	})
 	t.Run("no host, no env map yet", func(t *testing.T) {
-		v := map[string]interface{}{"virtualService": map[string]interface{}{"host": "{{ namespace }}.demo.kubify.foundation"}}
+		v := map[string]interface{}{"virtualService": map[string]interface{}{"host": "{{ namespace }}.demo.example.com"}}
 		defaultFrontendBaseURL("product-z", v)
 		got := v["env"].(map[string]interface{})["auth0"].(map[string]interface{})["baseurl"]
-		if got != "https://product-z.demo.kubify.foundation/" {
+		if got != "https://product-z.demo.example.com/" {
 			t.Fatalf("baseurl = %v", got)
 		}
 	})

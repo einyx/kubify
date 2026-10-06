@@ -20,8 +20,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -43,8 +43,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -296,7 +296,7 @@ func main() {
 		MaxTenants:      atoiEnv("DEMO_MAX_TENANTS", 10),
 		Target:          os.Getenv("DEMO_TARGET"),
 		DefaultTemplate: envOr("DEMO_DEFAULT_TEMPLATE", "full"),
-		TenantDomain:    envOr("DEMO_TENANT_DOMAIN", "kubify.foundation"),
+		TenantDomain:    envOr("DEMO_TENANT_DOMAIN", "example.com"),
 	}
 	if demoEmailer == nil {
 		setupLog.Info("demo request emailer disabled (no kubo-system/demo-request-email secret)")

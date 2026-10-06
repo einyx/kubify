@@ -8,7 +8,7 @@
 //
 // The export file is plaintext — encrypt it (age/gpg) before storing it
 // anywhere shared. Shared secrets (ghcr-pull-secret, acr-pull-secret,
-// kubifyregistry-helm-secret) can only come from export/import or manual
+// registry-helm-secret) can only come from export/import or manual
 // creation; they are never adopted from tenant namespaces.
 package main
 

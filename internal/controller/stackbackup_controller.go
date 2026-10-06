@@ -26,7 +26,7 @@ import (
 
 const (
 	stackBackupSA   = "kubo-stackbackup"
-	defaultPGImage  = "kubifyregistry.azurecr.io/kubo/stack-backup:pg17" // pg_dump/psql v17 + mc bundled (runtime downloads break behind proxies)
+	defaultPGImage  = "registry.example.com/kubo/stack-backup:pg17" // pg_dump/psql v17 + mc bundled (runtime downloads break behind proxies)
 	defaultPGHost   = "postgres-postgresql"
 	defaultPGSecret = "postgres-postgresql"
 	defaultPGPwdKey = "postgres-password"
