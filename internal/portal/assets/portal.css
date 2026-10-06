@@ -746,13 +746,6 @@
     padding: 8px 12px; font-size: 13px;
   }
   .tool-input { flex: 1; max-width: 320px; }
-  .detail-spec { margin-bottom: 14px; }
-  .spec-chip {
-    display: inline-block; margin: 4px 6px 4px 0; padding: 4px 12px;
-    background: rgba(68,147,248,.08); border: 1px solid rgba(68,147,248,.25);
-    border-radius: 99px; font-size: 12px;
-  }
-  .spec-key { color: var(--primary); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .05em; margin-right: 4px; }
   .section-title {
     font-size: 10px; color: var(--primary); text-transform: uppercase;
     letter-spacing: .18em; font-weight: 600; padding: 16px 16px 4px;
@@ -1021,7 +1014,6 @@
   html[data-theme='dark'] select { background: #1b1f26; color: var(--foreground); }
   html[data-theme='dark'] .dep-badge,
   html[data-theme='dark'] .img-chip,
-  html[data-theme='dark'] .spec-chip { background: rgba(255,255,255,0.05); border-color: var(--border); }
   html[data-theme='dark'] dialog {
     background: var(--card);
     border-color: rgba(255,255,255,0.12);

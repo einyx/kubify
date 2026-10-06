@@ -202,7 +202,6 @@ async function fetchDetail(ns, name) {
       </tr>`;}).join('')
       || '<tr class="empty-row"><td colspan="5">No component status yet.</td></tr>';
     for (const name of expandedComps) renderComponentDetail(name);
-    renderSpec(d);
     setBadge('badge-components', d.components.length, false);
     setBadge('badge-conditions', (d.conditions || []).length, false);
     loadEvents(ns);
@@ -290,19 +289,6 @@ async function renderComponentDetail(name) {
     const box2 = document.getElementById('comp-pods-' + CSS.escape(name));
     if (box2) { box2.className = ''; box2.innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
   }
-}
-
-function renderSpec(d) {
-  const chips = [];
-  if (d.bundle) chips.push(['Bundle', d.bundle]);
-  if (d.operators) for (const [k, v] of Object.entries(d.operators)) {
-    if (v) chips.push(['Operator', k]);
-  }
-  if (d.exclude && d.exclude.length) chips.push(['Excluded', d.exclude.join(', ')]);
-  const html = chips.map(([k, v]) =>
-    `<span class="spec-chip"><span class="spec-key">${esc(k)}</span> ${esc(v)}</span>`).join('');
-  document.getElementById('spec-chips').innerHTML =
-    html || '<span class="muted" style="font-size:12px">No spec highlights.</span>';
 }
 
 function askDelete() {
