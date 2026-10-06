@@ -37,6 +37,9 @@ import (
 //	GET  /healthz              liveness (always OK once serving)
 //	GET  /readyz               readiness (K8s API reachable)
 //	GET  /metrics              Prometheus metrics
+//	GET  /api/marketplace/health  Marketplace credential readiness
+//	POST /api/marketplace/resolve  resolve a Marketplace purchase token
+//	POST /api/marketplace/activate activate a resolved subscription
 //
 // The portal is unauthenticated by design (it is a local operator tool):
 // requests whose Host is not a loopback form are rejected, which defeats
@@ -63,6 +66,34 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 	}
 
 	handle("GET /assets/", serveAsset)
+	handle("GET /api/marketplace/health", func(w http.ResponseWriter, r *http.Request) {
+		_, err := p.marketplaceClient(r.Context())
+		respond(w, r, map[string]bool{"configured": err == nil}, err)
+	})
+	handle("POST /api/marketplace/resolve", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			Token string `json:"token"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		out, err := p.ResolveMarketplace(r.Context(), in.Token)
+		respond(w, r, out, err)
+	})
+	handle("POST /api/marketplace/activate", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			SubscriptionID string `json:"subscriptionId"`
+			PlanID         string `json:"planId"`
+			Quantity       int32  `json:"quantity"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&in); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		err := p.ActivateMarketplace(r.Context(), in.SubscriptionID, in.PlanID, in.Quantity)
+		respond(w, r, map[string]bool{"activated": err == nil}, err)
+	})
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		p.refreshAgentfws(r.Context()) // nav reflects discovered products immediately
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
