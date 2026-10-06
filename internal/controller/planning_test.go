@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -225,11 +226,39 @@ func TestApplyFeatureFlags(t *testing.T) {
 			t.Fatalf("connectors_enabled = %v", got)
 		}
 	})
-	t.Run("non-frontend components untouched", func(t *testing.T) {
+	t.Run("backend compiles MX_FF_ env entries", func(t *testing.T) {
+		v := map[string]interface{}{"env": []interface{}{
+			map[string]interface{}{"name": "MX_POSTGRES_USER", "value": "product"},
+			map[string]interface{}{"name": "MX_FF_TTYD_ENABLED", "value": "false"},
+		}}
+		applyFeatureFlags(map[string]string{
+			"ttyd_enabled":               "true",
+			"MX_FF_LANDSCAPE_AUTO_STACK": "false",
+		}, "backend", v)
+		env := v["env"].([]interface{})
+		got := map[string]string{}
+		for _, e := range env {
+			m := e.(map[string]interface{})
+			got[m["name"].(string)] = m["value"].(string)
+		}
+		if got["MX_FF_TTYD_ENABLED"] != "true" {
+			t.Fatalf("ttyd flag should override componentValues entry: %v", got)
+		}
+		if got["MX_FF_LANDSCAPE_AUTO_STACK"] != "false" {
+			t.Fatalf("env-form key should normalize: %v", got)
+		}
+		if got["MX_POSTGRES_USER"] != "product" {
+			t.Fatalf("unrelated env must survive: %v", got)
+		}
+		if len(env) != 3 {
+			t.Fatalf("env should have 3 entries, got %d", len(env))
+		}
+	})
+	t.Run("unrelated components untouched", func(t *testing.T) {
 		v := map[string]interface{}{}
-		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "backend", v)
+		applyFeatureFlags(map[string]string{"connectors_enabled": "true"}, "scheduler", v)
 		if _, ok := v["env"]; ok {
-			t.Fatal("backend values should not gain env")
+			t.Fatal("scheduler values should not gain env")
 		}
 	})
 	t.Run("empty flags no-op", func(t *testing.T) {
@@ -239,4 +268,44 @@ func TestApplyFeatureFlags(t *testing.T) {
 			t.Fatal("nil flags should not modify values")
 		}
 	})
+}
+
+// canonicalizeEnvLists must produce a stable, sorted env order regardless of
+// the order values arrived in, so helm renders byte-identical manifests and
+// the no-op detection skips the upgrade.
+func TestCanonicalizeEnvLists(t *testing.T) {
+	shuffled := func(order ...string) map[string]interface{} {
+		env := make([]interface{}, len(order))
+		for i, n := range order {
+			env[i] = map[string]interface{}{"name": n, "value": "x"}
+		}
+		return map[string]interface{}{"env": env}
+	}
+	a := shuffled("MX_C", "MX_A", "MX_B")
+	b := shuffled("MX_B", "MX_C", "MX_A")
+	canonicalizeEnvLists(a)
+	canonicalizeEnvLists(b)
+	if fmt.Sprint(a) != fmt.Sprint(b) {
+		t.Fatalf("canonical order differs: %v vs %v", a, b)
+	}
+	names := []string{}
+	for _, e := range a["env"].([]interface{}) {
+		names = append(names, e.(map[string]interface{})["name"].(string))
+	}
+	if names[0] != "MX_A" || names[2] != "MX_C" {
+		t.Fatalf("not sorted: %v", names)
+	}
+
+	// Non name-keyed lists pass through untouched.
+	weird := map[string]interface{}{"env": []interface{}{"plain", 42}}
+	before := fmt.Sprint(weird)
+	canonicalizeEnvLists(weird)
+	if fmt.Sprint(weird) != before {
+		t.Fatal("non name-keyed env list must not be touched")
+	}
+	one := map[string]interface{}{"env": []interface{}{map[string]interface{}{"name": "A"}}}
+	canonicalizeEnvLists(one)
+	if len(one["env"].([]interface{})) != 1 {
+		t.Fatal("single-entry list mangled")
+	}
 }
