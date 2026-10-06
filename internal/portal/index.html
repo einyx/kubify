@@ -3,12 +3,9 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>kubo · operator portal</title>
-<meta name="description" content="Inspect, provision, and manage Kubernetes stacks with kubo.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='8' fill='%23266656'/%3E%3Ctext x='20' y='29' text-anchor='middle' font-family='sans-serif' font-size='27' fill='white'%3EK%3C/text%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<title>meshX · operator console</title>
+<meta name="description" content="Inspect, provision, and manage meshX Foundation stacks.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23e34a28' d='M3 6l13 8 13-8v6L16 20 3 12zm0 14l13-8 13 8v6l-13-8-13 8z'/%3E%3C/svg%3E">
 <script>
   // Set the theme before first paint to avoid a flash.
   (function () {
@@ -17,16 +14,17 @@
     document.documentElement.dataset.theme = t;
   })();
 </script>
+<link rel="stylesheet" href="/assets/meshx-design-system.css">
 <link rel="stylesheet" href="/assets/portal.css">
 <link rel="stylesheet" href="/assets/console.css">
 </head>
-<body>
+<body class="meshx-theme">
 <a class="skip-link" href="#main-content">Skip to content</a>
 
 <nav aria-label="Portal navigation">
   <div class="nav-brand">
-    <div class="nav-logo">K</div>
-    <a class="nav-title" href="/">kubo <span>/ operator console</span></a>
+    <div class="nav-logo" aria-hidden="true"><svg viewBox="0 0 82 116" fill="currentColor"><path d="M82 37V19L41 45 0 18v19l27 17 14 9 14-9zM82 89v18L41 81 0 108V89l27-17 14-9 14 9z"/></svg></div>
+    <a class="nav-title" href="/">meshX <span>/ operator console</span></a>
   </div>
   <div class="nav-right">
     <!-- mcp-nav -->
