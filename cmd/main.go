@@ -20,8 +20,8 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -43,8 +43,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
-	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
@@ -259,6 +259,10 @@ func main() {
 	}
 	utilruntime.Must(helmv2.AddToScheme(mgr.GetScheme()))
 	utilruntime.Must(sourcev1.AddToScheme(mgr.GetScheme()))
+	if err = (&controller.GitWritebackRequestReconciler{Client: mgr.GetClient(), SystemNamespace: envOr("POD_NAMESPACE", "kubo-system")}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "GitWritebackRequest")
+		os.Exit(1)
+	}
 	if err = (&controller.StackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

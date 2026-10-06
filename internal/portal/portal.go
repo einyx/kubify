@@ -288,6 +288,7 @@ type StackDetail struct {
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
 	FeatureFlags    map[string]string          `json:"featureFlags,omitempty"`
 	ImageTags       map[string]string          `json:"imageTags,omitempty"`
+	GitManaged      bool                       `json:"gitManaged"`
 	URL             string                     `json:"url,omitempty"`
 	Conditions      []ConditionView            `json:"conditions,omitempty"`
 	Components      []ComponentView            `json:"components"`
@@ -331,6 +332,7 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 		Exclude:    s.Spec.Exclude,
 		Components: make([]ComponentView, 0, len(s.Status.Components)),
 	}
+	d.GitManaged = s.Labels["kustomize.toolkit.fluxcd.io/name"] != ""
 	overridden := make([]string, 0, len(s.Spec.ComponentValues))
 	for comp := range s.Spec.ComponentValues {
 		overridden = append(overridden, comp)

@@ -285,6 +285,22 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 		}
 		respond(w, r, map[string]bool{"patched": true}, nil)
 	})
+	handle("POST /api/stacks/{namespace}/{name}/feature-flags/writeback", func(w http.ResponseWriter, r *http.Request) {
+		var in struct {
+			FeatureFlags map[string]string `json:"featureFlags"`
+			Expected     map[string]string `json:"expectedFeatureFlags"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
+			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+			return
+		}
+		who := r.Header.Get("Cf-Access-Authenticated-User-Email")
+		if who == "" {
+			who = "portal"
+		}
+		out, err := p.CreateFeatureFlagWriteback(r.Context(), r.PathValue("namespace"), r.PathValue("name"), who, in.FeatureFlags, in.Expected)
+		respond(w, r, out, err)
+	})
 	handle("GET /api/stacks/{namespace}/{name}/components/{component}/pods", func(w http.ResponseWriter, r *http.Request) {
 		pods, err := p.ListComponentPods(r.Context(), r.PathValue("namespace"), r.PathValue("component"))
 		respond(w, r, pods, err)

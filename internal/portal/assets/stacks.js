@@ -547,12 +547,19 @@ async function toggleFlag(key, on) {
   const flags = Object.assign({}, currentData.featureFlags || {});
   flags[key] = on ? 'true' : 'false';
   try {
-    await fetch(`/api/stacks/${ns}/${name}`, {
-      method: 'PATCH',
+    const gitManaged = currentData.gitManaged === true;
+    const endpoint = gitManaged
+      ? `/api/stacks/${ns}/${name}/feature-flags/writeback`
+      : `/api/stacks/${ns}/${name}`;
+    const body = gitManaged
+      ? { featureFlags: flags, expectedFeatureFlags: currentData.featureFlags || {} }
+      : { featureFlags: flags };
+    const result = await fetch(endpoint, {
+      method: gitManaged ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ featureFlags: flags }),
-    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
-    toast(`Flag ${key} ${on ? 'enabled' : 'disabled'}`, true);
+      body: JSON.stringify(body),
+    }).then(async r => { const data = await r.json().catch(() => ({})); if (!r.ok) throw new Error(data.error || r.statusText); return data; });
+    toast(gitManaged ? `Pull request queued: ${result.metadata?.name || 'pending'}` : `Flag ${key} ${on ? 'enabled' : 'disabled'}`, true);
     fetchDetail(ns, name);
   } catch (e) { toast(e.message, false); }
 }
