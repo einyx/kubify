@@ -20,11 +20,22 @@ type WritebackTarget struct {
 
 // GitWritebackRequestSpec describes an allowlisted mutation to a Git-managed Stack.
 type GitWritebackRequestSpec struct {
-	Target       WritebackTarget   `json:"target"`
-	FeatureFlags map[string]string `json:"featureFlags"`
+	Target WritebackTarget `json:"target"`
+	// +optional
+	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
+	// +optional
+	ImageTags map[string]string `json:"imageTags,omitempty"`
 	// ExpectedFeatureFlags enables optimistic conflict detection.
 	// +optional
 	ExpectedFeatureFlags map[string]string `json:"expectedFeatureFlags,omitempty"`
+	// ExpectedImageTags enables optimistic conflict detection.
+	// +optional
+	ExpectedImageTags map[string]string `json:"expectedImageTags,omitempty"`
+	// +optional
+	ChartVersions map[string]string `json:"chartVersions,omitempty"`
+	// ExpectedChartVersions enables optimistic conflict detection.
+	// +optional
+	ExpectedChartVersions map[string]string `json:"expectedChartVersions,omitempty"`
 	// +optional
 	RequestedBy string `json:"requestedBy,omitempty"`
 }

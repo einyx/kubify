@@ -54,12 +54,30 @@ spec:
             description: GitWritebackRequestSpec describes an allowlisted mutation
               to a Git-managed Stack.
             properties:
+              chartVersions:
+                additionalProperties:
+                  type: string
+                type: object
+              expectedChartVersions:
+                additionalProperties:
+                  type: string
+                description: ExpectedChartVersions enables optimistic conflict detection.
+                type: object
               expectedFeatureFlags:
                 additionalProperties:
                   type: string
                 description: ExpectedFeatureFlags enables optimistic conflict detection.
                 type: object
+              expectedImageTags:
+                additionalProperties:
+                  type: string
+                description: ExpectedImageTags enables optimistic conflict detection.
+                type: object
               featureFlags:
+                additionalProperties:
+                  type: string
+                type: object
+              imageTags:
                 additionalProperties:
                   type: string
                 type: object
@@ -76,7 +94,6 @@ spec:
                 - namespace
                 type: object
             required:
-            - featureFlags
             - target
             type: object
           status:

@@ -301,6 +301,25 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 		out, err := p.CreateFeatureFlagWriteback(r.Context(), r.PathValue("namespace"), r.PathValue("name"), who, in.FeatureFlags, in.Expected)
 		respond(w, r, out, err)
 	})
+	for path, field := range map[string]string{"image-tags": "imageTags", "chart-versions": "chartVersions"} {
+		field := field
+		handle("POST /api/stacks/{namespace}/{name}/"+path+"/writeback", func(w http.ResponseWriter, r *http.Request) {
+			var in struct {
+				Desired  map[string]string `json:"desired"`
+				Expected map[string]string `json:"expected"`
+			}
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in); err != nil {
+				respond(w, r, nil, fmt.Errorf("invalid JSON body"))
+				return
+			}
+			who := r.Header.Get("Cf-Access-Authenticated-User-Email")
+			if who == "" {
+				who = "portal"
+			}
+			out, err := p.CreateStackMapWriteback(r.Context(), r.PathValue("namespace"), r.PathValue("name"), who, field, in.Desired, in.Expected)
+			respond(w, r, out, err)
+		})
+	}
 	handle("GET /api/stacks/{namespace}/{name}/components/{component}/pods", func(w http.ResponseWriter, r *http.Request) {
 		pods, err := p.ListComponentPods(r.Context(), r.PathValue("namespace"), r.PathValue("component"))
 		respond(w, r, pods, err)

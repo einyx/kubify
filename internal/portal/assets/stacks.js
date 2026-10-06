@@ -476,6 +476,10 @@ function renderProduct(d) {
   const tbox = document.getElementById('tags-rows');
   tbox.innerHTML = tkeys.length ? tkeys.map(k => tagRow(k, tags[k])).join('')
     : '<span class="muted">No image tag overrides configured.</span>';
+  const charts = d.chartVersions || {};
+  const ckeys = Object.keys(charts).sort();
+  setBadge('badge-charts', ckeys.length, false);
+  document.getElementById('charts-rows').innerHTML = ckeys.length ? ckeys.map(k => versionRow(k, charts[k])).join('') : '<span class="muted">No chart version overrides configured.</span>';
 }
 
 function tagRow(name, tag) {
@@ -517,15 +521,22 @@ async function removeTag(name) {
 
 async function patchTags(ns, sname, tags, msg) {
   try {
-    await fetch(`/api/stacks/${ns}/${sname}`, {
-      method: 'PATCH',
+    const gitManaged = currentData.gitManaged === true;
+    const result = await fetch(gitManaged ? `/api/stacks/${ns}/${sname}/image-tags/writeback` : `/api/stacks/${ns}/${sname}`, {
+      method: gitManaged ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageTags: tags }),
-    }).then(async r => { if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText); });
-    toast(msg, true);
+      body: JSON.stringify(gitManaged ? { desired: tags, expected: currentData.imageTags || {} } : { imageTags: tags }),
+    }).then(async r => { const d=await r.json().catch(() => ({})); if (!r.ok) throw new Error(d.error || r.statusText); return d; });
+    toast(gitManaged ? `Pull request queued: ${result.metadata?.name || 'pending'}` : msg, true);
     fetchDetail(ns, sname);
   } catch (e) { toast(e.message, false); }
 }
+
+function versionRow(name, version) { return `<label class="flag-row"><code class="flag-name">${esc(name)}</code><input class="tag-input" value="${esc(version || '')}" placeholder="chart version" onchange="saveChart('${esc(name)}', this.value)"><button class="btn secondary" onclick="removeChart('${esc(name)}')">remove</button></label>`; }
+function addChartRow() { const name=prompt('Component name:'); if(!name)return; const versions=Object.assign({},currentData.chartVersions||{}); if(!(name in versions)){versions[name]='';renderProduct(Object.assign({},currentData,{chartVersions:versions}));} }
+async function saveChart(name, version) { const versions=Object.assign({},currentData.chartVersions||{}); versions[name]=version; await patchCharts(versions,`Chart version for ${name} saved`); }
+async function removeChart(name) { const versions=Object.assign({},currentData.chartVersions||{}); delete versions[name]; await patchCharts(versions,`Chart version for ${name} removed`); }
+async function patchCharts(versions,msg) { if(!currentDetail)return; const {ns,name}=currentDetail; try { const gitManaged=currentData.gitManaged===true; const result=await fetch(gitManaged?`/api/stacks/${ns}/${name}/chart-versions/writeback`:`/api/stacks/${ns}/${name}`,{method:gitManaged?'POST':'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(gitManaged?{desired:versions,expected:currentData.chartVersions||{}}:{chartVersions:versions})}).then(async r=>{const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||r.statusText);return d}); toast(gitManaged?`Pull request queued: ${result.metadata?.name||'pending'}`:msg,true);fetchDetail(ns,name);}catch(e){toast(e.message,false);} }
 
 async function toggleFlag(key, on) {
   if (!currentDetail || !currentData) return;

@@ -25,3 +25,15 @@ func TestMutateFeatureFlagsDetectsConflict(t *testing.T) {
 		t.Fatal("expected conflict")
 	}
 }
+
+func TestMutateChartVersionsAddsMissingBlockWithoutReformatting(t *testing.T) {
+	src := []byte("apiVersion: platform.kubo.io/v1alpha1\nkind: Stack\nmetadata:\n  name: product\n  namespace: integration\nspec:\n  mode: Flux\n")
+	out, err := MutateChartVersions(src, "integration", "product", map[string]string{}, map[string]string{"backend": "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "spec:\n  chartVersions:\n    backend: '1.2.3'\n  mode: Flux"
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("unexpected output:\n%s", out)
+	}
+}

@@ -29,6 +29,18 @@ func (e *githubError) Error() string {
 }
 
 func (g *GitHub) CreateFeatureFlagPR(ctx context.Context, repoURL, file, namespace, name string, expected, desired map[string]string, title, branch string) (PullRequest, error) {
+	return g.createStackMapPR(ctx, repoURL, file, namespace, name, "featureFlags", expected, desired, title, branch)
+}
+
+func (g *GitHub) CreateImageTagPR(ctx context.Context, repoURL, file, namespace, name string, expected, desired map[string]string, title, branch string) (PullRequest, error) {
+	return g.createStackMapPR(ctx, repoURL, file, namespace, name, "imageTags", expected, desired, title, branch)
+}
+
+func (g *GitHub) CreateChartVersionPR(ctx context.Context, repoURL, file, namespace, name string, expected, desired map[string]string, title, branch string) (PullRequest, error) {
+	return g.createStackMapPR(ctx, repoURL, file, namespace, name, "chartVersions", expected, desired, title, branch)
+}
+
+func (g *GitHub) createStackMapPR(ctx context.Context, repoURL, file, namespace, name, field string, expected, desired map[string]string, title, branch string) (PullRequest, error) {
 	owner, repo, err := githubRepo(repoURL)
 	if err != nil {
 		return PullRequest{}, err
@@ -84,7 +96,15 @@ func (g *GitHub) CreateFeatureFlagPR(ctx context.Context, repoURL, file, namespa
 		if err != nil {
 			return PullRequest{}, err
 		}
-		updated, err := MutateFeatureFlags(raw, namespace, name, expected, desired)
+		var updated []byte
+		switch field {
+		case "imageTags":
+			updated, err = MutateImageTags(raw, namespace, name, expected, desired)
+		case "chartVersions":
+			updated, err = MutateChartVersions(raw, namespace, name, expected, desired)
+		default:
+			updated, err = MutateFeatureFlags(raw, namespace, name, expected, desired)
+		}
 		if err != nil {
 			return PullRequest{}, err
 		}
@@ -102,7 +122,7 @@ func (g *GitHub) CreateFeatureFlagPR(ctx context.Context, repoURL, file, namespa
 	var pr struct {
 		HTMLURL string `json:"html_url"`
 	}
-	if err = g.do(ctx, "POST", fmt.Sprintf("%s/repos/%s/%s/pulls", base, owner, repo), map[string]string{"title": title, "head": branch, "base": info.DefaultBranch, "body": "Created by the Kubify operator console.\n\nThis change updates only `spec.featureFlags`."}, &pr); err != nil {
+	if err = g.do(ctx, "POST", fmt.Sprintf("%s/repos/%s/%s/pulls", base, owner, repo), map[string]string{"title": title, "head": branch, "base": info.DefaultBranch, "body": fmt.Sprintf("Created by the Kubify operator console.\n\nThis change updates only `spec.%s`.", field)}, &pr); err != nil {
 		if existing, findErr := g.openPullRequest(ctx, base, owner, repo, branch); findErr == nil && existing.URL != "" {
 			return existing, nil
 		}

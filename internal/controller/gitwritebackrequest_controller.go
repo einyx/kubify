@@ -43,8 +43,14 @@ func (r *GitWritebackRequestReconciler) Reconcile(ctx context.Context, req ctrl.
 	if wb.Status.PullRequestURL != "" || wb.Status.Phase == platformv1alpha1.GitWritebackApplied {
 		return ctrl.Result{}, nil
 	}
-	if len(wb.Spec.FeatureFlags) == 0 {
-		return r.fail(ctx, &wb, platformv1alpha1.GitWritebackFailed, "featureFlags cannot be empty", nil)
+	fields := 0
+	for _, present := range []bool{wb.Spec.FeatureFlags != nil, wb.Spec.ImageTags != nil, wb.Spec.ChartVersions != nil} {
+		if present {
+			fields++
+		}
+	}
+	if fields != 1 {
+		return r.fail(ctx, &wb, platformv1alpha1.GitWritebackFailed, "exactly one of featureFlags, imageTags, or chartVersions is required", nil)
 	}
 	wb.Status.Phase = platformv1alpha1.GitWritebackRunning
 	wb.Status.ObservedGeneration = wb.Generation
@@ -74,7 +80,17 @@ func (r *GitWritebackRequestReconciler) Reconcile(ctx context.Context, req ctrl.
 	}
 	branch := fmt.Sprintf("kubify/%s-%s-%s", stack.Namespace, stack.Name, string(wb.UID)[:8])
 	title := fmt.Sprintf("%s/%s: update feature flags", stack.Namespace, stack.Name)
-	pr, err := (&writeback.GitHub{Token: token, HTTPClient: r.HTTPClient}).CreateFeatureFlagPR(ctx, loc.Repository, loc.File, stack.Namespace, stack.Name, wb.Spec.ExpectedFeatureFlags, wb.Spec.FeatureFlags, title, branch)
+	github := &writeback.GitHub{Token: token, HTTPClient: r.HTTPClient}
+	var pr writeback.PullRequest
+	if wb.Spec.ImageTags != nil {
+		title = fmt.Sprintf("%s/%s: update image tags", stack.Namespace, stack.Name)
+		pr, err = github.CreateImageTagPR(ctx, loc.Repository, loc.File, stack.Namespace, stack.Name, wb.Spec.ExpectedImageTags, wb.Spec.ImageTags, title, branch)
+	} else if wb.Spec.ChartVersions != nil {
+		title = fmt.Sprintf("%s/%s: update chart versions", stack.Namespace, stack.Name)
+		pr, err = github.CreateChartVersionPR(ctx, loc.Repository, loc.File, stack.Namespace, stack.Name, wb.Spec.ExpectedChartVersions, wb.Spec.ChartVersions, title, branch)
+	} else {
+		pr, err = github.CreateFeatureFlagPR(ctx, loc.Repository, loc.File, stack.Namespace, stack.Name, wb.Spec.ExpectedFeatureFlags, wb.Spec.FeatureFlags, title, branch)
+	}
 	if err != nil {
 		phase := platformv1alpha1.GitWritebackFailed
 		if strings.Contains(err.Error(), "changed from expected") {

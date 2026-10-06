@@ -13,6 +13,18 @@ import (
 // MutateFeatureFlags updates only spec.featureFlags in the matching Stack
 // document while retaining comments and the rest of the YAML node tree.
 func MutateFeatureFlags(src []byte, namespace, name string, expected, desired map[string]string) ([]byte, error) {
+	return mutateStringMap(src, namespace, name, "featureFlags", expected, desired)
+}
+
+func MutateImageTags(src []byte, namespace, name string, expected, desired map[string]string) ([]byte, error) {
+	return mutateStringMap(src, namespace, name, "imageTags", expected, desired)
+}
+
+func MutateChartVersions(src []byte, namespace, name string, expected, desired map[string]string) ([]byte, error) {
+	return mutateStringMap(src, namespace, name, "chartVersions", expected, desired)
+}
+
+func mutateStringMap(src []byte, namespace, name, field string, expected, desired map[string]string) ([]byte, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(src))
 	found := false
 	start, end, indent := -1, -1, ""
@@ -44,16 +56,21 @@ func MutateFeatureFlags(src []byte, namespace, name string, expected, desired ma
 			continue
 		}
 		spec := ensureMapping(root, "spec")
-		flags := mapping(spec, "featureFlags")
+		flags := mapping(spec, field)
 		current := stringMap(flags)
 		for k, v := range expected {
 			if current[k] != v {
-				return nil, fmt.Errorf("feature flag %s changed from expected %q to %q", k, v, current[k])
+				return nil, fmt.Errorf("%s.%s changed from expected %q to %q", field, k, v, current[k])
 			}
 		}
-		key := mappingKey(spec, "featureFlags")
+		key := mappingKey(spec, field)
 		if key == nil {
-			return nil, fmt.Errorf("Stack %s/%s has no featureFlags block", namespace, name)
+			specKey := mappingKey(root, "spec")
+			start = specKey.Line
+			indent = strings.Repeat(" ", specKey.Column+1)
+			end = start
+			found = true
+			break
 		}
 		start = key.Line - 1
 		indent = strings.Repeat(" ", key.Column-1)
@@ -72,7 +89,7 @@ func MutateFeatureFlags(src []byte, namespace, name string, expected, desired ma
 	lines := strings.Split(string(src), "\n")
 	seen := map[string]bool{}
 	var replacement []string
-	replacement = append(replacement, indent+"featureFlags:")
+	replacement = append(replacement, indent+field+":")
 	for _, k := range order {
 		if v, ok := desired[k]; ok {
 			replacement = append(replacement, indent+"  "+k+": '"+v+"'")

@@ -24,3 +24,28 @@ func (p *Portal) CreateFeatureFlagWriteback(ctx context.Context, namespace, name
 	}
 	return wb, nil
 }
+
+func (p *Portal) CreateStackMapWriteback(ctx context.Context, namespace, name, requestedBy, field string, desired, expected map[string]string) (*platformv1alpha1.GitWritebackRequest, error) {
+	if namespace == "" || name == "" || desired == nil {
+		return nil, fmt.Errorf("target and %s are required", field)
+	}
+	for k, v := range desired {
+		if strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("%s keys and values cannot be empty", field)
+		}
+	}
+	spec := platformv1alpha1.GitWritebackRequestSpec{Target: platformv1alpha1.WritebackTarget{Namespace: namespace, Name: name}, RequestedBy: requestedBy}
+	switch field {
+	case "imageTags":
+		spec.ImageTags, spec.ExpectedImageTags = desired, expected
+	case "chartVersions":
+		spec.ChartVersions, spec.ExpectedChartVersions = desired, expected
+	default:
+		return nil, fmt.Errorf("unsupported write-back field %q", field)
+	}
+	wb := &platformv1alpha1.GitWritebackRequest{ObjectMeta: metav1.ObjectMeta{GenerateName: name + "-git-", Namespace: namespace}, Spec: spec}
+	if err := p.client.Create(ctx, wb); err != nil {
+		return nil, err
+	}
+	return wb, nil
+}
