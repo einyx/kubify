@@ -332,6 +332,10 @@
     font-family: 'SF Mono', 'Fira Code', monospace;
   }
   .cell-count { font-variant-numeric: tabular-nums; }
+  .cost-cell { min-width: 118px; font-variant-numeric: tabular-nums; }
+  .cost-cell strong { display: block; font-size: 13px; font-weight: 650; letter-spacing: -0.02em; }
+  .cost-cell span { display: block; margin-top: 2px; color: var(--muted2); font: 10px/1.25 'SF Mono', 'Fira Code', monospace; white-space: nowrap; }
+  .cost-cell strong .cost-period { display: inline; margin: 0 0 0 2px; font-size: 9px; font-weight: 500; }
 
   /* ── Phase badges ── */
   .phase {

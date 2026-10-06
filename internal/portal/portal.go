@@ -129,7 +129,19 @@ type StackSummary struct {
 	FailureMsg string `json:"failureMsg,omitempty"`
 	// Failing lists the names of components not currently Ready.
 	Failing []string `json:"failing,omitempty"`
+	// ComputeMonthlyUSD is a ballpark monthly allocation based on pod resource
+	// requests and the default UAE North Standard_D8as_v6 PAYG rate.
+	ComputeMonthlyUSD float64 `json:"computeMonthlyUsd,omitempty"`
+	RequestedCPUMilli int64   `json:"requestedCpuMilli,omitempty"`
+	RequestedMemory   int64   `json:"requestedMemoryBytes,omitempty"`
 }
+
+const (
+	azureNodeHourlyUSD = 0.447 // default: Standard_D8as_v6 Linux PAYG, UAE North
+	azureNodeCPUMilli  = 8000
+	azureNodeMemory    = 32 * 1024 * 1024 * 1024
+	monthlyHours       = 730
+)
 
 // GetIndexHTML returns the embedded single-page UI.
 func (p *Portal) GetIndexHTML() string { return indexHTML }
@@ -163,6 +175,11 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 	if err := p.client.List(ctx, &list); err != nil {
 		return nil, fmt.Errorf("portal: list stacks: %w", err)
 	}
+	var pods corev1.PodList
+	if err := p.client.List(ctx, &pods); err != nil {
+		return nil, fmt.Errorf("portal: list pods for cost estimate: %w", err)
+	}
+	requests := namespaceRequests(pods.Items)
 	out := make([]StackSummary, 0, len(list.Items))
 	for i := range list.Items {
 		s := &list.Items[i]
@@ -173,6 +190,11 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 			Phase:     s.Status.Phase,
 			Paused:    s.Spec.Paused,
 			Age:       since(s.CreationTimestamp.Time),
+		}
+		if req := requests[s.Namespace]; req != nil {
+			sum.RequestedCPUMilli = req.cpuMilli
+			sum.RequestedMemory = req.memoryBytes
+			sum.ComputeMonthlyUSD = estimateAzureCompute(req.cpuMilli, req.memoryBytes)
 		}
 		if sum.Mode == "" {
 			sum.Mode = "Direct"
@@ -194,6 +216,66 @@ func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 		out = append(out, sum)
 	}
 	return out, nil
+}
+
+type resourceRequest struct{ cpuMilli, memoryBytes int64 }
+
+func namespaceRequests(pods []corev1.Pod) map[string]*resourceRequest {
+	out := map[string]*resourceRequest{}
+	for i := range pods {
+		pod := &pods[i]
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		appCPU, appMem := int64(0), int64(0)
+		for _, c := range pod.Spec.Containers {
+			appCPU += c.Resources.Requests.Cpu().MilliValue()
+			appMem += c.Resources.Requests.Memory().Value()
+		}
+		// Kubernetes schedules against the larger of the app-container sum and
+		// the largest init container, plus pod overhead.
+		cpu, mem := appCPU, appMem
+		for _, c := range pod.Spec.InitContainers {
+			if v := c.Resources.Requests.Cpu().MilliValue(); v > cpu {
+				cpu = v
+			}
+			if v := c.Resources.Requests.Memory().Value(); v > mem {
+				mem = v
+			}
+		}
+		if pod.Spec.Overhead != nil {
+			cpu += pod.Spec.Overhead.Cpu().MilliValue()
+			mem += pod.Spec.Overhead.Memory().Value()
+		}
+		r := out[pod.Namespace]
+		if r == nil {
+			r = &resourceRequest{}
+			out[pod.Namespace] = r
+		}
+		r.cpuMilli += cpu
+		r.memoryBytes += mem
+	}
+	return out
+}
+
+func estimateAzureCompute(cpuMilli, memoryBytes int64) float64 {
+	hourly := envFloat("KUBO_COST_AZURE_NODE_HOURLY_USD", azureNodeHourlyUSD)
+	nodeCPU := envFloat("KUBO_COST_AZURE_NODE_CPU_MILLI", azureNodeCPUMilli)
+	nodeMemory := envFloat("KUBO_COST_AZURE_NODE_MEMORY_BYTES", azureNodeMemory)
+	cpuShare := float64(cpuMilli) / nodeCPU
+	memoryShare := float64(memoryBytes) / nodeMemory
+	if memoryShare > cpuShare {
+		cpuShare = memoryShare
+	}
+	return cpuShare * hourly * monthlyHours
+}
+
+func envFloat(name string, fallback float64) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv(name)), 64)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
 }
 
 // StackDetail is the deep view of a single stack.

@@ -24,8 +24,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
@@ -171,7 +173,13 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 				platformv1alpha1.DemoRequestPending, "previous tenant with this slug is terminating")
 		}
 		log.Error(err, "demo provisioning failed", "tenant", tenant)
-		return ctrl.Result{}, r.setStatus(ctx, &dr, platformv1alpha1.DemoRequestFailed, truncStr(err.Error(), 300))
+		// Provisioning failures are generally transient (webhook rollout,
+		// registry/auth outage, namespace teardown). Keep retrying instead of
+		// stranding the request until somebody mutates its spec manually.
+		if statusErr := r.setStatus(ctx, &dr, platformv1alpha1.DemoRequestProvisioning, truncStr(err.Error(), 300)); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// Mirror the Stack phase.
@@ -391,8 +399,31 @@ func (r *DemoRequestReconciler) setStatus(ctx context.Context, dr *platformv1alp
 func (r *DemoRequestReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&platformv1alpha1.DemoRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		// A tenant Stack can be deleted independently of its DemoRequest. Watch
+		// Stack lifecycle events so deletion/recreation is event-driven instead
+		// of waiting for the one-minute status mirror cadence.
+		Watches(&platformv1alpha1.Stack{}, handler.EnqueueRequestsFromMapFunc(r.demoRequestsForStack)).
 		Named("demorequest").
 		Complete(r)
+}
+
+func (r *DemoRequestReconciler) demoRequestsForStack(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list platformv1alpha1.DemoRequestList
+	if err := r.List(ctx, &list); err != nil {
+		log.FromContext(ctx).Error(err, "list DemoRequests for Stack event")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, 1)
+	for i := range list.Items {
+		dr := &list.Items[i]
+		if dr.Status.Tenant == obj.GetNamespace() {
+			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{
+				Namespace: dr.Namespace,
+				Name:      dr.Name,
+			}})
+		}
+	}
+	return requests
 }
 
 // --- ACS email -------------------------------------------------------------

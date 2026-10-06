@@ -10,6 +10,7 @@ let currentData = null;   // last StackDetail for prefilling the edit dialog
 let stacksETag = null;
 let lastStacks = [];
 let phaseFilter = ''; // set via the phase pills in the stats strip
+let aiCostByProduct = {};
 
 async function refresh() {
   let stacks;
@@ -25,6 +26,15 @@ async function refresh() {
       stacks = await r.json();
       lastStacks = stacks;
     }
+    // AgentFW records actual priced token usage. Keep it independent from the
+    // stack API so an unavailable agent archive never blocks the stack list.
+    try {
+      const ar = await fetch('/api/agentfw/products');
+      if (ar.ok) {
+        const ad = await ar.json();
+        aiCostByProduct = Object.fromEntries((ad.products || []).map(p => [p.product, p.cost_micro || 0]));
+      }
+    } catch (_) {}
     const tb = document.getElementById('rows');
     const t = new Date();
     document.getElementById('list-error').textContent = '';
@@ -38,7 +48,7 @@ async function refresh() {
       (!q || s.namespace.includes(q) || s.name.includes(q)));
     visible = sortStacks(visible);
     if (!visible.length) {
-      tb.innerHTML = `<tr class="empty-row"><td colspan="6">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet - create one from a template.'}</td></tr>`;
+      tb.innerHTML = `<tr class="empty-row"><td colspan="7">${stacks.length ? 'No stacks match the filter.' : 'No stacks yet - create one from a template.'}</td></tr>`;
       return;
     }
     tb.innerHTML = visible.map(s => {
@@ -60,6 +70,10 @@ async function refresh() {
             <span class="bar-label">${s.ready}/${s.total}</span>
           </div>
         </td>
+        <td class="cost-cell" title="Ballpark compute allocation from Kubernetes requests at UAE North Standard_D8as_v6 PAYG rates. AI is recorded AgentFW usage, not an Azure invoice.">
+          <strong>~$${Number(s.computeMonthlyUsd || 0).toFixed(0)}<span class="cost-period">/mo</span></strong>
+          <span>compute · ${formatAI(aiCostByProduct[s.namespace] || aiCostByProduct[s.name] || 0)} AI</span>
+        </td>
         <td class="cell-mode">${esc(s.age)}</td>
       </tr>`;
     }).join('');
@@ -73,6 +87,11 @@ async function refresh() {
       banner.style.display = 'flex';
     }
   }
+}
+
+function formatAI(micro) {
+  const usd = Number(micro || 0) / 1e6;
+  return usd < 0.01 ? '<$0.01' : '$' + usd.toFixed(2);
 }
 
 const PHASE_COLORS = {

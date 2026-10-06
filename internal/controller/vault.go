@@ -15,6 +15,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -27,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
 )
@@ -40,6 +42,53 @@ const (
 	vaultUnsealKey  = "vault-unseal-keys"
 	vaultRBACName   = "vault-secrets"
 )
+
+// reinitSealedVault recovers the deadlock where the Vault CR (and with it
+// the unseal-keys secret) was deleted while the raft PVC survived: vault
+// can never unseal again and every reconcile would wait forever. Tenant
+// vaults are fully re-seedable from seedVault, so the stale raft is wiped
+// and bank-vaults re-initializes on the next pass. Opt out with
+// spec.seedVault.autoReinit: false for tenants that keep non-reseedable
+// data in Vault. Returns true when a wipe was performed.
+func (r *StackReconciler) reinitSealedVault(ctx context.Context, stack *platformv1alpha1.Stack) (bool, error) {
+	if stack.Spec.SeedVault != nil && stack.Spec.SeedVault.AutoReinit != nil && !*stack.Spec.SeedVault.AutoReinit {
+		return false, nil
+	}
+	ns := stack.Namespace
+
+	// Deadlock signature: the raft PVC is older than the current Vault CR.
+	// A PVC younger than (or equal to) the CR is a normal first init.
+	cr := &unstructured.Unstructured{}
+	cr.SetGroupVersionKind(schema.GroupVersionKind{Group: "vault.banzaicloud.com", Version: "v1alpha1", Kind: "Vault"})
+	cr.SetName("vault")
+	cr.SetNamespace(ns)
+	if err := r.Get(ctx, client.ObjectKeyFromObject(cr), cr); err != nil {
+		return false, err
+	}
+	pvc := &corev1.PersistentVolumeClaim{}
+	pvcName := "vault-file-vault-0" // bank-vaults: <cr>-file-<cr>-0
+	if err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: pvcName}, pvc); err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil // no raft yet — plain first init
+		}
+		return false, err
+	}
+	if !pvc.CreationTimestamp.Time.Before(cr.GetCreationTimestamp().Time) {
+		return false, nil
+	}
+
+	logf.FromContext(ctx).Info("vault: stale raft detected (Vault CR recreated after init) — wiping for re-init; seedVault will restore contents",
+		"pvc", pvcName, "pvcCreated", pvc.CreationTimestamp.Time, "crCreated", cr.GetCreationTimestamp().Time)
+	// Pod first: a running pod keeps the PVC in Terminating.
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "vault-0", Namespace: ns}}
+	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	if err := r.Delete(ctx, pvc); err != nil && !apierrors.IsNotFound(err) {
+		return false, err
+	}
+	return true, nil
+}
 
 // ensureTenantVault creates and maintains the per-tenant bank-vaults Vault
 // instance: ServiceAccount (with pull secret), RBAC for the unseal-keys
@@ -69,6 +118,15 @@ func (r *StackReconciler) ensureTenantVault(ctx context.Context, stack *platform
 	var sec corev1.Secret
 	err := r.Get(ctx, types.NamespacedName{Namespace: ns, Name: vaultUnsealKey}, &sec)
 	if apierrors.IsNotFound(err) {
+		// The unseal secret never appearing while a raft PVC predates the
+		// Vault CR means the CR (and the keys) were deleted after init —
+		// vault is sealed forever. Recover by wiping the stale raft so
+		// bank-vaults re-initializes; seedVault restores the contents.
+		if wiped, werr := r.reinitSealedVault(ctx, stack); werr != nil {
+			return fmt.Errorf("vault reinit check: %w", werr)
+		} else if wiped {
+			return fmt.Errorf("vault re-initializing (stale raft wiped, waiting for %s secret)", vaultUnsealKey)
+		}
 		return fmt.Errorf("vault initializing (waiting for %s secret)", vaultUnsealKey)
 	}
 	if err != nil {
@@ -309,6 +367,35 @@ func generateValue(g platformv1alpha1.GeneratedKey) (generatedValue, error) {
 		b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
 		s := fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 		return generatedValue{data: s}, nil
+	case "scheduler-credentials":
+		password := make([]byte, 18)
+		accessKey := make([]byte, 10)
+		secretKey := make([]byte, 30)
+		if _, err := rand.Read(password); err != nil {
+			return generatedValue{}, err
+		}
+		if _, err := rand.Read(accessKey); err != nil {
+			return generatedValue{}, err
+		}
+		if _, err := rand.Read(secretKey); err != nil {
+			return generatedValue{}, err
+		}
+		doc := map[string]interface{}{
+			"scheduler@meshx.io": map[string]interface{}{
+				"password": base64.RawURLEncoding.EncodeToString(password),
+				"is_admin": true,
+				"username": "scheduler@meshx.io",
+				"keypair": map[string]string{
+					"access_key_id":     "AKIA" + strings.ToUpper(hex.EncodeToString(accessKey)),
+					"secret_access_key": base64.RawURLEncoding.EncodeToString(secretKey),
+				},
+			},
+		}
+		b, err := json.Marshal(doc)
+		if err != nil {
+			return generatedValue{}, err
+		}
+		return generatedValue{data: string(b)}, nil
 	case "bcrypt":
 		pw := make([]byte, 24)
 		if _, err := rand.Read(pw); err != nil {

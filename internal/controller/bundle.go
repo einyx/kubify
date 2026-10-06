@@ -178,7 +178,13 @@ func rewriteBundleValues(values map[string]interface{}, images map[string]bundle
 	}
 	disableEmptySecrets(values)
 	forceOff(values, "autoscaling", "pdb", "vpa", "serviceMonitor", "externalSecret")
-	rewriteImageRefs(values, images)
+	// NOTE: no recursive image rewrite here. Matching nested repositories
+	// by basename lets one product's bundle clobber another product's
+	// charts — e.g. the foundation bundle's "backend" image rewriting the
+	// dai chart's "…/dai/backend" repository into a nonexistent
+	// foundation/backend:vX image. The component-scoped
+	// matchBundleImage + applyBundleImage pair in the reconciler is the
+	// only place image refs are rewritten.
 	if pullSecret != "" {
 		values["imagePullSecrets"] = []interface{}{map[string]interface{}{"name": pullSecret}}
 	}
@@ -208,51 +214,6 @@ func disableEmptySecrets(v interface{}) {
 	for _, child := range m {
 		disableEmptySecrets(child)
 	}
-}
-
-func rewriteImageRefs(v interface{}, images map[string]bundleImage) {
-	switch t := v.(type) {
-	case map[string]interface{}:
-		if repo, ok := t["repository"].(string); ok {
-			if img, ok := lookupBundleImage(repo, images); ok {
-				reg, path := splitRegistry(img.Repo)
-				if _, hasReg := t["registry"]; hasReg {
-					t["registry"] = reg
-					t["repository"] = path
-				} else {
-					t["repository"] = img.Repo
-				}
-				if tag, _ := t["tag"].(string); tag == "" || tag == "latest" {
-					t["tag"] = img.Tag
-				}
-			}
-		}
-		for _, child := range t {
-			rewriteImageRefs(child, images)
-		}
-	case []interface{}:
-		for _, child := range t {
-			rewriteImageRefs(child, images)
-		}
-	}
-}
-
-func lookupBundleImage(repo string, images map[string]bundleImage) (bundleImage, bool) {
-	name := repo
-	if i := strings.LastIndex(repo, "/"); i >= 0 {
-		name = repo[i+1:]
-	}
-	if img, ok := images[name]; ok {
-		return img, true
-	}
-	// Bundle image names may carry a product prefix (e.g. "<product>-backend");
-	// a suffix match keeps this product-agnostic.
-	for n, img := range images {
-		if n == name || strings.HasSuffix(n, "-"+name) {
-			return img, true
-		}
-	}
-	return bundleImage{}, false
 }
 
 func applyBundleImage(values map[string]interface{}, img bundleImage, pullSecret string) {
@@ -288,6 +249,11 @@ func (r *StackReconciler) bundleCredentialFor(ctx context.Context, stack *platfo
 		var secret corev1.Secret
 		if err := r.Get(ctx, client.ObjectKey{Namespace: stack.Namespace, Name: src.SecretRef.Name}, &secret); err != nil {
 			return auth.EmptyCredential, err
+		}
+		// Plain Opaque username/password secret (helm-registry style):
+		// registry-agnostic, used directly.
+		if u, p := secret.Data["username"], secret.Data["password"]; len(u) > 0 && len(p) > 0 {
+			return auth.Credential{Username: string(u), Password: string(p)}, nil
 		}
 		raw := secret.Data[".dockerconfigjson"]
 		if len(raw) == 0 {
