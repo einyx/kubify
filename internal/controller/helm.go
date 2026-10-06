@@ -176,60 +176,72 @@ func (h *HelmEngine) EnsureChart(ref platformv1alpha1.ChartRef, pullSecret, ns s
 }
 
 // dockerAuthFor extracts username/password for the registry in repoURL from a
-// dockerconfigjson Secret. Returns empty credentials when the secret is unset
-// or missing.
+// dockerconfigjson Secret. When the primary secret doesn't cover the registry,
+// it falls back to kubo-system/ghcr-pull-secret so GHCR-hosted charts resolve
+// even when the stack's bundle secret only contains ACR credentials.
 func dockerAuthFor(restCfg *rest.Config, ns, secretName, repoURL string) (user, pass string, err error) {
-	if secretName == "" {
-		return "", "", nil
+	registryHost := strings.TrimPrefix(repoURL, "oci://")
+	if i := strings.Index(registryHost, "/"); i >= 0 {
+		registryHost = registryHost[:i]
 	}
 	cs, err := kubernetes.NewForConfig(restCfg)
 	if err != nil {
 		return "", "", err
 	}
-	registryHost := strings.TrimPrefix(repoURL, "oci://")
-	if i := strings.Index(registryHost, "/"); i >= 0 {
-		registryHost = registryHost[:i]
-	}
 	ctx := context.Background()
-	sec, err := cs.CoreV1().Secrets(ns).Get(ctx, secretName, metav1.GetOptions{})
-	if err != nil {
-		return "", "", err
+
+	// Candidates: stack's own secret first, then the cluster-level GHCR secret.
+	type candidate struct{ ns, name string }
+	candidates := []candidate{}
+	if secretName != "" {
+		candidates = append(candidates, candidate{ns, secretName})
 	}
-	raw := sec.Data[".dockerconfigjson"]
-	if len(raw) == 0 {
-		return "", "", nil
-	}
-	var cfg struct {
-		Auths map[string]struct {
-			Auth     string `json:"auth"`
-			Username string `json:"username"`
-			Password string `json:"password"`
-		} `json:"auths"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return "", "", err
-	}
-	entry, ok := cfg.Auths[registryHost]
-	if !ok {
-		for host, e := range cfg.Auths {
-			if strings.Contains(host, registryHost) || strings.Contains(registryHost, host) {
-				entry, ok = e, true
-				break
+	candidates = append(candidates, candidate{sourceNamespace, "ghcr-pull-secret"})
+
+	for _, c := range candidates {
+		sec, serr := cs.CoreV1().Secrets(c.ns).Get(ctx, c.name, metav1.GetOptions{})
+		if serr != nil {
+			continue
+		}
+		raw := sec.Data[".dockerconfigjson"]
+		if len(raw) == 0 {
+			continue
+		}
+		var cfg struct {
+			Auths map[string]struct {
+				Auth     string `json:"auth"`
+				Username string `json:"username"`
+				Password string `json:"password"`
+			} `json:"auths"`
+		}
+		if json.Unmarshal(raw, &cfg) != nil {
+			continue
+		}
+		entry, ok := cfg.Auths[registryHost]
+		if !ok {
+			for host, e := range cfg.Auths {
+				if strings.Contains(host, registryHost) || strings.Contains(registryHost, host) {
+					entry, ok = e, true
+					break
+				}
 			}
 		}
-	}
-	if !ok {
-		return "", "", nil
-	}
-	user, pass = entry.Username, entry.Password
-	if entry.Auth != "" {
-		decoded, err := base64.StdEncoding.DecodeString(entry.Auth)
-		if err != nil {
-			return "", "", err
+		if !ok {
+			continue
 		}
-		user, pass, _ = strings.Cut(string(decoded), ":")
+		u, p := entry.Username, entry.Password
+		if entry.Auth != "" {
+			decoded, derr := base64.StdEncoding.DecodeString(entry.Auth)
+			if derr != nil {
+				continue
+			}
+			u, p, _ = strings.Cut(string(decoded), ":")
+		}
+		if u != "" {
+			return u, p, nil
+		}
 	}
-	return user, pass, nil
+	return "", "", nil
 }
 
 // isPendingStatus reports whether a release is stuck mid-operation
