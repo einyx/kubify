@@ -335,6 +335,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, name)
 		applyFeatureFlags(stack.Spec.FeatureFlags, name, values)
 		applyImageTags(stack.Spec.ImageTags, name, values)
+		applyChartVersion(stack.Spec.ChartVersions, name, &comp.ChartRef)
 		if ch.Values != nil {
 			values = mergeValues(ch.Values, values)
 		}
@@ -653,6 +654,8 @@ func (r *StackReconciler) deployComponent(
 	values := resolveComponentValues(&comp.Values, &stack.Spec.Values, stack.Spec.ComponentValues, comp.Name)
 	applyFeatureFlags(stack.Spec.FeatureFlags, comp.Name, values)
 	applyImageTags(stack.Spec.ImageTags, comp.Name, values)
+	applyChartVersion(stack.Spec.ChartVersions, comp.Name, &comp.ChartRef)
+	canonicalizeEnvLists(values)
 	targetNS := stack.Namespace
 	if isClusterComponent(comp) {
 		targetNS = clusterOperatorsNamespace

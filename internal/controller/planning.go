@@ -3,6 +3,7 @@ package controller
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -66,30 +67,73 @@ func resolveComponentValues(
 	return merged
 }
 
-// applyFeatureFlags compiles stack.spec.featureFlags into the frontend
-// component's env.feature_flags, with the highest precedence (above
-// componentValues). Keys may be given in the chart's lowercase snake_case
+// applyFeatureFlags compiles stack.spec.featureFlags into the consuming
+// components' values, with the highest precedence (above componentValues):
+// the frontend chart's env.feature_flags map, and the backend's MX_FF_*
+// env entries — the backend exposes every ff_* Config field as an MX_FF_*
+// boolean (see its GET /flags introspection endpoint), so one flag map
+// drives both tiers. Keys may be given in the chart's lowercase snake_case
 // form or as the rendered env name (MX_FF_CONNECTORS_ENABLED); both are
-// normalized to the chart's key. Only components that consume
-// env.feature_flags (the frontend chart) are targeted, so unknown
-// components are left untouched.
+// normalized. Other components are left untouched.
 func applyFeatureFlags(featureFlags map[string]string, compName string, values map[string]interface{}) {
-	if len(featureFlags) == 0 || (compName != "frontend" && compName != "foundation-frontend") {
+	if len(featureFlags) == 0 {
 		return
 	}
-	env, _ := values["env"].(map[string]interface{})
-	if env == nil {
-		env = map[string]interface{}{}
+	switch compName {
+	case "frontend", "foundation-frontend":
+		env, _ := values["env"].(map[string]interface{})
+		if env == nil {
+			env = map[string]interface{}{}
+			values["env"] = env
+		}
+		ff, _ := env["feature_flags"].(map[string]interface{})
+		if ff == nil {
+			ff = map[string]interface{}{}
+			env["feature_flags"] = ff
+		}
+		for _, k := range sortedKeys(featureFlags) {
+			v := featureFlags[k]
+			ff[normalizeFeatureFlagKey(k)] = v
+		}
+	case "backend", "foundation-backend":
+		// The backend chart's env is a {name, value} list. Same-named
+		// entries from componentValues are replaced — featureFlags win.
+		env, _ := values["env"].([]interface{})
+		idx := map[string]int{}
+		for i, e := range env {
+			m, ok := e.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if n, ok := m["name"].(string); ok {
+				idx[n] = i
+			}
+		}
+		for _, k := range sortedKeys(featureFlags) {
+			v := featureFlags[k]
+			name := "MX_FF_" + strings.ToUpper(normalizeFeatureFlagKey(k))
+			entry := map[string]interface{}{"name": name, "value": v}
+			if i, ok := idx[name]; ok {
+				env[i] = entry
+			} else {
+				env = append(env, entry)
+			}
+		}
 		values["env"] = env
 	}
-	ff, _ := env["feature_flags"].(map[string]interface{})
-	if ff == nil {
-		ff = map[string]interface{}{}
-		env["feature_flags"] = ff
+}
+
+// sortedKeys gives deterministic iteration over a flag map so rendered
+// values — and therefore pod templates — are byte-stable across reconciles.
+// Without it Go's randomized map order reorders env entries every pass and
+// the Deployment flaps into a new ReplicaSet on each reconcile.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
 	}
-	for k, v := range featureFlags {
-		ff[normalizeFeatureFlagKey(k)] = v
-	}
+	sort.Strings(keys)
+	return keys
 }
 
 // applyImageTags compiles stack.spec.imageTags into each component's
@@ -111,6 +155,40 @@ func applyImageTags(imageTags map[string]string, compName string, values map[str
 		values["image"] = image
 	}
 	image["tag"] = tag
+}
+
+// canonicalizeEnvLists sorts every {name,value} env list under values by
+// name. Env entries may be assembled from several sources (component
+// values, stack values, componentValues, featureFlags); any map-keyed
+// intermediate shuffles them, and a shuffled list changes the rendered
+// manifest — defeating helm's no-op detection and rolling the workload on
+// every reconcile. Sorting at the helm boundary makes renders byte-stable.
+func canonicalizeEnvLists(values map[string]interface{}) {
+	env, ok := values["env"].([]interface{})
+	if !ok || len(env) < 2 {
+		return
+	}
+	entries := make([]struct {
+		name string
+		raw  interface{}
+	}, 0, len(env))
+	for _, e := range env {
+		m, ok := e.(map[string]interface{})
+		if !ok {
+			return // not a name-keyed list; leave untouched
+		}
+		n, _ := m["name"].(string)
+		entries = append(entries, struct {
+			name string
+			raw  interface{}
+		}{n, e})
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+	sorted := make([]interface{}, len(entries))
+	for i, e := range entries {
+		sorted[i] = e.raw
+	}
+	values["env"] = sorted
 }
 
 // normalizeFeatureFlagKey converts MX_FF_UPPER_SNAKE to the chart's
