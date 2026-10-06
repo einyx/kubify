@@ -66,6 +66,8 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 	}
 
 	handle("GET /assets/", serveAsset)
+	handle("GET /marketplace", serveMarketplaceLanding)
+	handle("POST /api/marketplace/webhook", p.handleMarketplaceWebhook)
 	handle("GET /api/marketplace/health", func(w http.ResponseWriter, r *http.Request) {
 		_, err := p.marketplaceClient(r.Context())
 		respond(w, r, map[string]bool{"configured": err == nil}, err)

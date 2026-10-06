@@ -1,0 +1,35 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: kubo-marketplace
+  namespace: kubo-system
+  labels:
+    app.kubernetes.io/name: kubo
+    app.kubernetes.io/component: marketplace
+spec:
+  gateways:
+    - foundation/foundation-gateway
+  hosts:
+    - marketplace.meshx.foundation
+  http:
+    - match:
+        - uri:
+            exact: /marketplace
+        - uri:
+            exact: /api/marketplace/resolve
+        - uri:
+            exact: /api/marketplace/activate
+        - uri:
+            exact: /api/marketplace/webhook
+      route:
+        - destination:
+            host: kubo-portal.kubo-system.svc.cluster.local
+            port:
+              number: 9090
+      headers:
+        response:
+          set:
+            Strict-Transport-Security: max-age=31536000; includeSubDomains
+            X-Content-Type-Options: nosniff
+    - directResponse:
+        status: 404

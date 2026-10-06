@@ -60,6 +60,19 @@ type ResolveResponse struct {
 	Subscription     Subscription `json:"subscription"`
 }
 
+// Operation is Microsoft's authoritative representation of a lifecycle
+// operation. Webhook payloads are not trusted until this record is retrieved.
+type Operation struct {
+	ID             string `json:"id"`
+	ActivityID     string `json:"activityId"`
+	SubscriptionID string `json:"subscriptionId"`
+	OfferID        string `json:"offerId"`
+	PlanID         string `json:"planId"`
+	Quantity       int32  `json:"quantity"`
+	Action         string `json:"action"`
+	Status         string `json:"status"`
+}
+
 func New(cfg Config) (*Client, error) {
 	if cfg.TenantID == "" || cfg.ClientID == "" || cfg.ClientSecret == "" {
 		return nil, fmt.Errorf("marketplace credentials require tenant ID, client ID, and client secret")
@@ -90,6 +103,15 @@ func (c *Client) Activate(ctx context.Context, subscriptionID, planID string, qu
 func (c *Client) Get(ctx context.Context, subscriptionID string) (Subscription, error) {
 	var out Subscription
 	err := c.do(ctx, http.MethodGet, "/subscriptions/"+url.PathEscape(subscriptionID), nil, nil, &out)
+	return out, err
+}
+
+// GetOperation validates a Marketplace webhook notification against
+// Microsoft's fulfillment service before any local state is changed.
+func (c *Client) GetOperation(ctx context.Context, subscriptionID, operationID string) (Operation, error) {
+	var out Operation
+	path := "/subscriptions/" + url.PathEscape(subscriptionID) + "/operations/" + url.PathEscape(operationID)
+	err := c.do(ctx, http.MethodGet, path, nil, nil, &out)
 	return out, err
 }
 
