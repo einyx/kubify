@@ -1585,6 +1585,20 @@ spec:
 
                   frontend component''s env.feature_flags with the highest precedence.'
                 type: object
+              imageTags:
+                additionalProperties:
+                  type: string
+                description: 'ImageTags groups per-component image tag overrides in
+                  one place
+
+                  instead of burying them inside componentValues. Keys are component
+
+                  names ("backend", "ai", "frontend", ...); values are image tags
+
+                  ("v0.2.79", "main", a digest). Compiled into the component''s
+
+                  image.tag with the highest precedence, above componentValues.'
+                type: object
               gitRef:
                 description: 'GitRef points to a Flux GitRepository in the same namespace.
 

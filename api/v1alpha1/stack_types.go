@@ -78,6 +78,23 @@ type StackSpec struct {
 	// +optional
 	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
 
+	// ImageTags groups per-component image tag overrides in one place
+	// instead of burying them inside componentValues. Keys are component
+	// names ("backend", "ai", "frontend", ...); values are image tags
+	// ("v0.2.79", "main", a digest). Compiled into the component's
+	// image.tag with the highest precedence, above componentValues.
+	// +optional
+	ImageTags map[string]string `json:"imageTags,omitempty"`
+
+	// ChartVersions groups per-component chart version pins in one place
+	// instead of burying them inside inline component chartRefs. Keys are
+	// component names; values are chart versions ("0.4.14", "2.7.5").
+	// Compiled into the component's chartRef.chartVersion with the highest
+	// precedence. Only affects components that pull charts from an OCI
+	// repo (bundle-supplied charts use the bundle's packaged version).
+	// +optional
+	ChartVersions map[string]string `json:"chartVersions,omitempty"`
+
 	// SecretsRef lists secrets to copy from kubo-system into the tenant
 	// namespace on every reconcile. Use this to seed per-tenant credentials
 	// (e.g. Auth0 client secrets) without storing them in the Stack spec.
@@ -190,6 +207,16 @@ type VaultSeed struct {
 	// missing are added — existing values are never overwritten.
 	// +optional
 	Generated []VaultSeedSecret `json:"generated,omitempty"`
+
+	// AutoReinit lets the operator self-heal the deadlock where the Vault
+	// CR (and with it the unseal-keys secret) was deleted while the raft
+	// PVC survived: vault can never unseal again. Because tenant vaults
+	// are fully re-seedable, the operator wipes the stale raft so
+	// bank-vaults re-initializes. Defaults to true; set false explicitly
+	// for tenants that keep non-reseedable data in Vault.
+	// +kubebuilder:default=true
+	// +optional
+	AutoReinit *bool `json:"autoReinit,omitempty"`
 }
 
 // VaultSeedSecret describes one kubo-system Secret kubo creates at bootstrap.
@@ -232,7 +259,7 @@ type GeneratedKey struct {
 	//   tls    — self-signed RSA key pair; produces tls.key and tls.crt keys
 	//            (Length ignored). Only valid with Secret type
 	//            kubernetes.io/tls.
-	// +kubebuilder:validation:Enum=hex;base64;uuid;bcrypt;tls
+	// +kubebuilder:validation:Enum=hex;base64;uuid;bcrypt;tls;scheduler-credentials
 	Kind string `json:"kind"`
 
 	// Length of the generated value (kind-dependent, see Kind).

@@ -19,10 +19,10 @@ import (
 // "kubo:" — manually created apps are never modified or deleted.
 
 var (
-	cfAccessTag       = "kubo:"                            // name prefix for managed apps
-	cfAccessSecretKey = "account_id"                       // extra key in kubo-cloudflare-api-token
-	cfAccessIdPKey    = "access_idp_id"                    // SSO identity provider UUID
-	cfAccessDomainKey = "access_allowed_email_domain"      // e.g. "kubify.io"
+	cfAccessTag       = "kubo:"                       // name prefix for managed apps
+	cfAccessSecretKey = "account_id"                  // extra key in kubo-cloudflare-api-token
+	cfAccessIdPKey    = "access_idp_id"               // SSO identity provider UUID
+	cfAccessDomainKey = "access_allowed_email_domain" // e.g. "kubify.io"
 )
 
 type cfAccessClient struct {
@@ -60,10 +60,12 @@ func newCFAccessClient(ctx context.Context, c client.Client) (*cfAccessClient, e
 }
 
 type cfAccessApp struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Domain string `json:"domain"`
-	Type   string `json:"type"`
+	ID                     string   `json:"id"`
+	Name                   string   `json:"name"`
+	Domain                 string   `json:"domain"`
+	Type                   string   `json:"type"`
+	AllowedIDPs            []string `json:"allowed_idps"`
+	AutoRedirectToIdentity bool     `json:"auto_redirect_to_identity"`
 }
 
 type cfAccessPolicy struct {
@@ -102,7 +104,9 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 
 	for _, a := range apps {
 		if a.Name == appName {
-			if a.Domain == host {
+			idpCorrect := ac.idpID == "" || (len(a.AllowedIDPs) == 1 && a.AllowedIDPs[0] == ac.idpID)
+			redirectCorrect := ac.idpID == "" || a.AutoRedirectToIdentity
+			if a.Domain == host && idpCorrect && redirectCorrect {
 				return a.ID, nil // already correct
 			}
 			// Domain drift — update.
@@ -114,6 +118,7 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 			}
 			if ac.idpID != "" {
 				body["allowed_idps"] = []string{ac.idpID}
+				body["auto_redirect_to_identity"] = true
 			}
 			var updated cfAccessApp
 			if err := ac.send(ctx, "PUT", fmt.Sprintf("/accounts/%s/access/apps/%s", ac.accountID, a.ID), body, &updated); err != nil {
@@ -133,6 +138,7 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 	}
 	if ac.idpID != "" {
 		body["allowed_idps"] = []string{ac.idpID}
+		body["auto_redirect_to_identity"] = true
 	}
 	var created cfAccessApp
 	if err := ac.send(ctx, "POST", fmt.Sprintf("/accounts/%s/access/apps", ac.accountID), body, &created); err != nil {

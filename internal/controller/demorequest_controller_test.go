@@ -39,6 +39,28 @@ func TestTenantSlug(t *testing.T) {
 	}
 }
 
+func TestDemoRequestsForStack(t *testing.T) {
+	sch := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(sch); err != nil {
+		t.Fatal(err)
+	}
+	matching := &platformv1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "matching", Namespace: "kubo-system"},
+		Status:     platformv1alpha1.DemoRequestStatus{Tenant: "test-13cd"},
+	}
+	other := &platformv1alpha1.DemoRequest{
+		ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "kubo-system"},
+		Status:     platformv1alpha1.DemoRequestStatus{Tenant: "other-tenant"},
+	}
+	r := &DemoRequestReconciler{Client: fake.NewClientBuilder().WithScheme(sch).WithObjects(matching, other).Build()}
+	stack := &platformv1alpha1.Stack{ObjectMeta: metav1.ObjectMeta{Name: "product", Namespace: "test-13cd"}}
+
+	requests := r.demoRequestsForStack(context.Background(), stack)
+	if len(requests) != 1 || requests[0].Name != "matching" || requests[0].Namespace != "kubo-system" {
+		t.Fatalf("demoRequestsForStack() = %#v, want kubo-system/matching", requests)
+	}
+}
+
 func TestDemoRequestReconcileProvisionsAndMirrors(t *testing.T) {
 	sch := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(sch)

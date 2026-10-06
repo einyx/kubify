@@ -954,6 +954,20 @@ func (in *StackSpec) DeepCopyInto(out *StackSpec) {
 			(*out)[key] = val
 		}
 	}
+	if in.ImageTags != nil {
+		in, out := &in.ImageTags, &out.ImageTags
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
+	if in.ChartVersions != nil {
+		in, out := &in.ChartVersions, &out.ChartVersions
+		*out = make(map[string]string, len(*in))
+		for key, val := range *in {
+			(*out)[key] = val
+		}
+	}
 	if in.SecretsRef != nil {
 		in, out := &in.SecretsRef, &out.SecretsRef
 		*out = make([]SecretMapping, len(*in))
@@ -1085,6 +1099,11 @@ func (in *VaultSeed) DeepCopyInto(out *VaultSeed) {
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
+	}
+	if in.AutoReinit != nil {
+		in, out := &in.AutoReinit, &out.AutoReinit
+		*out = new(bool)
+		**out = **in
 	}
 }
 

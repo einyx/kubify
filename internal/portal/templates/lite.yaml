@@ -8,23 +8,6 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: "{{.Tenant}}"
-  labels:
-    istio.io/dataplane-mode: ambient
-    istio.io/use-waypoint: waypoint
----
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: waypoint
-  namespace: "{{.Tenant}}"
-  labels:
-    istio.io/waypoint-for: service
-spec:
-  gatewayClassName: istio-waypoint
-  listeners:
-    - name: mesh
-      port: 15008
-      protocol: HBONE
 ---
 # Seed propagation fills the key before deployment; watcher owns this Secret
 # in Helm so its first install can adopt it without an ownership conflict.
@@ -76,7 +59,7 @@ spec:
     storage-engine: v0.0.43
     trino: "482-kubify"
     ai: v0.0.2
-    dai-backend: v0.2.79
+    dai-backend: v0.2.87
     dai-frontend: basepath
     watcher: v2.0.25
   seedVault:
@@ -104,8 +87,10 @@ spec:
           name: kubo-shared-auth0-frontend
           keys:
             AUTH0_CLIENT_ID: AUTH0_CLIENT_ID
+            NEXT_PUBLIC_AUTH0_CLIENT_ID: AUTH0_CLIENT_ID
             AUTH0_CLIENT_SECRET: AUTH0_CLIENT_SECRET
             AUTH0_DOMAIN: AUTH0_DOMAIN
+            NEXT_PUBLIC_AUTH0_DOMAIN: AUTH0_DOMAIN
             AUTH0_AUDIENCE: AUTH0_AUDIENCE
             AUTH0_ISSUER_BASE_URL: AUTH0_ISSUER_BASE_URL
       - name: "{{.Tenant}}-trino-auth0"
@@ -125,6 +110,14 @@ spec:
       - name: "{{.Tenant}}-dai-backend"
         copyFrom:
           name: kubo-shared-dai-backend
+      # DAI needs the same Anthropic key as the ai component; without it the
+      # chart falls back to the placeholder MX_ANTHROPIC_API_KEY and LLM
+      # calls fail.
+      - name: "{{.Tenant}}-dai-backend"
+        copyFrom:
+          name: kubo-shared-ai
+          keys:
+            MX_ANTHROPIC_API_KEY: MX_ANTHROPIC_API_KEY
       - name: "{{.Tenant}}-dai-frontend"
         copyFrom:
           name: kubo-shared-dai-frontend
@@ -141,6 +134,15 @@ spec:
           name: kubifyregistry-helm-secret
           namespace: acr-cache-system
     generated:
+      # Pre-populates the Helm-owned Secret declared above. Without this,
+      # watcher chart first-install evaluates index on an empty Secret and
+      # backend's migrations cannot resolve MX_API_KEY.
+      - name: "{{.Tenant}}-foundation-watcher-api-key"
+        generate:
+          MX_API_KEY: {kind: hex, length: 32}
+      - name: "{{.Tenant}}-foundation-scheduler-user-credentials"
+        generate:
+          credentials.json: {kind: scheduler-credentials}
       - name: "{{.Tenant}}-trino-jwt-signing-key"
         type: kubernetes.io/tls
         generate:
@@ -186,6 +188,8 @@ spec:
   # Secrets are pre-created in kubo-system with the "{{.Tenant}}-" prefix
   # and propagated here by the kubo operator on every reconcile.
   secretsRef:
+    - from: "{{.Tenant}}-foundation-watcher-api-key"
+      to: foundation-watcher-api-key
     - from: "{{.Tenant}}-backend-auth0"
       to: backend-auth0
     - from: "{{.Tenant}}-frontend-auth0"
@@ -202,6 +206,8 @@ spec:
       to: product-ai-secrets
     - from: "{{.Tenant}}-hive-metastore-minio-credentials"
       to: hive-metastore-minio-credentials
+    - from: "{{.Tenant}}-foundation-scheduler-user-credentials"
+      to: foundation-scheduler-user-credentials
     - from: "{{.Tenant}}-dai-backend"
       to: dai-backend
     - from: "{{.Tenant}}-dai-frontend"
@@ -368,8 +374,14 @@ spec:
           match:
           - uri:
               exact: /ai
-          redirect:
-            uri: /ai/
+          rewrite:
+            uri: /dev
+          route:
+          - destination:
+              host: ai-product-ai
+              port:
+                number: 8000
+          timeout: 300s
         - name: ai
           match:
           - uri:
@@ -475,10 +487,13 @@ spec:
             grant_public.sql: |
               GRANT CREATE ON SCHEMA public TO product;
             vector.sql: |
+              ALTER ROLE product WITH SUPERUSER;
               \connect product
               CREATE EXTENSION IF NOT EXISTS vector;
             dai.sql: |
               CREATE DATABASE dai OWNER product;
+              \connect dai
+              CREATE EXTENSION IF NOT EXISTS pg_trgm;
             ai.sql: |
               CREATE DATABASE ai OWNER product;
 
@@ -785,7 +800,7 @@ spec:
           MX_AUTH0_AUDIENCE: "https://demo.kubify.foundation/"
           MX_AUTH0_ENABLED: "true"
           MX_ENV: "production"
-          MX_RELEASE_TAG: "v0.2.79"
+          MX_RELEASE_TAG: "v0.2.87"
           MX_POSTGRES_HOST: "postgres-postgresql"
           MX_POSTGRES_PORT: "5432"
           MX_POSTGRES_USER: "product"
@@ -806,8 +821,11 @@ spec:
         value: https://auth0-stg.kubify.app
       - name: AUTH0_BASE_URL
         value: https://{{.Tenant}}.kubify.foundation/dai
+      # Origin only — no /dai suffix. The app already serves under
+      # NEXT_PUBLIC_BASE_PATH=/dai and prefixes it itself; a suffixed
+      # APP_BASE_URL doubles every redirect (/dai/dai/auth/callback).
       - name: APP_BASE_URL
-        value: https://{{.Tenant}}.kubify.foundation/dai
+        value: https://{{.Tenant}}.kubify.foundation
       - name: AUTH0_DOMAIN
         valueFrom:
           secretKeyRef:
@@ -830,6 +848,17 @@ spec:
             key: AUTH0_SECRET
       - name: API_URL
         value: http://dai-backend:8000
+      # dai-frontend middleware proxies /api/* to the backend; it reads
+      # INTERNAL_API_URL (preferred) or NEXT_PUBLIC_API_URL — without one
+      # of these every API call 502s and the app shows its "page isn't
+      # available" fallback. API_URL alone is not read by the proxy.
+      - name: INTERNAL_API_URL
+        value: http://dai-backend:8000
+      # Tokens are requested with this audience; dai-backend validates
+      # MX_AUTH0_AUDIENCE. Without it every authenticated API call 403s
+      # with "Audience doesn't match".
+      - name: AUTH0_AUDIENCE
+        value: https://demo.kubify.foundation/
 
     watcher:
       replicaCount: 1
@@ -888,7 +917,7 @@ spec:
         name: kubifyregistry-helm-secret
       chartRef:
         chartName: storage-engine
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
       dependsOn:
       - postgres
       name: storage-engine
@@ -937,13 +966,15 @@ spec:
         repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
+      dependsOnReady:
+      - postgres
       name: watcher
       scope: Namespaced
     - chartPullSecretRef:
         name: kubifyregistry-helm-secret
       chartRef:
         chartName: opa
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
       dependsOn:
       - backend
       name: opa
@@ -952,7 +983,7 @@ spec:
         name: kubifyregistry-helm-secret
       chartRef:
         chartName: scheduler
-        repoURL: oci://kubifyregistry.azurecr.io/kubo/charts
+        repoURL: oci://kubifyregistry.azurecr.io/cached/ecr-kubify/foundation-charts
       dependsOn:
       - backend
       name: scheduler
@@ -991,6 +1022,8 @@ spec:
     - chartRef:
         chartName: dai-backend
       dependsOn:
+      - postgres
+      dependsOnReady:
       - postgres
       name: dai-backend
       scope: Namespaced

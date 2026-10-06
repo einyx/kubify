@@ -228,6 +228,14 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *pl
 		ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns},
 		Spec: appsv1.DeploymentSpec{
 			Replicas: &replicas,
+			// Recreate, not RollingUpdate: the deployment is single-replica
+			// with a ReadWriteOnce PVC. A rolling update deadlocks — the
+			// new pod can't attach the volume while the old (Ready) pod
+			// holds it, and the old pod is only removed once the new one
+			// is Ready. Recreate accepts a brief outage instead.
+			Strategy: appsv1.DeploymentStrategy{
+				Type: appsv1.RecreateDeploymentStrategyType,
+			},
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": agentfwName}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
@@ -322,6 +330,9 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *pl
 	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
 	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
 	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
+	// Sync strategy so deployments created before the Recreate default stop
+	// deadlocking on the RWO PVC during rollouts.
+	existing.Spec.Strategy = desired.Spec.Strategy
 	// Sync the policy checksum so mitmEnabled flips roll the pod.
 	if existing.Spec.Template.Annotations == nil {
 		existing.Spec.Template.Annotations = map[string]string{}

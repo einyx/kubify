@@ -67,29 +67,13 @@ func TestMatchBundleImage(t *testing.T) {
 			t.Errorf("matchBundleImage(%q) tag = %q, want %q", tt.component, img.Tag, tt.wantTag)
 		}
 	}
+	// A product-prefixed component must NOT fall through to another
+	// product's image by basename — dai-backend is not foundation/backend.
+	if _, ok := matchBundleImage("dai-backend", images); ok {
+		t.Error("dai-backend must not match the foundation backend image")
+	}
 }
 
-func TestLookupBundleImage(t *testing.T) {
-	images := map[string]bundleImage{
-		"backend":      bi("backend", "reg.io/example/backend", "v1"),
-		"acme-watcher": bi("acme-watcher", "reg.io/example/acme-watcher", "v9"),
-	}
-	// exact name
-	if img, ok := lookupBundleImage("backend", images); !ok || img.Tag != "v1" {
-		t.Errorf("lookup backend: got %v %v", img, ok)
-	}
-	// repo URL basename
-	if img, ok := lookupBundleImage("reg.io/example/backend", images); !ok || img.Tag != "v1" {
-		t.Errorf("lookup by repo URL: got %v %v", img, ok)
-	}
-	// suffix match through product prefix
-	if img, ok := lookupBundleImage("reg.io/example/acme-watcher", images); !ok || img.Tag != "v9" {
-		t.Errorf("lookup suffixed: got %v %v", img, ok)
-	}
-	if _, ok := lookupBundleImage("nope", images); ok {
-		t.Error("lookup nope should not match")
-	}
-}
 
 func TestRewriteBundleValues(t *testing.T) {
 	values := map[string]interface{}{
@@ -114,12 +98,15 @@ func TestRewriteBundleValues(t *testing.T) {
 	if pg := values["postgres"].(map[string]interface{}); pg["enabled"] != false {
 		t.Error("empty existingSecret should disable the component")
 	}
+	// Image refs are deliberately NOT rewritten here — the
+	// component-scoped applyBundleImage owns that (see
+	// TestRewriteBundleValuesDoesNotTouchImages).
 	img := values["image"].(map[string]interface{})
-	if img["repository"] != "mirror.io/example/backend" {
-		t.Errorf("repository not rewritten: %v", img["repository"])
+	if img["repository"] != "ghcr.io/example/backend" {
+		t.Errorf("repository must be untouched: %v", img["repository"])
 	}
-	if img["tag"] != "v7" {
-		t.Errorf("tag not pinned to bundle tag: %v", img["tag"])
+	if img["tag"] != "latest" {
+		t.Errorf("tag must be untouched: %v", img["tag"])
 	}
 	secrets := values["imagePullSecrets"].([]interface{})
 	if len(secrets) != 1 || secrets[0].(map[string]interface{})["name"] != "pull-secret" {
@@ -134,20 +121,25 @@ func TestRewriteBundleValues(t *testing.T) {
 	}
 }
 
-func TestRewriteImageRefsSplitsRegistry(t *testing.T) {
+func TestRewriteBundleValuesDoesNotTouchImages(t *testing.T) {
+	// The recursive repo rewrite was removed: rewriteBundleValues must
+	// never touch image repositories (the component-scoped
+	// matchBundleImage + applyBundleImage pair owns that), otherwise one
+	// product's bundle rewrites another product's repos by basename.
 	values := map[string]interface{}{
 		"image": map[string]interface{}{
 			"registry":   "old.reg.io",
-			"repository": "example/backend",
+			"repository": "example/dai/backend",
+			"tag":        "v0.2.79",
 		},
 	}
 	images := map[string]bundleImage{
-		"backend": bi("backend", "mirror.io/example/backend", "v1"),
+		"backend": bi("backend", "mirror.io/example/backend", "v7"),
 	}
-	rewriteImageRefs(values, images)
+	rewriteBundleValues(values, images, "")
 	img := values["image"].(map[string]interface{})
-	if img["registry"] != "mirror.io" || img["repository"] != "example/backend" {
-		t.Errorf("registry split wrong: %v", img)
+	if img["repository"] != "example/dai/backend" || img["tag"] != "v0.2.79" {
+		t.Errorf("image rewritten: %v", img)
 	}
 }
 
