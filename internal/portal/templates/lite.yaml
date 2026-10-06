@@ -28,8 +28,96 @@ apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
   name: product
+  annotations:
+    # TLS-terminate agent CONNECT tunnels so prompts and token usage are
+    # archived and scanned. Reverse-proxy routes (ANTHROPIC_BASE_URL via
+    # agentfw) are inspected without MITM; the ai component also mounts the
+    # agentfw-ca trust bundle (SSL_CERT_FILE) so HTTPS_PROXY-style egress
+    # keeps working when termination is on.
+    kubify.io/agentfw-mitm: "true"
   namespace: "{{.Tenant}}"
 spec:
+  # Operator-managed tenant routes. The frontend chart's own VirtualService
+  # is DISABLED (see the frontend component values): two writers on one VS
+  # caused helm ownership races. The operator creates/updates this one —
+  # full route table: app, /dai, /mcp, /ai.
+  virtualService:
+    name: frontend
+    gateway: foundation/foundation-gateway
+    host: "{{.Tenant}}.meshx.foundation"
+    http:
+    - name: dai
+      match:
+      - uri:
+          prefix: /dai
+      route:
+      - destination:
+          host: dai-frontend
+          port:
+            number: 3000
+      timeout: 50s
+    - name: mcp
+      match:
+      - uri:
+          prefix: /mcp
+      route:
+      - destination:
+          host: backend
+          port:
+            number: 8765
+      timeout: 300s
+    - name: ai-slash
+      match:
+      - uri:
+          exact: /ai
+      rewrite:
+        uri: /dev
+      route:
+      - destination:
+          host: ai-product-ai
+          port:
+            number: 8000
+      timeout: 300s
+    - name: ai
+      match:
+      - uri:
+          prefix: /ai/
+      rewrite:
+        uri: /
+      route:
+      - destination:
+          host: ai-product-ai
+          port:
+            number: 8000
+      timeout: 300s
+    - name: frontend
+      match:
+      - uri:
+          prefix: /
+      route:
+      - destination:
+          host: frontend
+          port:
+            number: 80
+      timeout: 50s
+      headers:
+        response:
+          set:
+            Strict-Transport-Security: max-age=31536000
+      corsPolicy:
+        allowHeaders:
+        - X-Account
+        - Content-Type
+        - Authorization
+        allowMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+        allowOrigins:
+        - exact: https://{{.Tenant}}.meshx.foundation
+
   # Frontend feature flags, grouped at the top level (the controller compiles
   # them into the frontend component's env.feature_flags). Mirror of the demo
   # tenant's curated set — do not rely on chart defaults, they drift.
@@ -62,6 +150,7 @@ spec:
     dai-backend: v0.2.87
     dai-frontend: basepath
     watcher: v2.0.25
+    foundation-bootstrap: "0.1.36"
   seedVault:
     # Product knowledge lives HERE, not in the controller: static entries
     # copy shared credentials from canonical kubo-system sources; generated
@@ -221,14 +310,13 @@ spec:
       # is a full tenant outage. Requests/limits mirror the foundation
       # backend; min 2 keeps rollouts non-disruptive.
       autoscaling:
-        minReplicas: 2
-        maxReplicas: 5
+        minReplicas: 1
+        maxReplicas: 3
       resources:
         requests:
-          cpu: 300m
+          cpu: 250m
           memory: 512Mi
         limits:
-          cpu: 1500m
           memory: 4Gi
       config:
         auth0:
@@ -238,6 +326,10 @@ spec:
           enabled: true
         kafka:
           cluster_host: kafka:9092
+        nats:
+          url: nats://nats:4222
+          stream_name: foundation-broker
+          subject_prefix: dev
         scheduler:
           host: scheduler
           port: 65434
@@ -319,10 +411,9 @@ spec:
       # higher — 256Mi limits OOMKill under real load.
       resources:
         requests:
-          cpu: 200m
+          cpu: 100m
           memory: 256Mi
         limits:
-          cpu: 500m
           memory: 512Mi
       # Traffic goes through the Istio VirtualService; the chart's default
       # Ingress has no hosts configured and is rejected as invalid.
@@ -343,9 +434,10 @@ spec:
           audience: ""
           domain: ""
       virtualService:
-        enabled: true
-        gateway: product/product-gateway
-        gatewayNamespace: product
+        # The operator owns the tenant routes VS (see spec.virtualService).
+        # The chart's VS must stay off: a second writer raced helm installs
+        # on the same object and broke adoption.
+        enabled: false
         host: "{{.Tenant}}.meshx.foundation"
         additionalHosts:
         - "{{.Tenant}}.meshx.foundation"
@@ -462,10 +554,9 @@ spec:
         # and RAM-starved (shared_buffers 160MB, work_mem 4MB).
         resources:
           requests:
-            cpu: 500m
+            cpu: 250m
             memory: 1Gi
           limits:
-            cpu: "2"
             memory: 2Gi
         extendedConfiguration: |
           # Sized for a 2Gi-limit dedicated instance
@@ -528,10 +619,9 @@ spec:
         name: "{{.Tenant}}-processor"
       resources:
         limits:
-          cpu: "1"
           memory: 1Gi
         requests:
-          cpu: 500m
+          cpu: 250m
           memory: 512Mi
 
     scheduler:
@@ -608,7 +698,7 @@ spec:
       serviceAccount:
         create: false
       server:
-        workers: 2
+        workers: 1
         exchangeManager:
           name: filesystem
       accessControl:
@@ -695,11 +785,10 @@ spec:
               heapRegionSize: "32M"
         resources:
           limits:
-            cpu: 4
             memory: "12Gi"
           requests:
-            cpu: 2
-            memory: "8Gi"
+            cpu: 250m
+            memory: "2Gi"
         additionalVolumes:
         - emptyDir: {}
           name: trino-cache
@@ -725,14 +814,13 @@ spec:
             type: UseG1GC
             g1:
               heapRegionSize: "32M"
-        replicas: 2
+        replicas: 1
         resources:
           limits:
-            cpu: 2
             memory: "8Gi"
           requests:
-            cpu: 1
-            memory: "4Gi"
+            cpu: 250m
+            memory: "2Gi"
         additionalVolumeMounts:
         - mountPath: /mnt/trino-cache
           name: trino-cache
@@ -770,7 +858,19 @@ spec:
           MX_MCP_OAUTH_REDIRECT_URI: https://{{.Tenant}}.meshx.foundation/ai/oauth/mcp-callback
           MX_DEFAULT_MODEL: claude-sonnet-4-6
           ANTHROPIC_BASE_URL: http://agentfw:8080
+          SSL_CERT_FILE: /etc/agentfw-ca/ca.crt
 
+      # agentfw CA trust bundle (public half of agentfw-mitm-ca, republished
+      # by the operator as agentfw-ca). Needs chart product-ai 0.1.4+ for the
+      # extraVolumes/extraVolumeMounts support.
+      extraVolumes:
+      - name: agentfw-ca
+        secret:
+          secretName: agentfw-ca
+      extraVolumeMounts:
+      - name: agentfw-ca
+        mountPath: /etc/agentfw-ca
+        readOnly: true
     dai-backend:
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/dai/backend
@@ -792,6 +892,8 @@ spec:
         data:
           MX_NATS_URL: "nats://nats:4222"
           MX_NATS_AUTO_CREATE_STREAM: "true"
+          MX_NATS_STREAM_NAME: "foundation-broker"
+          MX_NATS_SUBJECT_PREFIX: "dev"
           MX_MONGO_DATABASE: "dai"
           MX_LLM_PROVIDER_TYPE: "anthropic"
           ANTHROPIC_BASE_URL: http://agentfw:8080
@@ -888,6 +990,36 @@ spec:
       # above must match this service name.
       fullnameOverride: watcher-{{.Tenant}}
 
+    foundation-bootstrap:
+      image:
+        repository: meshxregistry.azurecr.io/foundation-bootstrap
+        pullPolicy: Always
+      imagePullSecrets:
+      - name: acr-pull-secret
+      env:
+        API_URL: http://backend:65432/api
+        FOUNDATION_ENV: "{{.Tenant}}"
+        FOUNDATION_BUCKET: samples
+        MX_POSTGRES_PASSWORD:
+          valueFrom:
+            secretKeyRef:
+              name: postgres
+              key: superUserPassword
+      useImageConfig: true
+      existingSecret: "foundation-bootstrap-credentials"
+
+  # Charts come from the foundation bundle (one OCI artifact, versioned
+  # together) — components without chartRef.repoURL resolve their chart
+  # from it. Only charts the bundle does not ship (nats, postgres, kafka,
+  # trino, ai) keep a pinned repoURL; dai-* resolve from extraBundles below.
+  bundle:
+    url: oci://meshxregistry.azurecr.io/kubo/foundation-bundle:0.1.0
+    # Must be a docker-registry pull secret (.dockerconfigjson) — the
+    # bundle resolver cannot parse helm basic-auth secrets and every
+    # reconcile fails with "parse pull secret: unexpected end of JSON input".
+    secretRef:
+      name: acr-pull-secret
+
   extraBundles:
   - url: oci://ghcr.io/meshxdata/dai-bundle:0.0.8
     secretRef:
@@ -917,7 +1049,6 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: storage-engine
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - postgres
       name: storage-engine
@@ -936,12 +1067,21 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: backend
-        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - postgres
       - kafka
+      - nats
+      - storage-engine
       dependsOnReady:
       - postgres
+      - kafka
+      - nats
+      - storage-engine
+      # vault: intentionally absent — its bank-vaults pods carry no
+      # app.kubernetes.io/instance label, so a readiness gate here would
+      # never match and block backend forever. The operator's secret
+      # re-propagation pass (and the backend's own startup retry) covers
+      # the vault-unsealed-late window.
       name: backend
       scope: Namespaced
     - chartPullSecretRef:
@@ -974,7 +1114,6 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: opa
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - backend
       name: opa
@@ -983,7 +1122,6 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: scheduler
-        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
       dependsOn:
       - backend
       name: scheduler
@@ -992,7 +1130,6 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: processor
-        repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       name: processor
@@ -1012,12 +1149,25 @@ spec:
         name: meshxregistry-helm-secret
       chartRef:
         chartName: product-ai
-        chartVersion: 0.1.2
+        chartVersion: 0.1.4
         repoURL: oci://meshxregistry.azurecr.io/kubo/charts
       dependsOn:
       - backend
       - postgres
+      dependsOnReady:
+      - backend
+      - postgres
       name: ai
+      scope: Namespaced
+    - chartPullSecretRef:
+        name: meshxregistry-helm-secret
+      chartRef:
+        chartName: foundation-bootstrap
+        repoURL: oci://meshxregistry.azurecr.io/cached/ecr-meshx/foundation-charts
+      dependsOn:
+      - backend
+      - storage-engine
+      name: foundation-bootstrap
       scope: Namespaced
     - chartRef:
         chartName: dai-backend
