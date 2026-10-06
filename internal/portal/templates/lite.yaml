@@ -420,7 +420,7 @@ spec:
       ingress:
         enabled: false
       externalSecret:
-        enabled: true
+        enabled: false
         target:
           name: product-frontend-auth0
       env:
@@ -614,6 +614,7 @@ spec:
       migrations:
         enabled: false
       serviceAccount:
+        create: true
         # The chart names the ClusterRole "<serviceAccount>-clusterrole";
         # it must be unique per tenant or installs collide cluster-wide.
         name: "{{.Tenant}}-processor"
@@ -910,6 +911,27 @@ spec:
           MX_POSTGRES_SSLMODE: "disable"
 
     dai-frontend:
+      livenessProbe:
+        httpGet:
+          path: /dai/ready
+          port: http
+        initialDelaySeconds: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
+      readinessProbe:
+        httpGet:
+          path: /dai/ready
+          port: http
+        initialDelaySeconds: 10
+        periodSeconds: 10
+        timeoutSeconds: 5
+      startupProbe:
+        httpGet:
+          path: /dai/ready
+          port: http
+        failureThreshold: 30
+        periodSeconds: 10
+        timeoutSeconds: 5
       image:
         repository: meshxregistry.azurecr.io/foundation/dai-frontend
       imagePullSecrets:
