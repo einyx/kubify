@@ -1,6 +1,6 @@
-id: lite
-name: Lite
-description: Product lite — aligned 1:1 with Full for now (same components); kept as a separate entry to diverge later without breaking existing references.
+id: full
+name: Full
+description: Full product stack with all supported components.
 defaults:
   mode: Direct
 ---
