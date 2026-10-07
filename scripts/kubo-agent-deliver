@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+log() { printf '[kubo-agent] %s\n' "$*"; }
+fail() { printf '[kubo-agent] error: %s\n' "$*" >&2; exit 1; }
+require() { [[ -n "${!1:-}" ]] || fail "$1 is required"; }
+
+require KUBO_REPOSITORY
+case "$KUBO_REPOSITORY" in
+  https://github.com/*) ;;
+  *) fail "KUBO_REPOSITORY must be an https://github.com URL" ;;
+esac
+
+revision="${KUBO_REVISION:-main}"
+workspace="${KUBO_WORKSPACE:-/workspace/repo}"
+agent="${KUBO_AGENT:-claude}"
+
+rm -rf "$workspace"
+mkdir -p "$(dirname "$workspace")"
+
+# GH_TOKEN is consumed by gh's credential helper and is never written into the
+# Git remote URL. Public repositories need no credential in smoke mode.
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  gh auth setup-git
+fi
+
+log "cloning $KUBO_REPOSITORY at $revision"
+git clone --filter=blob:none --no-checkout "$KUBO_REPOSITORY" "$workspace"
+cd "$workspace"
+git checkout "$revision"
+
+if [[ "${1:-}" == "--smoke" ]]; then
+  git status --short --branch
+  log "smoke test completed"
+  exit 0
+fi
+
+require KUBO_TASK
+require GH_TOKEN
+
+case "$agent" in
+  claude) require ANTHROPIC_API_KEY ;;
+  codex) require OPENAI_API_KEY ;;
+  *) fail "KUBO_AGENT must be claude or codex" ;;
+esac
+
+slug="${HOSTNAME:-delivery}"
+slug="$(printf '%s' "$slug" | tr -cd '[:alnum:]-' | cut -c1-32)"
+branch="kubify/agent-${slug:-delivery}"
+git switch -c "$branch"
+git config user.name "Kubo Agent"
+git config user.email "agent@kubify.io"
+
+log "running $agent agent"
+case "$agent" in
+  claude)
+    claude --print --permission-mode acceptEdits "$KUBO_TASK"
+    ;;
+  codex)
+    codex exec --full-auto "$KUBO_TASK"
+    ;;
+esac
+
+if [[ -n "${KUBO_TEST_COMMAND:-}" ]]; then
+  log "running configured verification command"
+  /bin/bash -lc "$KUBO_TEST_COMMAND"
+fi
+
+if git diff --quiet && [[ -z "$(git status --porcelain)" ]]; then
+  fail "agent completed without producing changes"
+fi
+
+git add --all
+subject="$(printf '%s' "$KUBO_TASK" | tr '\n' ' ' | cut -c1-72)"
+git commit -m "Agent delivery: $subject"
+git push --set-upstream origin "$branch"
+
+body_file="$(mktemp)"
+trap 'rm -f "$body_file"' EXIT
+cat >"$body_file" <<EOF
+Created by Kubo AgentDelivery.
+
+Agent: $agent
+Source revision: $revision
+EOF
+
+pr_url="$(gh pr create --head "$branch" --base "$revision" --title "Agent delivery: $subject" --body-file "$body_file")"
+log "pull request opened: $pr_url"
+printf '%s\n' "$pr_url"
