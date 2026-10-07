@@ -631,6 +631,7 @@ spec:
             memory: 2Gi
         extendedConfiguration: |
           # Sized for a 2Gi-limit dedicated instance
+          listen_addresses = '*'
           shared_buffers = 512MB
           effective_cache_size = 1536MB
           work_mem = 16MB
