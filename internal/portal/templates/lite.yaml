@@ -592,6 +592,7 @@ spec:
         client:
           protocol: PLAINTEXT
       controller:
+        replicaCount: 1
         resources:
           limits:
             cpu: "2"
