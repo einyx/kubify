@@ -78,7 +78,7 @@ func Serve(ctx context.Context, addr, adminAddr, policyPath string) error {
 	}
 
 	newScanner := func(p Policy) *Scanner {
-		return &Scanner{Policy: p, Auditor: auditor, KillSwitch: ks, Sessions: sessions, Archive: archive}
+		return &Scanner{Policy: p, Auditor: auditor, KillSwitch: ks, Sessions: sessions, Archive: archive, Sources: NewInClusterSourceResolver()}
 	}
 
 	var core http.Handler

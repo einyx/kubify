@@ -5,11 +5,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -84,6 +86,9 @@ mitmCaKey: /etc/agentfw/mitm/ca.key
 func (r *StackReconciler) ensureTenantAgentFW(ctx context.Context, stack *platformv1alpha1.Stack) error {
 	ns := stack.Namespace
 
+	if err := r.ensureAgentFWRBAC(ctx, ns); err != nil {
+		return fmt.Errorf("agentfw rbac: %w", err)
+	}
 	if err := r.ensureAgentFWMITMCA(ctx, ns); err != nil {
 		return fmt.Errorf("agentfw mitm ca: %w", err)
 	}
@@ -98,6 +103,56 @@ func (r *StackReconciler) ensureTenantAgentFW(ctx context.Context, stack *platfo
 	}
 	if err := r.ensureAgentFWService(ctx, ns); err != nil {
 		return fmt.Errorf("agentfw service: %w", err)
+	}
+	return nil
+}
+
+func (r *StackReconciler) ensureAgentFWRBAC(ctx context.Context, ns string) error {
+	objects := []client.Object{
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
+		&rbacv1.Role{
+			ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns},
+			Rules:      []rbacv1.PolicyRule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list", "watch"}}},
+		},
+		&rbacv1.RoleBinding{
+			ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns},
+			Subjects:   []rbacv1.Subject{{Kind: "ServiceAccount", Name: agentfwName, Namespace: ns}},
+			RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: agentfwName},
+		},
+	}
+	for _, desired := range objects {
+		key := types.NamespacedName{Namespace: ns, Name: agentfwName}
+		existing := desired.DeepCopyObject().(client.Object)
+		err := r.Get(ctx, key, existing)
+		if apierrors.IsNotFound(err) {
+			if err := r.Create(ctx, desired); err != nil {
+				return err
+			}
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		switch current := existing.(type) {
+		case *rbacv1.Role:
+			want := desired.(*rbacv1.Role)
+			if reflect.DeepEqual(current.Rules, want.Rules) {
+				continue
+			}
+			current.Rules = want.Rules
+			if err := r.Update(ctx, current); err != nil {
+				return err
+			}
+		case *rbacv1.RoleBinding:
+			want := desired.(*rbacv1.RoleBinding)
+			if reflect.DeepEqual(current.Subjects, want.Subjects) && reflect.DeepEqual(current.RoleRef, want.RoleRef) {
+				continue
+			}
+			current.Subjects, current.RoleRef = want.Subjects, want.RoleRef
+			if err := r.Update(ctx, current); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -245,6 +300,7 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *pl
 					Annotations: map[string]string{"kubify.io/agentfw-policy": policyChecksum},
 				},
 				Spec: corev1.PodSpec{
+					ServiceAccountName: agentfwName,
 					SecurityContext: &corev1.PodSecurityContext{
 						// Let the nonroot agentfw (65532) write the viewer archive.
 						FSGroup: &fsGroup,
@@ -332,6 +388,7 @@ func (r *StackReconciler) ensureAgentFWDeployment(ctx context.Context, stack *pl
 	existing.Spec.Template.Spec.Containers = desired.Spec.Template.Spec.Containers
 	existing.Spec.Template.Spec.Volumes = desired.Spec.Template.Spec.Volumes
 	existing.Spec.Template.Spec.SecurityContext = desired.Spec.Template.Spec.SecurityContext
+	existing.Spec.Template.Spec.ServiceAccountName = desired.Spec.Template.Spec.ServiceAccountName
 	// Sync strategy so deployments created before the Recreate default stop
 	// deadlocking on the RWO PVC during rollouts.
 	existing.Spec.Strategy = desired.Spec.Strategy
@@ -400,6 +457,9 @@ func (r *StackReconciler) deleteAgentFW(ctx context.Context, stack *platformv1al
 	for _, obj := range []client.Object{
 		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
+		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
+		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: agentfwName, Namespace: ns}},
 		// ponytail: ConfigMap intentionally kept — preserves user policy customisations
 	} {
 		if err := r.Delete(ctx, obj); client.IgnoreNotFound(err) != nil {

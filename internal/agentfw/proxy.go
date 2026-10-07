@@ -257,6 +257,7 @@ func (px *Proxy) traceTunnel(r *http.Request, action string, status int, body st
 		RespBody:  body,
 		Findings:  findings,
 	}
+	rec.SourceIP, rec.SourceName = px.scanner.Sources.Resolve(r.RemoteAddr)
 	go func() { _, _ = a.Insert(rec) }() // best-effort, like Scanner.record
 }
 
@@ -320,6 +321,7 @@ func (px *Proxy) tunnelRaw(w http.ResponseWriter, r *http.Request) {
 			Action:     "allow",
 			Findings:   []Finding{{Kind: "tunnel", Pattern: "connect", Excerpt: "opaque TLS tunnel — payload not scanned"}},
 		}
+		rec.SourceIP, rec.SourceName = px.scanner.Sources.Resolve(r.RemoteAddr)
 		go func() { _, _ = a.Insert(rec) }() // best-effort, like Scanner.record
 	}
 }

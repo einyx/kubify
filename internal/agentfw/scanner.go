@@ -19,24 +19,27 @@ var ctxKeyCapture struct{}
 // request context so the response half (which may arrive via a proxy
 // clone that preserves context) can complete the row.
 type reqCapture struct {
-	start    time.Time
-	session  string
-	method   string
-	url      string
-	host     string
-	reqBody  string
-	model    string
-	action   string
-	findings []Finding
+	start      time.Time
+	session    string
+	method     string
+	url        string
+	host       string
+	reqBody    string
+	model      string
+	action     string
+	findings   []Finding
+	sourceIP   string
+	sourceName string
 }
 
 // Scanner runs the ordered inspection pipeline on a request/response pair.
 type Scanner struct {
 	Policy     Policy
 	Auditor    *Auditor
-	KillSwitch *KillSwitch   // optional
-	Sessions   *SessionStore // optional; enables taint classification
-	Archive    *Archive      // optional; enables the viewer archive
+	KillSwitch *KillSwitch     // optional
+	Sessions   *SessionStore   // optional; enables taint classification
+	Archive    *Archive        // optional; enables the viewer archive
+	Sources    *SourceResolver // optional; persists Kubernetes workload identity
 }
 
 // InspectRequest checks an outbound request. Returns an error if it should be blocked.
@@ -47,6 +50,7 @@ func (s *Scanner) InspectRequest(r *http.Request) (*http.Request, error) {
 	capture := &reqCapture{start: time.Now(), method: r.Method, url: r.URL.String(), host: r.Host}
 	if s.Archive != nil {
 		capture.session = SessionID(r)
+		capture.sourceIP, capture.sourceName = s.Sources.Resolve(r.RemoteAddr)
 	}
 
 	// 0. Kill switch — deny-all before any other check
@@ -237,6 +241,8 @@ func captureFrom(r *http.Request) *reqCapture {
 func (s *Scanner) insert(cap reqCapture, action string, status int, respBody string, findings []Finding) {
 	rec := Record{
 		SessionID:  cap.session,
+		SourceIP:   cap.sourceIP,
+		SourceName: cap.sourceName,
 		Time:       cap.start,
 		Method:     cap.method,
 		URL:        cap.url,
@@ -275,6 +281,8 @@ func (s *Scanner) record(cap *reqCapture, resp *http.Response, respBody string, 
 	usage.Model = model
 	rec := Record{
 		SessionID:  cap.session,
+		SourceIP:   cap.sourceIP,
+		SourceName: cap.sourceName,
 		Time:       cap.start,
 		Method:     cap.method,
 		URL:        cap.url,

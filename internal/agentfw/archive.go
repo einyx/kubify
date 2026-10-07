@@ -25,6 +25,8 @@ type Archive struct {
 type Record struct {
 	ID         int64     `json:"id"`
 	SessionID  string    `json:"session_id"`
+	SourceIP   string    `json:"source_ip,omitempty"`
+	SourceName string    `json:"source_name,omitempty"`
 	Time       time.Time `json:"time"`
 	Method     string    `json:"method"`
 	URL        string    `json:"url"`
@@ -82,6 +84,8 @@ const archiveSchema = `
 CREATE TABLE IF NOT EXISTS requests (
 	id          INTEGER PRIMARY KEY,
 	session_id  TEXT NOT NULL,
+	source_ip   TEXT NOT NULL DEFAULT '',
+	source_name TEXT NOT NULL DEFAULT '',
 	ts          INTEGER NOT NULL,
 	method      TEXT NOT NULL,
 	url         TEXT NOT NULL,
@@ -145,6 +149,13 @@ func (a *Archive) init() error {
 	if _, err := a.db.Exec(archiveSchema); err != nil {
 		return fmt.Errorf("archive schema: %w", err)
 	}
+	// Existing archives predate durable source attribution. SQLite has no
+	// ADD COLUMN IF NOT EXISTS, so inspect first and migrate in place.
+	for name, definition := range map[string]string{"source_ip": "TEXT NOT NULL DEFAULT ''", "source_name": "TEXT NOT NULL DEFAULT ''"} {
+		if err := ensureArchiveColumn(a.db, "requests", name, definition); err != nil {
+			return err
+		}
+	}
 	// Probe FTS5 once; modernc ships it in most builds. Fall back to LIKE.
 	if _, err := a.db.Exec(`CREATE VIRTUAL TABLE IF NOT EXISTS requests_fts USING fts5(url, req_body, resp_body, content='requests', content_rowid='id')`); err != nil {
 		a.fts = false
@@ -160,6 +171,37 @@ func (a *Archive) init() error {
 		VALUES ('delete', old.id, old.url, old.req_body, old.resp_body);
 	END`) //nolint:errcheck
 	a.fts = true
+	return nil
+}
+
+func ensureArchiveColumn(db *sql.DB, table, column, definition string) error {
+	rows, err := db.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, kind string
+		var notNull, primaryKey int
+		var defaultValue any
+		if err := rows.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	if _, err := db.Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition); err != nil {
+		return fmt.Errorf("archive migration add %s: %w", column, err)
+	}
 	return nil
 }
 
@@ -195,9 +237,9 @@ func (a *Archive) Insert(rec Record) (int64, error) {
 		in, out, cost = rec.Usage.InputTokens, rec.Usage.OutputTokens, rec.Usage.CostMicro
 	}
 	res, err := tx.Exec(`INSERT INTO requests
-		(session_id, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action, req_body, resp_body, input_tokens, output_tokens, cost_micro)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		rec.SessionID, rec.Time.Unix(), rec.Method, rec.URL, rec.Host, rec.Model,
+		(session_id, source_ip, source_name, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action, req_body, resp_body, input_tokens, output_tokens, cost_micro)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		rec.SessionID, rec.SourceIP, rec.SourceName, rec.Time.Unix(), rec.Method, rec.URL, rec.Host, rec.Model,
 		rec.Status, rec.DurationMS, rec.ReqBytes, rec.RespBytes, rec.Action,
 		rec.ReqBody, rec.RespBody, in, out, cost)
 	if err != nil {
@@ -234,7 +276,7 @@ func (a *Archive) List(opt SearchOptions) ([]Record, error) {
 	var err error
 
 	if opt.Query != "" && a.fts {
-		rows, err = a.db.Query(`SELECT r.id, r.session_id, r.ts, r.method, r.url, r.host, r.model, r.status, r.duration_ms, r.req_bytes, r.resp_bytes, r.action,
+		rows, err = a.db.Query(`SELECT r.id, r.session_id, r.source_ip, r.source_name, r.ts, r.method, r.url, r.host, r.model, r.status, r.duration_ms, r.req_bytes, r.resp_bytes, r.action,
 			COALESCE(r.input_tokens,0), COALESCE(r.output_tokens,0), COALESCE(r.cost_micro,0),
 			(SELECT COUNT(*) FROM findings f WHERE f.request_id = r.id)
 			FROM requests_fts q JOIN requests r ON r.id = q.rowid
@@ -244,7 +286,7 @@ func (a *Archive) List(opt SearchOptions) ([]Record, error) {
 			ftsQuery(opt.Query), opt.SessionID, opt.SessionID, opt.Action, opt.Action, opt.Limit, opt.Offset)
 	} else {
 		where, args := listWhere(opt)
-		rows, err = a.db.Query(`SELECT id, session_id, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action,
+		rows, err = a.db.Query(`SELECT id, session_id, source_ip, source_name, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action,
 			input_tokens, output_tokens, cost_micro,
 			0
 			FROM requests `+where+` ORDER BY ts DESC LIMIT ? OFFSET ?`,
@@ -307,13 +349,13 @@ func ftsQuery(q string) string {
 
 // Get returns one record with bodies and findings.
 func (a *Archive) Get(id int64) (*Record, error) {
-	row := a.db.QueryRow(`SELECT id, session_id, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action, req_body, resp_body,
+	row := a.db.QueryRow(`SELECT id, session_id, source_ip, source_name, ts, method, url, host, model, status, duration_ms, req_bytes, resp_bytes, action, req_body, resp_body,
 		input_tokens, output_tokens, cost_micro FROM requests WHERE id = ?`, id)
 	var r Record
 	var ts int64
 	var in, out, cost int64
 	var usage Usage
-	if err := row.Scan(&r.ID, &r.SessionID, &ts, &r.Method, &r.URL, &r.Host, &r.Model, &r.Status, &r.DurationMS, &r.ReqBytes, &r.RespBytes, &r.Action, &r.ReqBody, &r.RespBody, &in, &out, &cost); err != nil {
+	if err := row.Scan(&r.ID, &r.SessionID, &r.SourceIP, &r.SourceName, &ts, &r.Method, &r.URL, &r.Host, &r.Model, &r.Status, &r.DurationMS, &r.ReqBytes, &r.RespBytes, &r.Action, &r.ReqBody, &r.RespBody, &in, &out, &cost); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -441,7 +483,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 		var ts int64
 		var findings int
 		var inTok, outTok, cost int64
-		if err := rows.Scan(&r.ID, &r.SessionID, &ts, &r.Method, &r.URL, &r.Host, &r.Model, &r.Status, &r.DurationMS, &r.ReqBytes, &r.RespBytes, &r.Action,
+		if err := rows.Scan(&r.ID, &r.SessionID, &r.SourceIP, &r.SourceName, &ts, &r.Method, &r.URL, &r.Host, &r.Model, &r.Status, &r.DurationMS, &r.ReqBytes, &r.RespBytes, &r.Action,
 			&inTok, &outTok, &cost, &findings); err != nil {
 			return nil, err
 		}

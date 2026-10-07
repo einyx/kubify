@@ -8,6 +8,7 @@ import (
 	"helm.sh/helm/v3/pkg/release"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -141,12 +142,28 @@ func TestDeleteAgentFW(t *testing.T) {
 	if err := r.ensureTenantAgentFW(ctx, stack); err != nil {
 		t.Fatal(err)
 	}
+	var deployment appsv1.Deployment
+	if err := c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	if deployment.Spec.Template.Spec.ServiceAccountName != "agentfw" {
+		t.Fatalf("service account = %q, want agentfw", deployment.Spec.Template.Spec.ServiceAccountName)
+	}
 	if err := r.deleteAgentFW(ctx, stack); err != nil {
 		t.Fatalf("deleteAgentFW: %v", err)
 	}
 	for _, get := range []func() error{
 		func() error { return c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, depObj()) },
 		func() error { return c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, svcObj()) },
+		func() error {
+			return c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, &corev1.ServiceAccount{})
+		},
+		func() error {
+			return c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, &rbacv1.Role{})
+		},
+		func() error {
+			return c.Get(ctx, client.ObjectKey{Namespace: "tenant-ns", Name: "agentfw"}, &rbacv1.RoleBinding{})
+		},
 	} {
 		if err := get(); err == nil {
 			t.Error("agentfw object still exists after deleteAgentFW")

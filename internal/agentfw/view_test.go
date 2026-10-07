@@ -1,6 +1,7 @@
 package agentfw
 
 import (
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,41 @@ import (
 	"testing"
 	"time"
 )
+
+func TestArchiveMigratesSourceIdentityColumns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE requests (
+		id INTEGER PRIMARY KEY, session_id TEXT NOT NULL, ts INTEGER NOT NULL,
+		method TEXT NOT NULL, url TEXT NOT NULL, host TEXT NOT NULL,
+		model TEXT NOT NULL DEFAULT '', status INTEGER NOT NULL, duration_ms INTEGER NOT NULL,
+		req_bytes INTEGER NOT NULL, resp_bytes INTEGER NOT NULL, action TEXT NOT NULL,
+		req_body TEXT NOT NULL DEFAULT '', resp_body TEXT NOT NULL DEFAULT '',
+		input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
+		cost_micro INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	archive, err := OpenArchive(path)
+	if err != nil {
+		t.Fatalf("migrate legacy archive: %v", err)
+	}
+	defer archive.Close()
+	id, err := archive.Insert(Record{SessionID: "ip:10.0.0.3:1", SourceIP: "10.0.0.3", SourceName: "integration/backend-new", Method: "POST", URL: "https://example.test", Host: "example.test", Action: "allow"})
+	if err != nil {
+		t.Fatalf("insert after migration: %v", err)
+	}
+	record, err := archive.Get(id)
+	if err != nil || record.SourceName != "integration/backend-new" {
+		t.Fatalf("migrated identity = %+v, err %v", record, err)
+	}
+}
 
 func TestParseUsageOpenAI(t *testing.T) {
 	body := `{"model":"gpt-4o","usage":{"prompt_tokens":1000,"completion_tokens":250,"prompt_tokens_details":{"cached_tokens":200}}}`
@@ -79,7 +115,7 @@ func TestArchiveInsertListGet(t *testing.T) {
 	a := newTestArchive(t)
 
 	id, err := a.Insert(Record{
-		SessionID: "ip:10.0.0.1", Method: "POST", URL: "https://api.openai.com/v1/chat/completions",
+		SessionID: "ip:10.0.0.1", SourceIP: "10.0.0.1", SourceName: "integration/backend-abc", Method: "POST", URL: "https://api.openai.com/v1/chat/completions",
 		Host: "api.openai.com", Model: "gpt-4o", Status: 200, DurationMS: 120,
 		ReqBytes: 10, RespBytes: 20, Action: "allow",
 		ReqBody:  `{"model":"gpt-4o","messages":[{"role":"user","content":"hello secret-plan-xyz"}]}`,
@@ -101,6 +137,15 @@ func TestArchiveInsertListGet(t *testing.T) {
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2", len(recs))
 	}
+	var sourced Record
+	for _, rec := range recs {
+		if rec.ID == id {
+			sourced = rec
+		}
+	}
+	if sourced.SourceIP != "10.0.0.1" || sourced.SourceName != "integration/backend-abc" {
+		t.Fatalf("durable source identity not returned: %+v", sourced)
+	}
 
 	// Action filter
 	blocks, err := a.List(SearchOptions{Action: "block"})
@@ -112,6 +157,10 @@ func TestArchiveInsertListGet(t *testing.T) {
 	sess, err := a.List(SearchOptions{SessionID: "ip:10.0.0.1"})
 	if err != nil || len(sess) != 1 || sess[0].ID != id {
 		t.Fatalf("session filter: %v %+v", err, sess)
+	}
+	detail, err := a.Get(id)
+	if err != nil || detail.SourceName != "integration/backend-abc" {
+		t.Fatalf("durable source identity missing from detail: %v %+v", err, detail)
 	}
 
 	// Get with bodies and findings
