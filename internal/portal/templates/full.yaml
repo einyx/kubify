@@ -26,6 +26,25 @@ metadata:
 type: Opaque
 ---
 apiVersion: platform.kubo.io/v1alpha1
+kind: OAuthApplication
+metadata:
+  name: foundation
+  namespace: "{{.Tenant}}"
+spec:
+  providerRef: auth0-staging
+  applicationType: regular_web
+  callbacks:
+  - https://{{.Tenant}}.meshx.foundation/auth/callback
+  logoutURLs:
+  - https://{{.Tenant}}.meshx.foundation
+  webOrigins:
+  - https://{{.Tenant}}.meshx.foundation
+  allowedOrigins:
+  - https://{{.Tenant}}.meshx.foundation
+  secretTargetRef:
+    name: oauth-application
+---
+apiVersion: platform.kubo.io/v1alpha1
 kind: Stack
 metadata:
   name: product

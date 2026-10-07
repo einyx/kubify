@@ -76,7 +76,14 @@ func TestProductTemplatesEnableWatcherHTTPOrchestrator(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			var foundOAuth bool
 			for _, obj := range objects {
+				if app, ok := obj.(*platformv1alpha1.OAuthApplication); ok {
+					foundOAuth = true
+					if app.Spec.ProviderRef != "auth0-staging" || app.Spec.SecretTargetRef.Name != "oauth-application" || len(app.Spec.Callbacks) != 1 || app.Spec.Callbacks[0] != "https://acme.meshx.foundation/auth/callback" {
+						t.Fatalf("OAuthApplication values: %+v", app.Spec)
+					}
+				}
 				stack, ok := obj.(*platformv1alpha1.Stack)
 				if !ok {
 					continue
@@ -99,6 +106,9 @@ func TestProductTemplatesEnableWatcherHTTPOrchestrator(t *testing.T) {
 				}
 				if !values.Config.Orchestrator.WorkerEnabled || values.Config.Watcher.HTTP.URL != "http://watcher-acme:8000" {
 					t.Fatalf("backend watcher/orchestrator values: %+v", values.Config)
+				}
+				if !foundOAuth {
+					t.Fatal("rendered template has no OAuthApplication")
 				}
 				return
 			}
