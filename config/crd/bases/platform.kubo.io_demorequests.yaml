@@ -76,6 +76,12 @@ spec:
                   sent here.
                 pattern: ^[^\s@]+@[^\s@]+\.[^\s@]+$
                 type: string
+              skipNotification:
+                description: |-
+                  SkipNotification suppresses the demo-specific ready email. Internal
+                  provisioning consumers such as MarketplaceRequest own their lifecycle
+                  messaging and set this field.
+                type: boolean
               target:
                 description: |-
                   Target identifies the cluster or operator instance that should

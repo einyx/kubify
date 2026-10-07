@@ -76,6 +76,12 @@ type DemoRequestSpec struct {
 	// 72h window is the tenant's actual lifetime.
 	// +optional
 	Approved bool `json:"approved,omitempty"`
+
+	// SkipNotification suppresses the demo-specific ready email. Internal
+	// provisioning consumers such as MarketplaceRequest own their lifecycle
+	// messaging and set this field.
+	// +optional
+	SkipNotification bool `json:"skipNotification,omitempty"`
 }
 
 // DemoRequestStatus mirrors the provisioned tenant back to the requester flow.

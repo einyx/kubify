@@ -190,7 +190,7 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	switch stack.Status.Phase {
 	case "Ready":
-		if dr.Status.NotifiedAt == "" && r.Emailer != nil {
+		if !dr.Spec.SkipNotification && dr.Status.NotifiedAt == "" && r.Emailer != nil {
 			if err := r.Emailer.SendDemoReady(ctx, dr.Spec.Email, tenant, dr.Status.URL); err != nil {
 				log.Error(err, "demo ready email failed", "to", dr.Spec.Email)
 				return ctrl.Result{RequeueAfter: time.Minute}, r.setStatus(ctx, &dr,
@@ -221,7 +221,7 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	// ready email promises automatic removal, so an unset TTL must still
 	// expire, never leak a tenant.
 	ttl := 72 * time.Hour
-	if dr.Spec.TTL != nil && dr.Spec.TTL.Duration > 0 {
+	if dr.Spec.TTL != nil {
 		ttl = dr.Spec.TTL.Duration
 	}
 	// The TTL window is the tenant's lifetime: count from approval, not
@@ -233,17 +233,24 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 	deadline := base.Add(ttl)
-	dr.Status.ExpiresAt = deadline.UTC().Format(time.RFC3339)
+	if ttl > 0 {
+		dr.Status.ExpiresAt = deadline.UTC().Format(time.RFC3339)
+	} else {
+		dr.Status.ExpiresAt = ""
+	}
 	if err := r.Status().Update(ctx, &dr); err != nil {
 		return ctrl.Result{}, err
 	}
-	if time.Now().After(deadline) {
+	if ttl > 0 && time.Now().After(deadline) {
 		return ctrl.Result{}, r.expire(ctx, &dr)
 	}
 	// Requeue at the sooner of the TTL deadline and the mirror cadence:
 	// the phase must keep tracking the Stack (Ready flip → notify), so a
 	// 72h deadline must not suppress the 1-minute mirror.
-	requeue := time.Until(deadline)
+	requeue := time.Minute
+	if ttl > 0 && time.Until(deadline) < requeue {
+		requeue = time.Until(deadline)
+	}
 	if requeue > time.Minute {
 		requeue = time.Minute
 	}
@@ -252,7 +259,7 @@ func (r *DemoRequestReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // admit enforces capacity caps and records the tenant/URL.
 func (r *DemoRequestReconciler) admit(ctx context.Context, dr *platformv1alpha1.DemoRequest) error {
-	if r.MaxTenants > 0 {
+	if r.MaxTenants > 0 && !dr.Spec.SkipNotification {
 		var list platformv1alpha1.DemoRequestList
 		if err := r.List(ctx, &list); err != nil {
 			return err
@@ -260,7 +267,7 @@ func (r *DemoRequestReconciler) admit(ctx context.Context, dr *platformv1alpha1.
 		live := 0
 		for _, other := range list.Items {
 			sameObject := other.Namespace == dr.Namespace && other.Name == dr.Name
-			if !sameObject && other.Status.Phase != platformv1alpha1.DemoRequestExpired {
+			if !sameObject && !other.Spec.SkipNotification && other.Status.Phase != platformv1alpha1.DemoRequestExpired {
 				live++
 			}
 		}

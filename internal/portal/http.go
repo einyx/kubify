@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/einyx/kubo/api/v1alpha1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // Mux returns the portal HTTP handler:
@@ -93,8 +95,20 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 			respond(w, r, nil, fmt.Errorf("invalid JSON body"))
 			return
 		}
-		err := p.ActivateMarketplace(r.Context(), in.SubscriptionID, in.PlanID, in.Quantity)
-		respond(w, r, map[string]bool{"activated": err == nil}, err)
+		request, err := p.ActivateMarketplace(r.Context(), in.SubscriptionID, in.PlanID, in.Quantity)
+		if err != nil {
+			respond(w, r, nil, err)
+			return
+		}
+		respond(w, r, map[string]string{"name": request.Name, "phase": string(request.Status.Phase)}, nil)
+	})
+	handle("GET /api/marketplace/requests/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var request v1alpha1.MarketplaceRequest
+		err := p.client.Get(r.Context(), client.ObjectKey{Namespace: "kubo-system", Name: r.PathValue("name")}, &request)
+		respond(w, r, map[string]string{
+			"phase": string(request.Status.Phase), "message": request.Status.Message,
+			"tenant": request.Status.Tenant, "url": request.Status.URL,
+		}, err)
 	})
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		p.refreshAgentfws(r.Context()) // nav reflects discovered products immediately

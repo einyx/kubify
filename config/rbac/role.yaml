@@ -105,6 +105,7 @@ rules:
   - platform.kubo.io
   resources:
   - demorequests
+  - marketplacerequests
   - stackbackups
   - stackbootstraps
   - stackdefinitions
@@ -122,6 +123,7 @@ rules:
   - platform.kubo.io
   resources:
   - demorequests/status
+  - marketplacerequests/status
   - stackbackups/status
   - stackbootstraps/status
   - stackdefinitions/status

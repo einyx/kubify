@@ -1,0 +1,114 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.2
+  name: marketplacerequests.platform.kubo.io
+spec:
+  group: platform.kubo.io
+  names:
+    kind: MarketplaceRequest
+    listKind: MarketplaceRequestList
+    plural: marketplacerequests
+    shortNames:
+    - marketreq
+    singular: marketplacerequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.provider
+      name: Provider
+      type: string
+    - jsonPath: .spec.planId
+      name: Plan
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.tenant
+      name: Tenant
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              MarketplaceRequestSpec describes an activated purchase that should provision
+              a Foundation tenant. SubscriptionID is the provider's idempotency key.
+            properties:
+              offerId:
+                type: string
+              planId:
+                type: string
+              provider:
+                enum:
+                - azure
+                type: string
+              providerTenantId:
+                type: string
+              purchaserEmail:
+                type: string
+              quantity:
+                format: int32
+                minimum: 1
+                type: integer
+              subscriptionId:
+                type: string
+              subscriptionName:
+                type: string
+              template:
+                enum:
+                - lite
+                - full
+                type: string
+            required:
+            - offerId
+            - planId
+            - provider
+            - purchaserEmail
+            - subscriptionId
+            - template
+            type: object
+          status:
+            properties:
+              demoRequestRef:
+                type: string
+              message:
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                type: string
+              tenant:
+                type: string
+              url:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
