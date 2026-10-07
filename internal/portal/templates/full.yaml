@@ -674,6 +674,9 @@ spec:
       readReplicas:
         replicaCount: 2
         podAntiAffinityPreset: hard
+        extraEnvVars:
+        - name: POSTGRESQL_MAX_CONNECTIONS
+          value: "200"
         extendedConfiguration: |
           # Standby recovery requires this to be at least the primary value.
           max_connections = 200
