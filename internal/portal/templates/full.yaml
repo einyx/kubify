@@ -379,7 +379,7 @@ spec:
             url: http://watcher-{{.Tenant}}:8000
         postgres:
           database: product
-          host: postgres-postgresql
+          host: postgres-postgresql-primary
           port: 5432
         trino:
           jwt:
@@ -695,7 +695,7 @@ spec:
         postgres:
           password: product
           database: product
-          host: postgres-postgresql
+          host: postgres-postgresql-primary
           port: 5432
           user: product
         iceberg:
@@ -726,7 +726,7 @@ spec:
       config:
         MX_KAFKA_CLUSTER_HOST: kafka:9092
         MX_POSTGRES_DATABASE: product
-        MX_POSTGRES_HOST: postgres-postgresql
+        MX_POSTGRES_HOST: postgres-postgresql-primary
         MX_POSTGRES_PORT: 5432
         MX_POSTGRES_USER: product
         MX_SCHEDULER_HOST: 0.0.0.0
@@ -943,7 +943,7 @@ spec:
           name: product-ai-secrets
       config:
         env:
-          MX_DB_HOST: postgres-postgresql
+          MX_DB_HOST: postgres-postgresql-primary
           MX_DB_PORT: "5432"
           MX_DB_NAME: ai
           MX_DB_USER: product
@@ -999,7 +999,7 @@ spec:
           MX_AUTH0_ENABLED: "true"
           MX_ENV: "production"
           MX_RELEASE_TAG: "v0.2.87"
-          MX_POSTGRES_HOST: "postgres-postgresql"
+          MX_POSTGRES_HOST: "postgres-postgresql-primary"
           MX_POSTGRES_PORT: "5432"
           MX_POSTGRES_USER: "product"
           MX_POSTGRES_DATABASE: "dai"
@@ -1093,7 +1093,7 @@ spec:
           enabled: true
         postgres:
           database: product
-          host: postgres-postgresql
+          host: postgres-postgresql-primary
           port: 5432
           user: product
           existingSecret: postgres-postgresql
