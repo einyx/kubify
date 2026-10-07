@@ -476,6 +476,8 @@ spec:
     frontend:
       image:
         repository: meshxregistry.azurecr.io/cached/ecr-meshx/foundation/frontend
+      autoscaling:
+        maxReplicas: 2
       # Match the foundation frontend: idle use is ~100Mi and SSR bursts go
       # higher — 256Mi limits OOMKill under real load.
       resources:
