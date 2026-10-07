@@ -468,6 +468,9 @@ spec:
         enabled: false
         target:
           name: product-frontend-auth0
+      existingAuthSecret:
+        enabled: true
+        name: product-frontend-auth0
       env:
         internal_api_url: http://backend/
         auth0:

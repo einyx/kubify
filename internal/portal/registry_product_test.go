@@ -2,6 +2,7 @@ package portal
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -40,6 +41,22 @@ func TestProductTemplateInRegistry(t *testing.T) {
 			}
 			if stack.Spec.SeedVault == nil || len(stack.Spec.SeedVault.Static) == 0 || len(stack.Spec.SeedVault.Generated) == 0 {
 				t.Fatal("rendered stack must include bootstrap secrets in spec.seedVault")
+			}
+			frontend, ok := stack.Spec.ComponentValues["frontend"]
+			if !ok {
+				t.Fatal("rendered stack has no frontend values")
+			}
+			var values struct {
+				ExistingAuthSecret struct {
+					Enabled bool   `json:"enabled"`
+					Name    string `json:"name"`
+				} `json:"existingAuthSecret"`
+			}
+			if err := json.Unmarshal(frontend.Raw, &values); err != nil {
+				t.Fatalf("decode frontend values: %v", err)
+			}
+			if !values.ExistingAuthSecret.Enabled || values.ExistingAuthSecret.Name != "product-frontend-auth0" {
+				t.Fatalf("frontend must consume propagated Auth0 secret: %+v", values.ExistingAuthSecret)
 			}
 			return
 		}
