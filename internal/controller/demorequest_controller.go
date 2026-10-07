@@ -372,6 +372,19 @@ func (r *DemoRequestReconciler) deleteTenant(ctx context.Context, tenant string)
 			}
 		}
 	}
+	// Delete provider-backed OAuth applications explicitly before removing the
+	// namespace. Their finalizers call the provider API to delete the remote
+	// client; relying only on namespace garbage collection can hide that work
+	// behind a terminating namespace and leave an orphaned Auth0 application.
+	var oauthApps platformv1alpha1.OAuthApplicationList
+	if err := r.List(ctx, &oauthApps, client.InNamespace(tenant)); err != nil {
+		return fmt.Errorf("list OAuth applications: %w", err)
+	}
+	for i := range oauthApps.Items {
+		if err := r.Delete(ctx, &oauthApps.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("delete OAuth application %s: %w", oauthApps.Items[i].Name, err)
+		}
+	}
 	var stack platformv1alpha1.Stack
 	err := r.Get(ctx, types.NamespacedName{Namespace: tenant, Name: "product"}, &stack)
 	if err == nil {
