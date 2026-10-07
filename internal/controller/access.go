@@ -23,13 +23,15 @@ var (
 	cfAccessSecretKey = "account_id"                  // extra key in kubo-cloudflare-api-token
 	cfAccessIdPKey    = "access_idp_id"               // SSO identity provider UUID
 	cfAccessDomainKey = "access_allowed_email_domain" // e.g. "meshx.io"
+	cfAccessTokenKey  = "access_service_token_id"     // optional service token UUID
 )
 
 type cfAccessClient struct {
 	*cfDNSClient
-	accountID   string
-	idpID       string
-	emailDomain string
+	accountID      string
+	idpID          string
+	emailDomain    string
+	serviceTokenID string
 }
 
 func newCFAccessClient(ctx context.Context, c client.Client) (*cfAccessClient, error) {
@@ -47,15 +49,17 @@ func newCFAccessClient(ctx context.Context, c client.Client) (*cfAccessClient, e
 	}
 	idpID := strings.TrimSpace(string(sec.Data[cfAccessIdPKey]))
 	emailDomain := strings.TrimSpace(string(sec.Data[cfAccessDomainKey]))
+	serviceTokenID := strings.TrimSpace(string(sec.Data[cfAccessTokenKey]))
 	if emailDomain == "" {
 		emailDomain = "meshx.io"
 	}
 	dns, _ := newCFDNSClient(ctx, c)
 	return &cfAccessClient{
-		cfDNSClient: dns,
-		accountID:   accountID,
-		idpID:       idpID,
-		emailDomain: emailDomain,
+		cfDNSClient:    dns,
+		accountID:      accountID,
+		idpID:          idpID,
+		emailDomain:    emailDomain,
+		serviceTokenID: serviceTokenID,
 	}, nil
 }
 
@@ -107,7 +111,7 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 			idpCorrect := ac.idpID == "" || (len(a.AllowedIDPs) == 1 && a.AllowedIDPs[0] == ac.idpID)
 			redirectCorrect := ac.idpID == "" || a.AutoRedirectToIdentity
 			if a.Domain == host && idpCorrect && redirectCorrect {
-				return a.ID, nil // already correct
+				return a.ID, ac.ensureAccessPolicies(ctx, a.ID)
 			}
 			// Domain drift — update.
 			body := map[string]interface{}{
@@ -124,7 +128,7 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 			if err := ac.send(ctx, "PUT", fmt.Sprintf("/accounts/%s/access/apps/%s", ac.accountID, a.ID), body, &updated); err != nil {
 				return "", fmt.Errorf("update access app %s: %w", appName, err)
 			}
-			return updated.ID, nil
+			return updated.ID, ac.ensureAccessPolicies(ctx, updated.ID)
 		}
 		// Migrate legacy apps named kubo:ns/name — update name to host-based.
 	}
@@ -145,37 +149,57 @@ func (ac *cfAccessClient) ensureAccessApp(ctx context.Context, apps []cfAccessAp
 		return "", fmt.Errorf("create access app %s: %w", appName, err)
 	}
 
-	// Attach the SSO allow policy.
-	if err := ac.ensureAllowPolicy(ctx, created.ID); err != nil {
+	// Attach separate identity and machine policies. Cloudflare only accepts
+	// service-token credentials through a Service Auth policy (the API calls
+	// this decision non_identity); putting the selector in an ordinary allow
+	// policy causes login redirects.
+	if err := ac.ensureAccessPolicies(ctx, created.ID); err != nil {
 		return created.ID, fmt.Errorf("access policy for %s: %w", appName, err)
 	}
 	return created.ID, nil
 }
 
 // ensureAllowPolicy ensures an "allow meshx.io" policy exists on the app.
-func (ac *cfAccessClient) ensureAllowPolicy(ctx context.Context, appID string) error {
+func (ac *cfAccessClient) ensureAccessPolicies(ctx context.Context, appID string) error {
 	var policies []cfAccessPolicy
 	if err := ac.get(ctx, fmt.Sprintf("/accounts/%s/access/apps/%s/policies", ac.accountID, appID), &policies); err != nil {
 		return err
 	}
+	if err := ac.ensureAllowPolicy(ctx, appID, policies); err != nil {
+		return err
+	}
+	if ac.serviceTokenID != "" {
+		return ac.ensureServiceAuthPolicy(ctx, appID, policies)
+	}
+	return nil
+}
+
+func (ac *cfAccessClient) ensureAllowPolicy(ctx context.Context, appID string, policies []cfAccessPolicy) error {
 	policyName := "kubo-sso"
+	include := []map[string]interface{}{{"email_domain": map[string]string{"domain": ac.emailDomain}}}
+	if ac.idpID != "" {
+		include = append(include, map[string]interface{}{"login_method": map[string]string{"id": ac.idpID}})
+	}
+	body := map[string]interface{}{"name": policyName, "decision": "allow", "include": include}
 	for _, p := range policies {
 		if p.Name == policyName && p.Decision == "allow" {
-			return nil // already exists
+			// Always update the managed SSO policy so stale service_token selectors
+			// are removed and moved to the dedicated service_auth policy.
+			return ac.send(ctx, "PUT", fmt.Sprintf("/accounts/%s/access/apps/%s/policies/%s", ac.accountID, appID, p.ID), body, nil)
 		}
 	}
-	include := []map[string]interface{}{
-		{"email_domain": map[string]string{"domain": ac.emailDomain}},
-	}
-	if ac.idpID != "" {
-		include = append(include, map[string]interface{}{
-			"login_method": map[string]string{"id": ac.idpID},
-		})
-	}
+	return ac.send(ctx, "POST", fmt.Sprintf("/accounts/%s/access/apps/%s/policies", ac.accountID, appID), body, nil)
+}
+
+func (ac *cfAccessClient) ensureServiceAuthPolicy(ctx context.Context, appID string, policies []cfAccessPolicy) error {
 	body := map[string]interface{}{
-		"name":     policyName,
-		"decision": "allow",
-		"include":  include,
+		"name": "kubo-service-auth", "decision": "non_identity",
+		"include": []map[string]interface{}{{"service_token": map[string]string{"token_id": ac.serviceTokenID}}},
+	}
+	for _, p := range policies {
+		if p.Name == "kubo-service-auth" {
+			return ac.send(ctx, "PUT", fmt.Sprintf("/accounts/%s/access/apps/%s/policies/%s", ac.accountID, appID, p.ID), body, nil)
+		}
 	}
 	return ac.send(ctx, "POST", fmt.Sprintf("/accounts/%s/access/apps/%s/policies", ac.accountID, appID), body, nil)
 }
