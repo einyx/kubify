@@ -34,6 +34,16 @@ func TestDLPRedactsAWSKey(t *testing.T) {
 	}
 }
 
+func TestDLPDoesNotRedactBareUUIDAsAzureSubscription(t *testing.T) {
+	id := "0c4b1234-5678-4abc-8def-0123456789ab"
+	if got := Redact(id); got != id {
+		t.Fatalf("bare resource UUID was redacted: %q", got)
+	}
+	if got := Redact("subscription_id=" + id); !strings.Contains(got, "[REDACTED:AZURE-SUB]") {
+		t.Fatalf("labeled Azure subscription was not redacted: %q", got)
+	}
+}
+
 func TestDLPBlocksOnBlockAction(t *testing.T) {
 	body := `Authorization: Bearer ghp_abc123def456ghi789jkl012mno345pqr678`
 	req := httptest.NewRequest(http.MethodPost, "http://example.com/api", strings.NewReader(body))
