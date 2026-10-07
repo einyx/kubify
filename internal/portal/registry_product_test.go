@@ -63,3 +63,46 @@ func TestProductTemplateInRegistry(t *testing.T) {
 	}
 	t.Fatal("rendered template has no Stack")
 }
+
+func TestProductTemplatesEnableWatcherHTTPOrchestrator(t *testing.T) {
+	r := NewRegistry(defaultTemplatesDir, nil)
+	for _, templateID := range []string{"full", "lite"} {
+		t.Run(templateID, func(t *testing.T) {
+			tpl, err := r.Get(context.Background(), templateID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			objects, err := renderTemplate(tpl.Body, "acme")
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, obj := range objects {
+				stack, ok := obj.(*platformv1alpha1.Stack)
+				if !ok {
+					continue
+				}
+				backend := stack.Spec.ComponentValues["backend"]
+				var values struct {
+					Config struct {
+						Orchestrator struct {
+							WorkerEnabled bool `json:"worker_enabled"`
+						} `json:"orchestrator"`
+						Watcher struct {
+							HTTP struct {
+								URL string `json:"url"`
+							} `json:"http"`
+						} `json:"watcher"`
+					} `json:"config"`
+				}
+				if err := json.Unmarshal(backend.Raw, &values); err != nil {
+					t.Fatal(err)
+				}
+				if !values.Config.Orchestrator.WorkerEnabled || values.Config.Watcher.HTTP.URL != "http://watcher-acme:8000" {
+					t.Fatalf("backend watcher/orchestrator values: %+v", values.Config)
+				}
+				return
+			}
+			t.Fatal("rendered template has no Stack")
+		})
+	}
+}

@@ -350,10 +350,14 @@ spec:
         scheduler:
           host: scheduler
           port: 65434
+        orchestrator:
+          worker_enabled: true
         watcher:
           # fullnameOverride below is per-tenant so the ClusterRole does not
           # collide across tenants; point the backend at the tenant's service.
           host: watcher-{{.Tenant}}
+          http:
+            url: http://watcher-{{.Tenant}}:8000
         postgres:
           database: product
           host: postgres-postgresql
