@@ -259,6 +259,15 @@ func main() {
 	}
 	utilruntime.Must(helmv2.AddToScheme(mgr.GetScheme()))
 	utilruntime.Must(sourcev1.AddToScheme(mgr.GetScheme()))
+	if err = (&controller.AgentDeliveryReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		SystemNamespace: envOr("POD_NAMESPACE", "kubo-system"),
+		SecretName:      envOr("SBX_SECRET_NAME", "docker-sandboxes"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AgentDelivery")
+		os.Exit(1)
+	}
 	if err = (&controller.StackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),

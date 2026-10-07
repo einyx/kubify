@@ -5,6 +5,32 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - platform.kubo.io
+  resources:
+  - agentdeliveries
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.kubo.io
+  resources:
+  - agentdeliveries/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - platform.kubo.io
+  resources:
+  - agentdeliveries/finalizers
+  verbs:
+  - update
+- apiGroups:
   - ""
   resources:
   - configmaps

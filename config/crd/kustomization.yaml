@@ -2,7 +2,14 @@
 # since it depends on service name and namespace that are out of this kustomize package.
 # It should be run by config/default
 resources:
+- bases/platform.kubo.io_agentdeliveries.yaml
+- bases/platform.kubo.io_demorequests.yaml
+- bases/platform.kubo.io_gitwritebackrequests.yaml
+- bases/platform.kubo.io_marketplacerequests.yaml
+- bases/platform.kubo.io_marketplacesubscriptions.yaml
+- bases/platform.kubo.io_stackbootstraps.yaml
 - bases/platform.kubo.io_stackdefinitions.yaml
+- bases/platform.kubo.io_stackreleases.yaml
 - bases/platform.kubo.io_stacks.yaml
 - bases/platform.kubo.io_stackbackups.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
