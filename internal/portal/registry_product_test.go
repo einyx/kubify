@@ -78,8 +78,16 @@ func TestProductTemplatesEnableWatcherHTTPOrchestrator(t *testing.T) {
 			}
 			var foundOAuth bool
 			for _, obj := range objects {
-				if app, ok := obj.(*platformv1alpha1.OAuthApplication); ok {
+				if obj.GetObjectKind().GroupVersionKind().Kind == "OAuthApplication" {
 					foundOAuth = true
+					raw, err := json.Marshal(obj)
+					if err != nil {
+						t.Fatal(err)
+					}
+					var app platformv1alpha1.OAuthApplication
+					if err := json.Unmarshal(raw, &app); err != nil {
+						t.Fatal(err)
+					}
 					if app.Spec.ProviderRef != "auth0-staging" || app.Spec.SecretTargetRef.Name != "oauth-application" || len(app.Spec.Callbacks) != 1 || app.Spec.Callbacks[0] != "https://acme.meshx.foundation/auth/callback" {
 						t.Fatalf("OAuthApplication values: %+v", app.Spec)
 					}
