@@ -48,7 +48,9 @@ func (r *SourceResolver) Resolve(remoteAddr string) (string, string) {
 	r.mu.RLock()
 	name, cacheFresh := r.cache[ip], time.Now().Before(r.expires)
 	r.mu.RUnlock()
-	if cacheFresh {
+	// Positive mappings are safe to cache briefly. Never negative-cache an IP:
+	// a pod may have started just after the previous namespace snapshot.
+	if cacheFresh && name != "" {
 		return ip, name
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)

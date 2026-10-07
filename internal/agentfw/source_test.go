@@ -38,3 +38,21 @@ func TestSourceIP(t *testing.T) {
 		}
 	}
 }
+
+func TestSourceResolverRefreshesUnknownIPs(t *testing.T) {
+	client := fake.NewSimpleClientset()
+	resolver := &SourceResolver{client: client, namespace: "integration", cache: map[string]string{}}
+	if _, name := resolver.Resolve("10.0.0.20:1234"); name != "" {
+		t.Fatalf("unexpected identity %q", name)
+	}
+	_, err := client.CoreV1().Pods("integration").Create(t.Context(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "new-pod", Namespace: "integration"},
+		Status:     corev1.PodStatus{PodIP: "10.0.0.21"},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, name := resolver.Resolve("10.0.0.21:5678"); name != "integration/new-pod" {
+		t.Fatalf("refreshed identity = %q", name)
+	}
+}
