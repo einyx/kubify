@@ -63,6 +63,8 @@ injectionAction: block
 baseURLDefault: https://api.anthropic.com
 baseURLRoutes:
   api.openai.com: https://api.openai.com
+signingKeyPath: /var/lib/agentfw/signing.key
+viewDBPath: /var/lib/agentfw/view.db
 `
 
 func agentfwMITMBlock(mitm bool) string {
