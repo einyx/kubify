@@ -39,7 +39,7 @@ scheduleRefresh();
 function routeFromHash() {
   const sm = location.hash.match(/^#\/agents\/session\/([\w.-]+)$/);
   if (sm) { afwSessionDetail(decodeURIComponent(sm[1])); return; }
-  const am = location.hash.match(/^#\/agents(\/(dashboard|sessions|requests|usage))?$/);
+  const am = location.hash.match(/^#\/agents(\/(dashboard|sessions|requests|graph|usage))?$/);
   if (am) { showAgents(am[1] ? am[1].slice(1) : 'dashboard'); return; }
   if (document.getElementById('agent-view').style.display === 'block') hideAgents(true);
   const m = location.hash.match(/^#\/([^/]+)\/([^/]+)(?:\/([a-z]+))?$/);

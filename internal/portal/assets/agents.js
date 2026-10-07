@@ -1,5 +1,5 @@
 // ── Agent traffic (agentfw) ────────────────────────────────────────────
-const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [], lastSig: '' };
+const afw = { tab: 'dashboard', q: '', action: '', session: '', product: '', page: 0, timer: null, products: [], lastSig: '', graphStop: null };
 const afwInt = n => (n ?? 0).toLocaleString('en-US');
 const afwCost = µ => {
   const d = (µ ?? 0) / 1e6;
@@ -31,6 +31,7 @@ async function afwAPI(path) {
 }
 
 function showAgents(tab) {
+	if (afw.graphStop) { afw.graphStop(); afw.graphStop = null; }
   currentDetail = null;
   document.getElementById('detail').style.display = 'none';
   document.getElementById('mcp-view').style.display = 'none';
@@ -61,6 +62,7 @@ function showAgents(tab) {
 }
 
 function hideAgents(fromRoute) {
+	if (afw.graphStop) { afw.graphStop(); afw.graphStop = null; }
   clearInterval(afw.timer);
   document.getElementById('agent-view').style.display = 'none';
   if (fromRoute) return;
@@ -71,6 +73,7 @@ function hideAgents(fromRoute) {
 
 document.querySelectorAll('#agent-tabbar button').forEach(b =>
   b.addEventListener('click', () => {
+		if (afw.graphStop) { afw.graphStop(); afw.graphStop = null; }
     afw.tab = b.dataset.atab; afw.page = 0;
     document.querySelectorAll('#agent-tabbar button').forEach(x => x.classList.toggle('active', x === b));
     history.replaceState(null, '', '#/agents' + (afw.tab !== 'dashboard' ? '/' + afw.tab : ''));
@@ -87,7 +90,7 @@ async function afwLoadProducts() {
 async function afwRender() {
   const live = document.getElementById('agent-live');
   try {
-    await ({ dashboard: afwDashboard, sessions: afwSessions, requests: afwRequests, usage: afwUsage })[afw.tab]();
+    await ({ dashboard: afwDashboard, sessions: afwSessions, requests: afwRequests, graph: afwGraph, usage: afwUsage })[afw.tab]();
     live.textContent = '● live'; live.style.color = 'var(--ok)';
   } catch (e) {
     live.textContent = '○ offline'; live.style.color = 'var(--err)';
@@ -95,6 +98,88 @@ async function afwRender() {
       `<div class="card-outer"><div class="card-inner"><div class="afw-empty">agentfw unreachable — ${esc(String(e.message || e))}<br>
        <span class="muted" style="font-size:11px">check the agentfw admin port / SetAgentfwURL configuration</span></div></div></div>`;
   }
+}
+
+async function afwGraph() {
+  const [{ requests = [] }, { sessions = [] }] = await Promise.all([
+    afwAPI('/requests?limit=500'),
+    afwAPI('/sessions?limit=500'),
+  ]);
+  document.getElementById('agent-body').innerHTML = `
+    <div class="afw-graph-shell">
+      <div class="afw-graph-head">
+        <div><strong>Traffic topology</strong><span>${afwInt(requests.length)} calls · ${afwInt(sessions.length)} sessions · line weight shows volume</span></div>
+        <div class="afw-graph-legend"><i class="product"></i>product <i class="session"></i>session <i class="model"></i>model <i class="target"></i>target <i class="finding"></i>finding</div>
+      </div>
+      <div id="afw-graph" role="img" aria-label="Interactive three-dimensional request knowledge graph"></div>
+      <div class="afw-graph-help">Drag to pan · scroll to zoom · select a node to isolate its relationships</div>
+      <aside id="afw-graph-inspect"><span class="muted">Select a node</span></aside>
+    </div>`;
+  afw.graphStop = afwStartGraph(document.getElementById('afw-graph'), requests);
+}
+
+function afwStartGraph(el, requests) {
+  if (typeof cytoscape !== 'function') throw new Error('graph engine did not load');
+  const cssColor = (token, fallback) => {
+    const probe = document.createElement('i');
+    probe.style.color = `var(${token})`; el.appendChild(probe);
+    const raw = getComputedStyle(probe).color; probe.remove();
+    const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = canvas.height = 1; ctx.fillStyle = fallback; ctx.fillStyle = raw; ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+    return `rgb(${r},${g},${b})`;
+  };
+  const colors = { product: cssColor('--orange-600', '#ea580c'), session: cssColor('--muted-foreground', '#605f59'), model: cssColor('--green-600', '#16a34a'), target: cssColor('--amber-700', '#b45309'), finding: cssColor('--destructive', '#dc2626') };
+  const nodes = new Map(), edges = [], edgeKeys = new Set();
+  const node = (id, type, label, extra = {}) => {
+    if (!nodes.has(id)) nodes.set(id, { id, type, label, hits: 0, displayLabel: type === 'session' ? '' : label.length > 26 ? label.slice(0, 25) + '…' : label, ...extra });
+    const n = nodes.get(id); n.hits++; return n;
+  };
+  const link = (source, target) => { const key = source.id + '>' + target.id, existing = edges.find(e => e.id === 'e:' + key); if (existing) { existing.hits++; return; } edgeKeys.add(key); edges.push({ id: 'e:' + key, source: source.id, target: target.id, hits: 1 }); };
+  requests.forEach(r => {
+    const productName = r.product || 'unknown';
+    const product = node('p:' + productName, 'product', productName);
+    const source = r.source_name || r.source_ip || r.session_id;
+    const session = node('s:' + productName + ':' + source, 'session', r.source_name || afwSessionLabel(r.session_id), {
+      sourceIP: r.source_ip || '', rawSession: r.session_id || ''
+    });
+    const model = node('m:' + (r.model || 'unpriced'), 'model', r.model || 'unpriced');
+    const targetLabel = afwURL(r.url || '').split('?')[0];
+    const target = node('t:' + targetLabel, 'target', targetLabel);
+    link(product, session); link(session, model); link(model, target);
+    (r.findings || []).forEach(f => { const finding = node('f:' + f.kind + ':' + f.pattern, 'finding', f.kind + ' · ' + f.pattern); link(session, finding); });
+  });
+  const elements = [...nodes.values()].map(data => ({ data: { ...data, size: data.type === 'product' ? 44 : data.type === 'model' ? 30 : Math.min(26, 14 + Math.log2(data.hits + 1) * 3), color: colors[data.type] } }))
+    .concat(edges.map(data => ({ data })));
+  const labelColor = cssColor('--foreground', '#0e0d0d'), labelBackground = cssColor('--card', '#ffffff'), lineColor = cssColor('--border', '#dbd9d4'), focusColor = cssColor('--primary', '#1b1818');
+  const cy = cytoscape({
+    container: el, elements, minZoom: .25, maxZoom: 3, wheelSensitivity: .18,
+    style: [
+      { selector: 'node', style: { 'width': 'data(size)', 'height': 'data(size)', 'background-color': 'data(color)', 'border-width': 2, 'border-color': labelBackground, 'label': 'data(displayLabel)', 'font-family': 'Stack Sans Text, sans-serif', 'font-size': 11, 'color': labelColor, 'text-margin-x': 9, 'text-valign': 'center', 'text-halign': 'right', 'text-background-color': labelBackground, 'text-background-opacity': .94, 'text-background-padding': 4, 'text-background-shape': 'roundrectangle', 'overlay-opacity': 0 } },
+      { selector: 'node[type = "product"]', style: { 'font-family': 'Stack Sans Headline, sans-serif', 'font-weight': 650, 'font-size': 13 } },
+      { selector: 'node[type = "finding"]', style: { 'shape': 'triangle' } },
+      { selector: 'edge', style: { 'width': 'mapData(hits, 1, 30, 1, 5)', 'line-color': lineColor, 'opacity': .72, 'curve-style': 'bezier' } },
+      { selector: '.show-label', style: { 'label': 'data(label)', 'z-index': 20 } },
+      { selector: '.focused', style: { 'border-width': 4, 'border-color': focusColor, 'z-index': 30 } },
+      { selector: 'node.faded', style: { 'opacity': .48, 'text-opacity': .32 } },
+      { selector: 'edge.faded', style: { 'opacity': .16 } },
+      { selector: 'edge.focused', style: { 'opacity': .95, 'line-color': focusColor } },
+    ],
+    layout: { name: 'breadthfirst', roots: [...nodes.values()].filter(n => n.type === 'product').map(n => n.id), directed: true, circle: false, spacingFactor: 1.55, avoidOverlap: true, maximal: true, animate: !matchMedia('(prefers-reduced-motion: reduce)').matches, animationDuration: 650 },
+  });
+  const clear = () => cy.elements().removeClass('faded focused show-label');
+  cy.on('mouseover', 'node', e => e.target.addClass('show-label'));
+  cy.on('mouseout', 'node', e => { if (!e.target.hasClass('focused')) e.target.removeClass('show-label'); });
+  cy.on('tap', e => {
+    if (e.target === cy) { clear(); document.getElementById('afw-graph-inspect').innerHTML = '<span class="muted">Select a node</span>'; return; }
+    if (!e.target.isNode()) return;
+    const n = e.target, hood = n.closedNeighborhood();
+    cy.elements().addClass('faded'); hood.removeClass('faded'); hood.edges().addClass('focused'); n.addClass('focused show-label');
+    const d = n.data();
+    document.getElementById('afw-graph-inspect').innerHTML = `<b style="color:${d.color}">${esc(d.type)}</b><strong>${esc(d.label)}</strong><span>${afwInt(d.hits)} requests · ${n.degree()} relationships</span>`;
+  });
+  cy.ready(() => cy.fit(undefined, 60));
+  return () => cy.destroy();
 }
 
 function afwCard(label, value, sub, color) {

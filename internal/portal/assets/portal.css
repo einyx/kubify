@@ -82,7 +82,12 @@
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
   }
-  .nav-logo svg { width: 20px; height: 28px; }
+  .nav-logo svg {
+    width: 20px; height: 28px;
+    transform-origin: 50% 50%;
+    transition: transform 650ms cubic-bezier(.22,1,.36,1);
+  }
+  .nav-brand:hover .nav-logo svg { transform: rotate(360deg); }
 
   .nav-title {
     font-size: 14px;
@@ -195,9 +200,13 @@
     background: rgba(15,18,25,0.08);
     display: flex; align-items: center; justify-content: center;
     font-size: 16px; font-weight: 400; line-height: 1;
-    transition: transform 400ms cubic-bezier(0.32,0.72,0,1);
+    transition: transform 650ms cubic-bezier(.22,1,.36,1);
   }
-  .btn:hover .btn-icon { transform: rotate(90deg) scale(1.08) translate(1px, -1px); }
+  .nav-right .btn:hover .btn-icon { transform: rotate(360deg) scale(1.08); }
+  @media (prefers-reduced-motion: reduce) {
+    .nav-right .btn:hover .btn-icon,
+    .nav-brand:hover .nav-logo svg { transform: none; }
+  }
 
   .btn.secondary {
     background: rgba(15,18,25,0.035);
@@ -927,6 +936,22 @@
   .afw-pager .btn { padding: 4px 12px; font-size: 12px; }
   .afw-toggle.on { color: var(--primary); border-color: rgba(91,84,236,0.5); }
   .afw-empty { padding: 40px 16px; text-align: center; color: var(--muted-foreground); font-size: 13px; }
+  .afw-graph-shell { position: relative; min-height: 620px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--card); }
+  .afw-graph-head { position: absolute; inset: 0 0 auto; z-index: 2; display: flex; justify-content: space-between; gap: 24px; padding: 16px 18px; border-bottom: 1px solid var(--border); background: color-mix(in oklab, var(--card) 92%, transparent); backdrop-filter: blur(12px); }
+  .afw-graph-head strong, #afw-graph-inspect strong { display: block; font: 600 14px 'Stack Sans Headline', sans-serif; }
+  .afw-graph-head span, #afw-graph-inspect span { display: block; margin-top: 3px; color: var(--muted-foreground); font-size: 11px; }
+  .afw-graph-legend { display: flex; align-items: center; gap: 8px; color: var(--muted-foreground); font: 10px 'JetBrains Mono', monospace; }
+  .afw-graph-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted-foreground); }
+  .afw-graph-legend .product { background:var(--orange-600) }.afw-graph-legend .model { background:var(--green-600) }.afw-graph-legend .target { background:var(--amber-700) }.afw-graph-legend .finding { background:var(--destructive) }
+  #afw-graph { width: 100%; height: 620px; display: block; cursor: grab; touch-action: none; }
+  #afw-graph canvas { display:block; outline:0; }
+  #afw-graph-inspect .btn { margin-top:10px; padding:4px 9px; font-size:11px; }
+  #afw-graph:active { cursor: grabbing; }
+  .afw-graph-help { position: absolute; left: 18px; bottom: 16px; color: var(--muted-foreground); font: 10px 'JetBrains Mono', monospace; }
+  #afw-graph-inspect { position: absolute; right: 16px; bottom: 16px; min-width: 190px; max-width: 320px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 8px; background: color-mix(in oklab, var(--card) 94%, transparent); backdrop-filter: blur(12px); }
+  #afw-graph-inspect b { font: 10px 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .08em; }
+  @media (max-width: 760px) { .afw-graph-head { align-items: flex-start; flex-direction: column; gap: 8px; }.afw-graph-legend { flex-wrap: wrap; } #afw-graph { height: 540px; } .afw-graph-help { display:none; } }
+  @media (prefers-reduced-motion: reduce) { #afw-graph { scroll-behavior: auto; } }
 
   /* ── Entry animation ── */
   @keyframes fadeUp {
