@@ -51,7 +51,11 @@ nav {
   backdrop-filter: none;
 }
 [data-theme="dark"] nav { background: var(--card); box-shadow: none; }
-.nav-logo { background: var(--primary); color: var(--primary-foreground); border-radius: var(--radius-md); }
+.nav-logo {
+  background: transparent;
+  color: var(--brand-shades-600);
+  border-radius: 0;
+}
 .nav-title { color: var(--foreground); text-decoration: none; }
 .nav-right { flex-wrap: wrap; gap: 8px; }
 main { max-width: 1368px; padding: 40px 24px 72px; }
