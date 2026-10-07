@@ -288,6 +288,8 @@ type StackDetail struct {
 	ComponentValues map[string]json.RawMessage `json:"componentValues,omitempty"`
 	FeatureFlags    map[string]string          `json:"featureFlags,omitempty"`
 	ImageTags       map[string]string          `json:"imageTags,omitempty"`
+	ChartVersions   map[string]string          `json:"chartVersions,omitempty"`
+	GitManaged      bool                       `json:"gitManaged"`
 	URL             string                     `json:"url,omitempty"`
 	Conditions      []ConditionView            `json:"conditions,omitempty"`
 	Components      []ComponentView            `json:"components"`
@@ -331,6 +333,7 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 		Exclude:    s.Spec.Exclude,
 		Components: make([]ComponentView, 0, len(s.Status.Components)),
 	}
+	d.GitManaged = s.Labels["kustomize.toolkit.fluxcd.io/name"] != ""
 	overridden := make([]string, 0, len(s.Spec.ComponentValues))
 	for comp := range s.Spec.ComponentValues {
 		overridden = append(overridden, comp)
@@ -347,6 +350,9 @@ func (p *Portal) GetStack(ctx context.Context, ns, name string) (*StackDetail, e
 	}
 	if s.Spec.ImageTags != nil {
 		d.ImageTags = s.Spec.ImageTags
+	}
+	if s.Spec.ChartVersions != nil {
+		d.ChartVersions = s.Spec.ChartVersions
 	}
 	if vs := s.Spec.VirtualService; vs != nil && vs.Host != "" {
 		d.URL = "https://" + vs.Host
@@ -617,7 +623,8 @@ type PatchRequest struct {
 	// FeatureFlags patches tenant feature flags. Replaces the entire map.
 	FeatureFlags map[string]string `json:"featureFlags,omitempty"`
 	// ImageTags patches per-component image tags. Replaces the entire map.
-	ImageTags map[string]string `json:"imageTags,omitempty"`
+	ImageTags     map[string]string `json:"imageTags,omitempty"`
+	ChartVersions map[string]string `json:"chartVersions,omitempty"`
 }
 
 // PatchStackSpec applies partial spec updates (mode, bundle, exclude,
@@ -701,6 +708,12 @@ func (p *Portal) PatchStackSpec(ctx context.Context, ns, name string, req PatchR
 		s.Spec.ImageTags = req.ImageTags
 		if len(s.Spec.ImageTags) == 0 {
 			s.Spec.ImageTags = nil
+		}
+	}
+	if req.ChartVersions != nil {
+		s.Spec.ChartVersions = req.ChartVersions
+		if len(s.Spec.ChartVersions) == 0 {
+			s.Spec.ChartVersions = nil
 		}
 	}
 	if err := p.client.Patch(ctx, &s, patch); err != nil {
