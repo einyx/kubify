@@ -414,7 +414,9 @@ spec:
       # TTYD uses the Foundation demo Azure OpenAI deployment. The API key is
       # copied from kubo-system/kubo-shared-azure-openai into backend-auth0.
       - name: MX_AZURE_OPENAI_ENDPOINT
-        value: https://az-vel-app-data-demo-uaen-oai.openai.azure.com
+        value: http://agentfw:8080/https://az-vel-app-data-demo-uaen-oai.openai.azure.com
+      - name: AZURE_OPENAI_ENDPOINT
+        value: http://agentfw:8080/https://az-vel-app-data-demo-uaen-oai.openai.azure.com
       - name: MX_AZURE_OPENAI_API_VERSION
         value: "2024-12-01-preview"
       - name: MX_AZURE_OPENAI_DEPLOYMENT_NAME
@@ -422,10 +424,14 @@ spec:
       - name: MX_AZURE_OPENAI_EMBEDDING_DEPLOYMENT_NAME
         value: text-embedding-3-large
       - name: MX_OPENAI_API_KEY
-        valueFrom:
-          secretKeyRef:
-            name: backend-auth0
-            key: MX_OPENAI_API_KEY
+        secretName: backend-auth0
+        secretKey: MX_OPENAI_API_KEY
+      - name: AZURE_OPENAI_API_KEY
+        secretName: backend-auth0
+        secretKey: MX_OPENAI_API_KEY
+      - name: OPENAI_API_KEY
+        secretName: backend-auth0
+        secretKey: MX_OPENAI_API_KEY
       - name: MX_OPENAI_MODEL
         value: gpt-4.1-mini
       - name: MX_OPENAI_EMBEDDING_MODEL
