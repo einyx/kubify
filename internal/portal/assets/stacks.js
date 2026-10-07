@@ -11,8 +11,15 @@ let stacksETag = null;
 let lastStacks = [];
 let phaseFilter = ''; // set via the phase pills in the stats strip
 let aiCostByProduct = {};
+let refreshInFlight = false;
+let refreshQueued = false;
 
 async function refresh() {
+	if (refreshInFlight) {
+		refreshQueued = true;
+		return;
+	}
+	refreshInFlight = true;
   let stacks;
   try {
     const headers = stacksETag ? { 'If-None-Match': stacksETag } : {};
@@ -86,6 +93,12 @@ async function refresh() {
         'API unreachable - ' + e.message + '. Retrying automatically.';
       banner.style.display = 'flex';
     }
+	} finally {
+		refreshInFlight = false;
+		if (refreshQueued) {
+			refreshQueued = false;
+			queueMicrotask(refresh);
+		}
   }
 }
 

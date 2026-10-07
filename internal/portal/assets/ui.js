@@ -74,4 +74,3 @@ document.querySelectorAll('th.sortable').forEach(th =>
     renderSortHeaders();
     refresh();
   }));
-

@@ -25,6 +25,7 @@ import (
 
 	"github.com/einyx/kubo/internal/agentfw"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -542,6 +543,7 @@ func (p *Portal) mergeAgentfwLists(w http.ResponseWriter, r *http.Request, resul
 	}
 	merged := []map[string]any{}
 	total := 0
+	podNames := p.agentfwPodNames(r.Context(), results)
 	for _, res := range results {
 		if res.err != nil {
 			continue
@@ -558,6 +560,14 @@ func (p *Portal) mergeAgentfwLists(w http.ResponseWriter, r *http.Request, resul
 		}
 		for _, row := range rows {
 			row["product"] = res.label
+			if sessionID, _ := row["session_id"].(string); sessionID != "" {
+				if ip := agentfwSessionIP(sessionID); ip != "" {
+					row["source_ip"] = ip
+					if name := podNames[res.label+"\x00"+ip]; name != "" {
+						row["source_name"] = name
+					}
+				}
+			}
 			merged = append(merged, row)
 		}
 		var t int
@@ -583,6 +593,55 @@ func (p *Portal) mergeAgentfwLists(w http.ResponseWriter, r *http.Request, resul
 		page = []map[string]any{}
 	}
 	writeAgentfwJSON(w, http.StatusOK, map[string]any{key: page, "total": total})
+}
+
+// agentfwSessionIP extracts the stable source IP from AgentFW's fallback
+// session IDs (ip:<address>:<ephemeral-port>). Explicit application session
+// IDs are intentionally left untouched.
+func agentfwSessionIP(sessionID string) string {
+	if !strings.HasPrefix(sessionID, "ip:") {
+		return ""
+	}
+	hostPort := strings.TrimPrefix(sessionID, "ip:")
+	if host, _, err := net.SplitHostPort(hostPort); err == nil {
+		return host
+	}
+	if i := strings.LastIndexByte(hostPort, ':'); i > 0 {
+		return hostPort[:i]
+	}
+	return hostPort
+}
+
+// agentfwPodNames resolves source addresses within each product namespace.
+// Resolution is best-effort so explicitly configured remote AgentFW instances
+// and deleted pods continue to render with their source IP.
+func (p *Portal) agentfwPodNames(ctx context.Context, results []agentfwResult) map[string]string {
+	out := map[string]string{}
+	if p.client == nil {
+		return out
+	}
+	seen := map[string]bool{}
+	for _, res := range results {
+		if seen[res.label] {
+			continue
+		}
+		seen[res.label] = true
+		var pods corev1.PodList
+		if err := p.client.List(ctx, &pods, client.InNamespace(res.label)); err != nil {
+			continue
+		}
+		for _, pod := range pods.Items {
+			if pod.Status.PodIP != "" {
+				out[res.label+"\x00"+pod.Status.PodIP] = pod.Namespace + "/" + pod.Name
+			}
+			for _, podIP := range pod.Status.PodIPs {
+				if podIP.IP != "" {
+					out[res.label+"\x00"+podIP.IP] = pod.Namespace + "/" + pod.Name
+				}
+			}
+		}
+	}
+	return out
 }
 
 // afwTimeOf parses the RFC3339 timestamps used by the archive API.

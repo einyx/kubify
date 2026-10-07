@@ -35,6 +35,19 @@ func TestAgentfwProxyDisabled(t *testing.T) {
 	}
 }
 
+func TestAgentfwSessionIP(t *testing.T) {
+	tests := map[string]string{
+		"ip:10.110.1.234:43122":  "10.110.1.234",
+		"ip:[2001:db8::1]:43122": "2001:db8::1",
+		"application-session":    "",
+	}
+	for sessionID, want := range tests {
+		if got := agentfwSessionIP(sessionID); got != want {
+			t.Errorf("agentfwSessionIP(%q) = %q, want %q", sessionID, got, want)
+		}
+	}
+}
+
 func TestAgentfwProxySurfacesArchive(t *testing.T) {
 	// Stand-in for the agentfw admin port.
 	var gotPath string

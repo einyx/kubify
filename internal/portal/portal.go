@@ -172,12 +172,22 @@ func (p *Portal) agentfwNav() string {
 // ListStacks returns every Stack in the cluster, oldest first.
 func (p *Portal) ListStacks(ctx context.Context) ([]StackSummary, error) {
 	var list v1alpha1.StackList
-	if err := p.client.List(ctx, &list); err != nil {
-		return nil, fmt.Errorf("portal: list stacks: %w", err)
-	}
 	var pods corev1.PodList
-	if err := p.client.List(ctx, &pods); err != nil {
-		return nil, fmt.Errorf("portal: list pods for cost estimate: %w", err)
+	type listResult struct {
+		kind string
+		err  error
+	}
+	results := make(chan listResult, 2)
+	go func() { results <- listResult{kind: "stacks", err: p.client.List(ctx, &list)} }()
+	go func() { results <- listResult{kind: "pods", err: p.client.List(ctx, &pods)} }()
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			if result.kind == "stacks" {
+				return nil, fmt.Errorf("portal: list stacks: %w", result.err)
+			}
+			return nil, fmt.Errorf("portal: list pods for cost estimate: %w", result.err)
+		}
 	}
 	requests := namespaceRequests(pods.Items)
 	out := make([]StackSummary, 0, len(list.Items))
