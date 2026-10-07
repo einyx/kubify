@@ -272,6 +272,12 @@ func main() {
 		setupLog.Error(err, "unable to create controller", "controller", "AgentDelivery")
 		os.Exit(1)
 	}
+	if err = (&controller.OAuthApplicationReconciler{
+		Client: mgr.GetClient(), Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "OAuthApplication")
+		os.Exit(1)
+	}
 	if err = (&controller.StackReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
