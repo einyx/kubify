@@ -32,7 +32,9 @@ var dlpPatterns = []dlpPattern{
 	{"twilio-sid", regexp.MustCompile(`AC[0-9a-fA-F]{32}`)},
 	{"sendgrid", regexp.MustCompile(`SG\.[a-zA-Z0-9\-_]{22}\.[a-zA-Z0-9\-_]{43}`)},
 	// Azure
-	{"azure-sub", regexp.MustCompile(`[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)},
+	// Subscription IDs have UUID syntax, so require an Azure/subscription label.
+	// Matching every bare UUID corrupts ordinary resource and tool identifiers.
+	{"azure-sub", regexp.MustCompile(`(?i)(azure[_ -]?subscription|subscription[_ -]?id)\s*[:=]\s*['"]?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)},
 	{"azure-storage-key", regexp.MustCompile(`DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{88}`)},
 	{"azure-sas-token", regexp.MustCompile(`sv=\d{4}-\d{2}-\d{2}&s[a-z]=.{10,}&sig=[A-Za-z0-9%+/=]{40,}`)},
 	// Anthropic / OpenAI / HuggingFace / Databricks / Cloudflare

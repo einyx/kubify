@@ -584,6 +584,13 @@ spec:
         API_BASE_URL: http://backend:65432
 
     postgres:
+      # Full uses synchronous streaming replication: one primary and two
+      # replicas spread across nodes. Clients keep using the primary Service.
+      architecture: replication
+      replication:
+        synchronousCommit: remote_apply
+        numSynchronousReplicas: 1
+        applicationName: foundation
       auth:
         database: product
         password: product
@@ -595,6 +602,10 @@ spec:
         registry: meshxregistry.azurecr.io
         repository: postgresql
       primary:
+        podAntiAffinityPreset: hard
+        pdb:
+          create: true
+          maxUnavailable: 0
         # Per-tenant dedicated instance sizing: the chart defaults were
         # 100m/128Mi requests with a 150m/192Mi limit — Postgres was CPU-
         # and RAM-starved (shared_buffers 160MB, work_mem 4MB).
@@ -633,6 +644,18 @@ spec:
               CREATE EXTENSION IF NOT EXISTS pg_trgm;
             ai.sql: |
               CREATE DATABASE ai OWNER product;
+      readReplicas:
+        replicaCount: 2
+        podAntiAffinityPreset: hard
+        pdb:
+          create: true
+          minAvailable: 1
+        resources:
+          requests:
+            cpu: 250m
+            memory: 1Gi
+          limits:
+            memory: 2Gi
 
     processor:
       replicaCount: 1

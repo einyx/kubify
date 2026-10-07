@@ -66,6 +66,9 @@ func TestAuditorEmitsVerifiableSignedLine(t *testing.T) {
 	if ev.Sig == "" {
 		t.Fatal("audit line is not signed")
 	}
+	if ev.ReceiptHash == "" {
+		t.Fatal("audit line has no receipt hash")
+	}
 	// The signature covers the unsigned marshaling of the event.
 	unsigned, _ := json.Marshal(ev.Event)
 	if !Verify(signer.Pub, unsigned, ev.Sig) {
@@ -74,6 +77,24 @@ func TestAuditorEmitsVerifiableSignedLine(t *testing.T) {
 	// Tampering must invalidate it.
 	if Verify(signer.Pub, []byte(`{"tampered":true}`), ev.Sig) {
 		t.Fatal("signature verified over tampered payload")
+	}
+}
+
+func TestAuditorChainsReceipts(t *testing.T) {
+	var buf strings.Builder
+	a := NewAuditor(&buf)
+	a.Log(Event{Action: "allow", URL: "https://one.example"})
+	a.Log(Event{Action: "block", URL: "https://two.example"})
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	var first, second Event
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.PrevHash != first.ReceiptHash {
+		t.Fatalf("chain mismatch: %q != %q", second.PrevHash, first.ReceiptHash)
 	}
 }
 

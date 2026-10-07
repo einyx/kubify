@@ -107,6 +107,8 @@ function afwCard(label, value, sub, color) {
 
 async function afwDashboard() {
   const s = await afwAPI('/stats');
+  const guarded = (s.blocked || 0) + (s.redacted || 0);
+  const guardRate = s.total_requests ? (guarded / s.total_requests * 100).toFixed(1) + '%' : '0%';
   const kinds = Object.entries(s.findings_by_kind || {}).map(([k, n]) =>
     `<span class="afw-badge kind">${esc(k)} ${n}</span>`).join(' ') || '<span class="muted">none</span>';
   const max = Math.max(1, ...(s.top_models || []).map(m => m.cost_micro));
@@ -121,6 +123,8 @@ async function afwDashboard() {
       ${afwCard('Blocked', afwInt(s.blocked), afwInt(s.redacted) + ' redacted', '--err')}
       ${afwCard('Input tokens', afwInt(s.input_tokens), afwInt(s.output_tokens) + ' out')}
       ${afwCard('Spend', afwCost(s.cost_micro), 'estimated', '--ok')}
+      ${afwCard('Guardrail rate', guardRate, afwInt(guarded) + ' intervened')}
+      ${afwCard('Evidence', 'signed', 'Ed25519 · hash-linked', '--ok')}
     </div>
     <div class="card-outer" style="animation-delay:60ms"><div class="card-inner">
       <div class="section-title">By product</div>
@@ -283,21 +287,26 @@ function afwPretty(s) {
 }
 
 async function afwUsage() {
-  const u = await afwAPI('/usage');
+  const [u, s] = await Promise.all([afwAPI('/usage'), afwAPI('/stats')]);
   const max = Math.max(1, ...(u.models || []).map(m => m.cost_micro));
+  const totalTokens = (u.input_tokens || 0) + (u.output_tokens || 0);
+  const requests = (u.models || []).reduce((n, m) => n + (m.requests || 0), 0);
+  const perRequest = requests ? (u.cost_micro || 0) / requests : 0;
+  const perMillion = totalTokens ? (u.cost_micro || 0) / totalTokens : 0;
+  const products = (s.products || []).slice().sort((a,b) => (b.cost_micro||0)-(a.cost_micro||0));
   document.getElementById('agent-body').innerHTML = `
     <div class="afw-cards">
-      ${afwCard('Input tokens', afwInt(u.input_tokens), 'across all models')}
-      ${afwCard('Output tokens', afwInt(u.output_tokens), 'across all models')}
-      ${afwCard('Total spend', afwCost(u.cost_micro), 'microdollar accounting', '--ok')}
+      ${afwCard('Total spend', afwCost(u.cost_micro), afwInt(requests) + ' priced requests', '--ok')}
+      ${afwCard('Tokens', afwInt(totalTokens), afwInt(u.input_tokens) + ' in · ' + afwInt(u.output_tokens) + ' out')}
+      ${afwCard('Avg / request', afwCost(perRequest), 'blended model cost')}
+      ${afwCard('Blended / 1M', '$' + perMillion.toFixed(2), 'input + output tokens')}
     </div>
     <div class="card-outer" style="animation-delay:60ms"><div class="card-inner">
-      <div class="section-title">Spend by model</div>
-      ${(u.models || []).map(m => `
-        <div class="afw-row"><div class="name" title="${esc(m.model)}">${esc(m.model)}</div>
-          <div class="bar-track"><div class="bar-fill" style="width:${Math.max(1, m.cost_micro / max * 100)}%"></div></div>
-          <div class="num">${afwInt(m.requests)} reqs · ${afwInt(m.input_tokens)}/${afwInt(m.output_tokens)} tok · ${afwCost(m.cost_micro)}</div></div>`).join('')
-        || '<div class="afw-empty">No usage recorded yet</div>'}
+      <div class="section-title">Model billing ledger</div>
+      ${(u.models || []).length ? `<table><thead><tr><th>Model</th><th>Requests</th><th>Input</th><th>Output</th><th>Share</th><th>Spend</th></tr></thead><tbody>${u.models.map(m => `<tr><td class="cell-ns">${esc(m.model)}</td><td>${afwInt(m.requests)}</td><td>${afwInt(m.input_tokens)}</td><td>${afwInt(m.output_tokens)}</td><td><div class="bar-track"><div class="bar-fill" style="width:${Math.max(1,m.cost_micro/max*100)}%"></div></div></td><td class="cell-mode">${afwCost(m.cost_micro)}</td></tr>`).join('')}</tbody></table>` : '<div class="afw-empty">No usage recorded yet</div>'}
+    </div></div>
+    <div class="card-outer" style="animation-delay:90ms"><div class="card-inner">
+      <div class="section-title">Spend by product</div>
+      ${products.length ? `<table><thead><tr><th>Product</th><th>Requests</th><th>Tokens</th><th>Spend</th></tr></thead><tbody>${products.map(p => `<tr><td class="cell-ns">${esc(p.product)}</td><td>${afwInt(p.total_requests)}</td><td>${afwInt((p.input_tokens||0)+(p.output_tokens||0))}</td><td class="cell-mode">${afwCost(p.cost_micro)}</td></tr>`).join('')}</tbody></table>` : '<div class="afw-empty">No product usage yet</div>'}
     </div></div>`;
 }
-
