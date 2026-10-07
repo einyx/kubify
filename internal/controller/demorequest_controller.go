@@ -464,13 +464,24 @@ func (a *ACSDemoEmailer) SendDemoReady(ctx context.Context, to, tenant, tenantUR
 		return err
 	}
 	api := endpoint + "/emails:send?api-version=2023-03-31"
-	subject := "Your meshX demo is ready"
-	text := fmt.Sprintf("Hi,\n\nYour meshX demo environment is ready:\n\n  %s\n\nIt will be automatically removed 72 hours after creation.\n\nIf you have any questions, just reply to this email.\n\n— meshX", tenantURL)
+
+	// Derive a first name from the email local-part for personalisation.
+	firstName := strings.Split(to, "@")[0]
+	if dot := strings.Index(firstName, "."); dot > 0 {
+		firstName = firstName[:dot]
+	}
+	if len(firstName) > 0 {
+		firstName = strings.ToUpper(firstName[:1]) + firstName[1:]
+	}
+
+	subject := "Your Foundation demo is ready"
+	text := fmt.Sprintf("Hi %s,\n\nYour Foundation demo environment is ready:\n\n  %s\n\nSign in with SSO using your work email — no new password needed.\n\nThe environment will be automatically removed 72 hours after it was created.\n\nIf you have any questions, just reply to this email.\n\n— The meshX team", firstName, tenantURL)
 	payload := map[string]any{
 		"senderAddress": a.Sender,
 		"content": map[string]any{
 			"subject":   subject,
 			"plainText": text,
+			"html":      demoReadyEmailHTML(firstName, tenantURL),
 		},
 		"recipients": map[string]any{
 			"to": []map[string]any{{"address": to, "displayName": to}},
