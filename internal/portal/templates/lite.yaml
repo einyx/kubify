@@ -496,14 +496,9 @@ spec:
         name: product-frontend-auth0
       env:
         internal_api_url: http://backend/
-        auth0:
-          enabled: "true"
-          secret: ""
-          baseurl: ""
-          issuer_baseurl: ""
-          client_id: ""
-          audience: ""
-          domain: ""
+        # Auth0 values are supplied by existingAuthSecret above. Leaving the
+        # chart's literal auth0 values unset avoids emitting empty env vars
+        # that override the Secret-backed configuration.
       virtualService:
         # The operator owns the tenant routes VS (see spec.virtualService).
         # The chart's VS must stay off: a second writer raced helm installs
