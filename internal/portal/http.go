@@ -63,6 +63,11 @@ func (p *Portal) mux(allowRemote bool) http.Handler {
 	}
 
 	handle("GET /assets/", serveAsset)
+	// Native in-process DNS management is disabled unless explicitly configured.
+	// Its bearer authorization remains active for both local and remote portals.
+	for _, method := range []string{"GET", "POST", "PUT", "DELETE"} {
+		handle(method+" /api/dns/", p.handleDNSManagement)
+	}
 	handle("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		p.refreshAgentfws(r.Context()) // nav reflects discovered products immediately
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
@@ -42,6 +43,7 @@ const DefaultTemplatesDir = defaultTemplatesDir
 
 // Portal is the operator portal server.
 type Portal struct {
+	dnsManagement   http.Handler // opt-in; retains its own bearer-token authorization
 	client          client.Client
 	registry        *Registry
 	metrics         *Metrics

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	platformv1alpha1 "github.com/einyx/kubo/api/v1alpha1"
+	"github.com/einyx/kubo/internal/dnsmanagement"
 	"github.com/einyx/kubo/internal/mcpserver"
 	"github.com/einyx/kubo/internal/portal"
 	corev1 "k8s.io/api/core/v1"
@@ -33,6 +34,7 @@ func main() {
 	allowRemote := flag.Bool("allow-remote", false,
 		"bind non-loopback addresses — the portal has NO authentication; "+
 			"only do this behind an authenticating proxy or NetworkPolicy")
+	dnsEnabled := flag.Bool("dns-management", false, "enable the native DNS API using KUBO_DNS_* configuration (separate bearer authorization required)")
 	flag.Parse()
 
 	if !isLoopbackAddr(*addr) && !*allowRemote {
@@ -58,6 +60,26 @@ func main() {
 		}
 	}
 	p.SetTemplateDir(*templatesDir)
+	if *dnsEnabled {
+		cfg := dnsmanagement.Config{Tenant: os.Getenv("KUBO_DNS_TENANT"), Token: os.Getenv("KUBO_DNS_API_TOKEN"), Zones: map[string]string{}}
+		for _, entry := range strings.Split(os.Getenv("KUBO_DNS_ZONES"), ",") {
+			name, id, ok := strings.Cut(strings.TrimSpace(entry), "=")
+			if !ok {
+				log.Fatal("portal: KUBO_DNS_ZONES requires zone=provider-id entries")
+			}
+			if _, exists := cfg.Zones[name]; exists {
+				log.Fatal("portal: duplicate DNS zone")
+			}
+			cfg.Zones[name] = id
+		}
+		provider, err := dnsmanagement.NewCloudflare(os.Getenv("KUBO_DNS_CLOUDFLARE_TOKEN"), nil)
+		if err != nil {
+			log.Fatalf("portal: DNS configuration: %v", err)
+		}
+		if err := p.SetDNSManagement(cfg, provider); err != nil {
+			log.Fatalf("portal: DNS configuration: %v", err)
+		}
+	}
 	if *vaultAddrTpl != "" {
 		tpl := *vaultAddrTpl
 		p.SetVaultAddrFunc(func(ns string) string {
