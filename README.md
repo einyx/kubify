@@ -54,6 +54,13 @@ go build -o agentfw ./cmd/agentfw
 ./agentfw view -db view.db                               # browse an archive
 ```
 
+## DNS management
+
+Optional native Go DNS management runs inside the portal process; no separate
+DNS service is required. Cloudflare record operations are zone-scoped and
+bearer-authorized, and controller-managed records remain read-only. Disabled by
+default; see [docs/dns-management.md](docs/dns-management.md).
+
 ## License
 
 Apache 2.0

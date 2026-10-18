@@ -9,6 +9,7 @@ require (
 	github.com/fluxcd/pkg/apis/meta v1.22.0
 	github.com/fluxcd/source-controller/api v1.7.3
 	github.com/google/go-containerregistry v0.22.1
+	github.com/libdns/libdns v1.1.0
 	github.com/onsi/ginkgo/v2 v2.27.4
 	github.com/onsi/gomega v1.39.0
 	github.com/opencontainers/go-digest v1.0.0
